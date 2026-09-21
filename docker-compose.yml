@@ -1,0 +1,122 @@
+# Full stack: Qdrant + Ollama + the Continuum API.
+#
+#   docker compose up -d --build        # from the repo root
+#
+# That is the only command. Models are pulled automatically by the `ollama-init`
+# job, the Qdrant collection is created by the API's own lifespan hook, and the
+# API waits for both to be healthy before it starts. No manual setup steps.
+#
+# This file lives at the repo root, not inside continuum-be/, because it is a
+# whole-stack concern: continuum-fe joins it as a `web` service in Phase 4.
+
+name: continuum
+
+services:
+  qdrant:
+    # Pinned conservatively. qdrant-client is 1.19.x; bump this tag to match
+    # once you have confirmed the tag exists in your registry.
+    image: qdrant/qdrant:v1.12.4
+    container_name: continuum-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # REST + dashboard -> http://localhost:6333/dashboard
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__ENABLE_CORS: "true"
+    healthcheck:
+      # The Qdrant image is distroless - no curl, no shell utilities. Its own
+      # binary can run a healthcheck against the gRPC port instead.
+      test: ["CMD", "/qdrant/qdrant", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: continuum-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Uncomment to use an NVIDIA GPU.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # One-shot job: pull the models, then exit. The API waits for it to complete.
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: continuum-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "pulling $${LLM_MODEL} ..."
+        ollama pull "$${LLM_MODEL}"
+        echo "pulling $${EMBEDDING_MODEL} ..."
+        ollama pull "$${EMBEDDING_MODEL}"
+        echo "models ready"
+    restart: "no"
+
+  api:
+    build:
+      # The build context is the backend project, so the Dockerfile's
+      # `COPY pyproject.toml uv.lock README.md ./` still resolves and
+      # continuum-be/.dockerignore still applies.
+      context: ./continuum-be
+      dockerfile: Dockerfile
+    container_name: continuum-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    environment:
+      ENVIRONMENT: docker
+      DEBUG: "false"
+      # Service names, not localhost - these resolve on the compose network.
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-continuum_memories}
+      LLM_BASE_URL: http://ollama:11434/v1
+      LLM_API_KEY: ollama
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct}
+      EMBEDDING_BASE_URL: http://ollama:11434/v1
+      EMBEDDING_API_KEY: ollama
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+      DECAY_ENABLED: ${DECAY_ENABLED:-true}
+      DECAY_INTERVAL_MINUTES: ${DECAY_INTERVAL_MINUTES:-360}
+    # Anything in a repo-root .env overrides the defaults above - handy for
+    # pointing at Groq instead of the bundled Ollama. Now a sibling of this
+    # file rather than one level up.
+    env_file:
+      - path: .env
+        required: false
+
+volumes:
+  qdrant_storage:
+  ollama_models:

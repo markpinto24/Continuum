@@ -1,0 +1,47 @@
+name: backend
+
+# Path-filtered: a change to the graph UI must not run pytest, and vice versa.
+# The two projects are independent, and CI reflects that.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'continuum-be/**'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths:
+      - 'continuum-be/**'
+      - '.github/workflows/backend.yml'
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: continuum-be
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          # The lockfile lives in the project, not at the repo root.
+          cache-dependency-glob: continuum-be/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # No services needed: the integration tests run against
+      # AsyncQdrantClient(":memory:") with a stubbed LLM, so this is real Qdrant
+      # indexing and real cosine scores without Docker or a model.
+      - name: Test
+        run: uv run pytest

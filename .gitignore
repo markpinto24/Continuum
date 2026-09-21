@@ -1,0 +1,43 @@
+# Repo-root ignores. Patterns must match from here, not from continuum-be/ —
+# anything anchored to a single project would silently stop working when the
+# other side of the monorepo grows the same artefact.
+
+# --- Secrets ---------------------------------------------------------------
+# Matches .env at any depth: the repo root (read by docker compose) and
+# continuum-be/.env (read by a local uvicorn run, whose CWD is that directory).
+.env
+.env.local
+.env.*.local
+# The template is the one env file that IS tracked.
+!.env.example
+
+# --- Python (continuum-be) -------------------------------------------------
+__pycache__/
+*.py[cod]
+**/.venv/
+**/venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node (continuum-fe, Phase 4) ------------------------------------------
+node_modules/
+.next/
+.vite/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Build output ----------------------------------------------------------
+dist/
+build/
+
+# --- Editors / OS ----------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
