@@ -137,8 +137,24 @@ Continuum/                            ← git root
 │       ├── test_retrieval.py         ★ ranking formula, dispute assembly
 │       ├── test_chat.py              ★ stream shape, disputed prompt, write-back
 │       └── test_ingest_pipeline.py   end-to-end vs in-memory Qdrant
-└── continuum-fe/                     ← not built yet (Phase 4)
-    └── README.md                     what it will be
+└── continuum-fe/                     ← the belief graph UI
+    ├── Dockerfile                    node build -> nginx, proxies /api
+    ├── nginx.conf                    SPA fallback + SSE-safe proxy
+    ├── vite.config.ts
+    └── src/
+        ├── lib/
+        │   ├── types.ts              ★ the backend contract, mirrored by hand
+        │   ├── api.ts                thin typed client + SSE chat stream
+        │   ├── sse.ts                ★ incremental SSE framing
+        │   └── memory-style.ts       ★ colour/size vocabulary, shared canvas+DOM
+        ├── hooks/                    use-resource, use-element-size
+        ├── components/
+        │   ├── belief-graph.tsx      ★ the Three.js scene
+        │   ├── memory-detail.tsx     provenance, edges, reinforce/restore
+        │   ├── contradiction-inbox.tsx
+        │   ├── chat-panel.tsx        ★ streaming, citations, dispute banner
+        │   └── ui/                   shadcn-style primitives, owned in-repo
+        └── App.tsx
 ```
 
 ★ = the files carrying the novel logic. Change these carefully.
@@ -269,14 +285,27 @@ is genuinely uncertain. Keep it that way.
   belief is still true
 - 86 tests passing, ruff clean
 
-### ⬜ Phase 4 — Belief graph UI (`continuum-fe`)
-- React + shadcn/ui + react-bits
-- Three.js force-directed graph off `GET /memories/graph`
-  - node colour = status, node size = confidence
-  - `supersedes` edges directed; `conflicts_with` edges highlighted
-  - click a node → source excerpt and provenance
-- Contradiction inbox with confirm / reject / keep-both
-- Chat panel alongside the graph
+### ✅ Phase 4 — Belief graph UI (done, this release)
+- React 19 + TypeScript + Vite + Tailwind v4, shadcn-style primitives owned
+  in-repo. Strict mode, no `any` in application code, ESLint config in `.ts`
+- Three.js force-directed graph off `GET /memories/graph` via
+  `react-force-graph-3d` — node colour = status, size = confidence (cubed, since
+  `nodeVal` is volume), `supersedes` arrows directed new → old
+- **`conflicts_with` edges are drawn without an arrowhead.** A conflict is
+  symmetric; giving it a direction would be the UI asserting the very thing the
+  resolver escalated to a human
+- Selecting a node lights its one-hop neighbourhood and dims the rest
+- Memory detail: the verbatim `source_excerpt`, decay half-life, every edge as a
+  click-through, plus reinforce and restore — neither a one-way door
+- Contradiction inbox with three verdicts; **keep-both is a first-class button**,
+  not a skip
+- Chat over SSE: the `context` frame renders the memories in play, with the
+  `similarity × confidence × recency` breakdown, before the first token; a
+  disagreement banner sits above the answer; a turn that changes the graph
+  refreshes it
+- `three` + `react-force-graph-3d` split into their own chunk — ~85% of the
+  bundle, and they change only when bumped
+- 23 tests (vitest + jsdom), eslint clean, no backend needed
 
 ### ⬜ Phase 5 — Evaluation (the part that proves it works)
 - A labelled corpus of contradiction scenarios
@@ -314,6 +343,18 @@ is genuinely uncertain. Keep it that way.
   clustering (identical → 1.0, same subject → ~0.89, different subject → ~0.13).
   A pure hash makes everything orthogonal and the resolver is never exercised.
   **If you change the embedding text format, re-check that geometry.**
+
+**Frontend**
+- `src/lib/types.ts` mirrors `models/schemas.py` by hand. Small surface, rare
+  changes, and a hand-written mirror turns a breaking backend change into a type
+  error rather than a runtime `undefined`. **Change both in the same commit.**
+- No data-fetching framework. `useResource` is ~40 lines and handles the one
+  thing that bites: a stale response landing after a newer one.
+- `memory-style.ts` is the single source of the visual vocabulary. Status colour
+  is defined once and used by both the WebGL scene and the DOM, which is what
+  stops a node reading amber in the canvas and grey in the sidebar.
+- Node size uses `confidence ** 3` because `nodeVal` is a sphere *volume*. Linear
+  confidence makes a 0.9 belief look barely larger than a 0.3 one.
 
 **Config**
 - Every tunable goes in `continuum-be/src/continuum/config.py` with a comment on
@@ -391,6 +432,14 @@ uv run python scripts/seed_demo.py     # end-to-end against a running stack
 - **Adding a manual setup step to the README instead of the compose graph.**
   `up -d --build` is the whole contract. Bootstrap belongs in the lifespan hook
   or in `depends_on`.
+- **Drawing an arrowhead on a `conflicts_with` edge, or sorting disputes so the
+  newer belief reads first.** Both are the UI quietly answering the question the
+  resolver refused to answer.
+- **Hiding the keep-both verdict behind a menu.** It is the correct answer often
+  enough that burying it pushes people toward picking a side they do not believe.
+- **Baking `VITE_API_URL` into the Docker image.** Vite inlines env vars at build
+  time, so it could not be overridden at run time anyway; nginx proxies
+  same-origin `/api` instead.
 - **Dropping a memory's disputed counterpart because it did not make top-k.**
   Then the agent reports one half of an open disagreement as settled fact.
 - **Reinforcing every memory that retrieval returns.** Being retrieved is not

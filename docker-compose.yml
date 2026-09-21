@@ -7,7 +7,7 @@
 # API waits for both to be healthy before it starts. No manual setup steps.
 #
 # This file lives at the repo root, not inside continuum-be/, because it is a
-# whole-stack concern: continuum-fe joins it as a `web` service in Phase 4.
+# whole-stack concern: `api` and `web` are built from sibling directories.
 
 name: continuum
 
@@ -116,6 +116,22 @@ services:
     env_file:
       - path: .env
         required: false
+
+  web:
+    build:
+      context: ./continuum-fe
+      dockerfile: Dockerfile
+    container_name: continuum-web
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    # No VITE_API_URL: the bundle calls same-origin /api and nginx proxies it to
+    # the api service. Baking an absolute URL into the build would tie the image
+    # to one deployment - and Vite inlines env vars at build time, so it could
+    # not be overridden at run time anyway.
 
 volumes:
   qdrant_storage:

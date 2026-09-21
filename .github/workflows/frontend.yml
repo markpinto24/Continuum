@@ -1,5 +1,7 @@
 name: frontend
 
+# Path-filtered: a change to the resolver must not run vitest, and vice versa.
+# The two projects are independent, and CI reflects that.
 on:
   push:
     branches: [main]
@@ -25,22 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # continuum-fe is a Phase 4 placeholder holding only a README. Until it is
-      # scaffolded, every real step is gated on package.json existing, so this
-      # workflow passes green instead of failing on a missing lockfile. Delete
-      # the guard — not the steps — once the app lands.
-      - name: Detect project
-        id: detect
-        run: |
-          if [ -f package.json ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::continuum-fe is not scaffolded yet (Phase 4) — nothing to build."
-          fi
-
       - name: Setup Node
-        if: steps.detect.outputs.ready == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -48,17 +35,16 @@ jobs:
           cache-dependency-path: continuum-fe/package-lock.json
 
       - name: Install dependencies
-        if: steps.detect.outputs.ready == 'true'
         run: npm ci
 
       - name: Lint
-        if: steps.detect.outputs.ready == 'true'
-        run: npm run lint --if-present
+        run: npm run lint
 
+      # `npm run build` runs `tsc -b` before vite, so this is the typecheck too.
       - name: Build
-        if: steps.detect.outputs.ready == 'true'
-        run: npm run build --if-present
+        run: npm run build
 
+      # jsdom only — no browser, no backend. The SSE parser and the inbox
+      # verdicts are pure enough to test without either.
       - name: Test
-        if: steps.detect.outputs.ready == 'true'
-        run: npm test --if-present
+        run: npm test

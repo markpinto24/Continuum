@@ -65,9 +65,11 @@ docker compose up -d --build
 ```
 
 That is the whole contract. Compose brings up Qdrant, Ollama, a one-shot job that
-pulls the models, and the API — which waits for both, then creates its Qdrant
-collection and starts the decay scheduler from its own FastAPI lifespan hook.
-There is no separate migrate, init or model-pull step.
+pulls the models, the API — which waits for both, then creates its Qdrant
+collection and starts the decay scheduler from its own FastAPI lifespan hook —
+and the web UI. There is no separate migrate, init or model-pull step.
+
+**Belief graph: <http://localhost:3000>**
 
 API docs: <http://localhost:8000/docs> · Qdrant dashboard:
 <http://localhost:6333/dashboard>
@@ -100,13 +102,13 @@ Continuum/
 ├── .env.example             every setting, with provider presets
 ├── CLAUDE.md                the engineering brief
 ├── continuum-be/            FastAPI + Qdrant + the resolution layer
-└── continuum-fe/            Phase 4 — React + shadcn + Three.js
+└── continuum-fe/            React + Three.js — the belief graph UI
 ```
 
 | | |
 | --- | --- |
 | [`continuum-be/README.md`](continuum-be/README.md) | Backend setup, architecture, the full endpoint list |
-| [`continuum-fe/README.md`](continuum-fe/README.md) | What the graph UI will be |
+| [`continuum-fe/README.md`](continuum-fe/README.md) | The graph UI: what each visual channel encodes, and why 3D |
 | [`CLAUDE.md`](CLAUDE.md) | Engineering brief: layering rules, conventions, what not to "improve" |
 
 ---
@@ -137,6 +139,17 @@ Retrieval then ranks by `similarity × confidence × recency`, and **contradicte
 memories are deliberately still retrieved**. When two beliefs disagree, the
 honest behaviour is to surface both and say so, not to quietly pick one.
 
+## How it looks
+
+The graph encodes the lifecycle directly: **colour is status** (amber means
+disputed, and nothing else is loud), **size is confidence**, **arrows are
+`supersedes`** drawn new → old so a belief's history reads in one direction. A
+conflict edge gets no arrowhead — it is symmetric, and drawing a direction would
+be the UI deciding the thing the resolver deliberately escalated to you.
+
+Click any node for the verbatim text it was extracted from. Unresolved disputes
+land in an inbox with three verdicts, one of which is *both are true*.
+
 ---
 
 ## Status
@@ -146,15 +159,17 @@ honest behaviour is to surface both and say so, not to quietly pick one.
 | **1 — Ingest & storage** | ✅ | Domain-tuned extraction, Qdrant with payload indexes, duplicate detection, per-user scoping |
 | **2 — Resolution & decay** | ✅ | The judge + confidence gate, supersede edges, contradiction inbox, per-category exponential decay with archival |
 | **3 — Memory-augmented chat** | ✅ | SSE streaming, retrieval ranked by similarity × confidence × recency, disagreement surfaced rather than resolved |
-| **4 — Belief graph UI** | ⬜ | `continuum-fe`: Three.js force-directed graph off `/memories/graph`, contradiction inbox, chat panel |
+| **4 — Belief graph UI** | ✅ | `continuum-fe`: Three.js force-directed graph off `/memories/graph`, provenance panel, contradiction inbox, streaming chat |
 | **5 — Evaluation** | ⬜ | Labelled contradiction corpus; supersede precision/recall, escalation rate, belief-loss rate. Tune the gate against numbers rather than vibes |
 
-Backend: 86 tests, no services required to run them.
+Backend: 86 tests. Frontend: 23. Neither needs a running service.
 
 ---
 
 ## Stack
 
-FastAPI · uv · Qdrant · any OpenAI-compatible LLM (Ollama / vLLM / Groq) ·
-`nomic-embed-text` embeddings · structlog · APScheduler. Frontend (planned):
-React · shadcn/ui · Three.js.
+**Backend** — FastAPI · uv · Qdrant · any OpenAI-compatible LLM (Ollama / vLLM /
+Groq) · `nomic-embed-text` embeddings · structlog · APScheduler.
+
+**Frontend** — React 19 · TypeScript · Vite · Tailwind v4 · shadcn-style
+primitives · Three.js via `react-force-graph-3d` · vitest.
