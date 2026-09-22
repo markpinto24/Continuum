@@ -1,0 +1,140 @@
+# Labelled extraction corpus.
+#
+# What is being measured is not "did it produce text" but whether the three
+# things the resolution layer depends on survive extraction:
+#
+#   content   a standalone third-person statement, pronouns resolved
+#   category  because resolution and decay policy are per-category
+#   subject   because the subject filter decides what reaches the judge
+#
+# A flat string extractor can score well on recall here and still be useless
+# downstream, which is exactly the comparison this corpus is for.
+#
+# Matching is token overlap (see extraction.py), so `content` labels are written
+# the way a good extraction would phrase it, not as the only acceptable wording.
+
+- id: kickoff-note
+  why: >
+    The base case: three distinct durable facts in one note, each a different
+    category, with a reason attached to the decision. Losing the reason is the
+    most common and most expensive extraction failure.
+  text: >
+    Kicked off the Atlas project today. Sara is leading the data platform side.
+    We decided to use Postgres over Mongo because the reporting layer needs real
+    joins and we already run Postgres in production.
+  expect:
+    - content: Chose Postgres over Mongo for Atlas because reporting needs real joins
+      category: decision
+      subject: atlas
+    - content: Sara leads the data platform
+      category: person
+      subject: sara
+  tags: [baseline, reason-preservation]
+
+- id: client-call
+  why: >
+    Two facts of different categories about one client, one of them phrased as a
+    negation ("don't want calls"). An extractor that records the negation as a
+    preference for calls inverts the belief.
+  text: >
+    Call with Acme. They really don't want weekly status calls - they'd rather
+    get written async updates every Friday. Budget is capped at 5k a month, and
+    that's a hard limit.
+  expect:
+    - content: Acme prefers written async updates over weekly status calls
+      category: preference
+      subject: acme
+    - content: Acme's budget is capped at 5k per month
+      category: constraint
+      subject: acme
+  tags: [baseline, negation]
+
+- id: pure-chatter
+  why: >
+    Nothing durable. An empty extraction is the correct answer, and an extractor
+    that manufactures a memory here will pollute every graph it touches. This is
+    the single most useful case in the corpus.
+  text: >
+    Thanks, that sounds good to me. Let's pick it up tomorrow. Have a good one!
+  expect: []
+  tags: [empty-is-correct, precision]
+
+- id: question-not-fact
+  why: >
+    A question about a possible future decision is not a decision. Recording it
+    as one creates a belief nobody holds.
+  text: >
+    Should we move the event store to Mongo? Worth discussing at the next sync.
+    Also, has anyone looked at the Redis bill?
+  expect: []
+  tags: [empty-is-correct, precision]
+
+- id: pronoun-resolution
+  why: >
+    "He" and "it" are unrecoverable once the surrounding text is gone. A memory
+    that reads "He owns it" is worthless at retrieval time, so resolving pronouns
+    against named entities is load-bearing, not cosmetic.
+  text: >
+    Raj took over the billing service from Sara last month. He's rewriting it in
+    Go because the Python version can't keep up with the payout batch.
+  expect:
+    - content: Raj owns the billing service
+      category: person
+      subject: billing-service
+    - content: Rewriting the billing service in Go because Python cannot keep up with the payout batch
+      category: decision
+      subject: billing-service
+  tags: [pronouns, reason-preservation]
+
+- id: event-vs-decision
+  why: >
+    A shipment is immutable history; the rollback plan is a decision. Category
+    confusion here is expensive: an event mislabelled as a decision becomes
+    supersedable, and history stops being append-only.
+  text: >
+    Shipped Atlas v1 to staging on the 14th. If the latency numbers don't hold we
+    roll back to the previous release rather than hotfix forward.
+  expect:
+    - content: Shipped Atlas v1 to staging on the 14th
+      category: event
+      subject: atlas
+    - content: Roll back to the previous release rather than hotfix forward if latency does not hold
+      category: decision
+      subject: atlas
+  tags: [category-accuracy, immutable-history]
+
+- id: compound-sentence
+  why: >
+    Two unrelated facts joined by "and". Extracting them as one memory makes the
+    result impossible to supersede independently - later changing the on-call
+    rotation would have to retire the deploy window along with it.
+  text: >
+    We deploy on Tuesdays and Thursdays only, and Priya is on call for the next
+    two weeks.
+  expect:
+    - content: Deploys happen on Tuesdays and Thursdays only
+      category: constraint
+      subject: deploys
+    - content: Priya is on call for the next two weeks
+      category: person
+      subject: priya
+  tags: [one-fact-per-memory]
+
+- id: transcript-with-noise
+  why: >
+    A realistic transcript: two durable facts buried in scheduling chatter. Tests
+    whether the extractor can ignore the surrounding noise rather than summarise
+    the whole exchange.
+  text: >
+    Morning! Sorry I'm late. Right - so the main thing is we're dropping Auth0
+    and moving auth in-house, mostly a cost thing. Can we push Thursday's review
+    to Friday? I've got a dentist appointment. Oh and the SOC2 audit is booked
+    for November.
+  expect:
+    - content: Dropped Auth0 and moved authentication in-house, mainly for cost
+      category: decision
+      subject: auth
+    - content: The SOC2 audit is booked for November
+      category: constraint
+      subject: soc2
+  tags: [noise-rejection, precision]

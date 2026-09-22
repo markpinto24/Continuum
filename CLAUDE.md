@@ -103,7 +103,8 @@ Continuum/                            ← git root
 │   ├── Dockerfile                    multi-stage uv build, non-root, healthcheck
 │   ├── README.md                     backend setup + architecture
 │   ├── scripts/
-│   │   └── seed_demo.py              end-to-end demo incl. a reversed decision
+│   │   ├── seed_demo.py              end-to-end demo incl. a reversed decision
+│   │   └── run_eval.py               Phase 5 harness: record once, sweep free
 │   ├── src/continuum/
 │   │   ├── main.py                   app factory, lifespan, scheduler wiring
 │   │   ├── config.py                 all settings (pydantic-settings)
@@ -125,6 +126,18 @@ Continuum/                            ← git root
 │   │   │   ├── decay.py              confidence decay + archival sweep
 │   │   │   ├── retrieval.py          ★ similarity × confidence × recency rank
 │   │   │   └── chat.py               ★ prompt assembly; surfaces disputes
+│   │   ├── evaluation/               ← Phase 5: the instrument
+│   │   │   ├── README.md             what each metric means, how to read it
+│   │   │   ├── FINDINGS.md           ★ what the first real run found
+│   │   │   ├── baselines/            recorded runs, replayable at any gate
+│   │   │   ├── preflight.py          ★ can the embedder see an entity swap?
+│   │   │   ├── types.py              Action vocabulary, corpus + outcome models
+│   │   │   ├── corpus.py             strict loading; rejects unlabelled cases
+│   │   │   ├── corpus/*.yaml         ★ the labelled data
+│   │   │   ├── runner.py             executes cases against the REAL resolver
+│   │   │   ├── metrics.py            ★ pure scoring, replay, sweep, recommend
+│   │   │   ├── extraction.py         token matching + the Mem0 baseline
+│   │   │   └── report.py             plain-text rendering
 │   │   └── api/
 │   │       ├── deps.py               DI wiring from app.state
 │   │       ├── router.py             router aggregation
@@ -136,6 +149,7 @@ Continuum/                            ← git root
 │       ├── test_decay.py             half-lives, idempotence, floors
 │       ├── test_retrieval.py         ★ ranking formula, dispute assembly
 │       ├── test_chat.py              ★ stream shape, disputed prompt, write-back
+│       ├── test_evaluation.py        ★ the instrument, before it is trusted
 │       └── test_ingest_pipeline.py   end-to-end vs in-memory Qdrant
 └── continuum-fe/                     ← the belief graph UI
     ├── Dockerfile                    node build -> nginx, proxies /api
@@ -307,11 +321,43 @@ is genuinely uncertain. Keep it that way.
   bundle, and they change only when bumped
 - 23 tests (vitest + jsdom), eslint clean, no backend needed
 
-### ⬜ Phase 5 — Evaluation (the part that proves it works)
-- A labelled corpus of contradiction scenarios
-- Metrics: precision/recall on supersede, escalation rate, belief-loss rate
-- Tune `auto_supersede_confidence` against real numbers, not vibes
-- Benchmark native extraction vs `Mem0Extractor` (the stub is in place)
+### ✅ Phase 5 — Evaluation (done, this release)
+- **28-case labelled contradiction corpus**, every case carrying a `why`. The
+  loader rejects an unlabelled case and rejects duplicate ids — a shadowed case
+  vanishes from the denominator without anyone noticing
+- Labels are **actions** (`retire` / `escalate` / `reinforce` / `store`), not
+  verdicts. `NEW` and `INDEPENDENT` are two routes to the same behaviour, and
+  grading them apart would mark the resolver down for being right cheaply
+- **Three metrics, not one.** `belief_loss_rate` (retired something that should
+  have lived), `stale_belief_rate` (should have retired, did not, did not ask),
+  `merge_loss_rate` (folded a distinct fact in as a duplicate). Averaging them
+  makes the gate untunable, because the dial trades one for the other
+- **Record once, sweep free.** `CaseOutcome` stores the judge's relation and
+  confidence *before* the gate, so every other gate value replays as arithmetic.
+  A sweep over eight gates costs zero LLM calls
+- `recommend_gate` applies the safety constraint first — cheapest gate inside the
+  belief-loss budget — rather than maximising F1. F1 treats a destroyed belief
+  and a wasted minute as the same size of mistake
+- `band_miss_rate` separates "the judge was wrong" from "the fact never got near
+  the belief it contradicts". Different problems, different fixes
+- Per-tag scoring, so a regression localises to a kind of case
+- Three cases tagged `known-gap` are expected to fail today and are kept. A
+  corpus of only passes measures nothing
+- `Mem0Extractor` implemented against a throwaway embedded-Qdrant store per
+  document, so Mem0's own update pass cannot turn an extraction miss into a hit
+- `preflight.py` refuses to report resolution numbers when the embedding model
+  cannot distinguish an entity swap — added because the first real run produced a
+  confident, well-formatted, completely meaningless table
+- 40 evaluation tests; the instrument is tested before it is trusted
+
+**The first run found three broken mechanisms — see `FINDINGS.md`.** In short:
+`nomic-embed-text` returns byte-identical vectors for `Postgres` vs `MongoDB`, so
+contradictions were classified duplicates and silently discarded; the cosine
+thresholds are model-specific constants that predate having a model to calibrate
+them against, and the duplicate band cannot be made sound by any threshold; and
+`auto_supersede_confidence` is inert, because `qwen2.5:7b-instruct` returns every
+`supersedes` at exactly 0.95. Belief loss stayed at 3.6% throughout — the safety
+bias works. These are open issues, not fixed ones.
 
 ---
 
@@ -408,9 +454,13 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 86 tests, no services needed
+uv run pytest                          # 126 tests, no services needed
 uv run ruff check . --fix
 uv run python scripts/seed_demo.py     # end-to-end against a running stack
+
+# Phase 5: one slow pass, then sweep the gate for free
+uv run python scripts/run_eval.py --record eval-run.json
+uv run python scripts/run_eval.py --replay eval-run.json
 ```
 
 ---
@@ -451,5 +501,11 @@ uv run python scripts/seed_demo.py     # end-to-end against a running stack
 - **Logging with `print` or the stdlib logger.** Use the module-level
   `structlog.get_logger(__name__)`. Request id and user id are bound by
   middleware and inherited automatically; re-passing them as kwargs is noise.
+- **Adding a corpus case without a rationale, or "fixing" the corpus when a
+  number looks bad.** The corpus is the instrument. Relabelling a case to make a
+  gate look good is how an evaluation stops measuring anything.
+- **Reporting one blended accuracy number for the resolver.** Belief loss and
+  stale beliefs trade against each other as the gate moves; a single figure hides
+  exactly the thing you are trying to tune.
 - **Skipping the cheap category/subject filters and judging everything.** Turns a
   cheap operation into an expensive one for no accuracy gain.

@@ -17,6 +17,10 @@ dependencies = [
     "tenacity>=9.0.0",
     "mem0ai>=0.1.40",
     "apscheduler>=3.10.4",
+    # Phase 5 corpora. Already present transitively via mem0ai, but the
+    # evaluation package imports it directly, and depending on someone
+    # else's dependency is how a build breaks for no visible reason.
+    "pyyaml>=6.0.1",
 ]
 
 [project.optional-dependencies]

@@ -19,9 +19,12 @@ default because the extra structure is load-bearing downstream.
 
 from __future__ import annotations
 
+import contextlib
+
 import structlog
 
 from continuum.clients.llm import LLMClient
+from continuum.config import Settings
 from continuum.models.memory import ExtractedFact, MemoryCategory
 
 log = structlog.get_logger(__name__)
@@ -143,18 +146,128 @@ def _normalise_subject(value: object) -> str | None:
 
 
 class Mem0Extractor:
-    """Adapter around Mem0's own extraction, kept for comparison.
+    """Adapter around Mem0's own extraction — the Phase 5 baseline.
 
-    Mem0 returns flat strings, so category/subject/excerpt fall back to defaults.
-    Useful as a baseline when evaluating whether the native prompt above is
-    actually earning its keep.
+    This exists to answer one question with a number instead of an opinion: is
+    the domain-tuned prompt above actually earning its keep, or would Mem0's
+    general-purpose extraction have done just as well?
+
+    Mem0 returns flat strings, so `category`, `subject` and `source_excerpt` fall
+    back to defaults — which is precisely the gap being measured. A memory with
+    no category cannot be routed by resolution policy, and one with no subject
+    cannot be filtered before the judge, so a baseline that ties on raw fact
+    recall can still be unusable downstream.
+
+    Isolation matters: Mem0's `add()` performs its own dedup-and-update pass
+    against whatever it has already stored, so a shared store would measure
+    extraction and update together and credit the result to extraction. `reset()`
+    empties the store between documents, which makes every result an ADD.
+
+    Reset rather than a fresh instance per document, because Mem0 also keeps an
+    internal migrations Qdrant under ~/.mem0, an embedded Qdrant permits one
+    concurrent opener, and that store is not released by `close()`. Building a
+    second instance in the same process dies on the second document.
     """
 
     def __init__(self, memory: object) -> None:
         self._memory = memory
 
-    async def extract(self, transcript: str) -> list[ExtractedFact]:
-        raise NotImplementedError(
-            "Wire this up in Phase 2 evaluation: call mem0's Memory.add() against a "
-            "throwaway collection and read back the extracted facts."
+    @classmethod
+    def create(cls, settings: Settings, storage_dir: str) -> Mem0Extractor:
+        """Build an extractor backed by an isolated, local Mem0 store.
+
+        `storage_dir` is a temporary directory; Qdrant runs embedded from it, so
+        nothing touches the real collection. Build one per run, not per document.
+        """
+        from mem0 import AsyncMemory
+
+        # `from_config` is a plain classmethod in mem0 2.x, not a coroutine —
+        # only `add()` is awaitable.
+        memory = AsyncMemory.from_config(
+            {
+                "llm": {
+                    "provider": "openai",
+                    "config": {
+                        "model": settings.llm_model,
+                        "openai_base_url": settings.llm_base_url,
+                        "api_key": settings.llm_api_key,
+                        "temperature": settings.llm_temperature,
+                    },
+                },
+                "embedder": {
+                    "provider": "openai",
+                    "config": {
+                        "model": settings.embedding_model,
+                        "openai_base_url": settings.embedding_base_url,
+                        "api_key": settings.embedding_api_key,
+                        "embedding_dims": settings.embedding_dim,
+                    },
+                },
+                "vector_store": {
+                    "provider": "qdrant",
+                    "config": {
+                        "collection_name": "mem0_baseline",
+                        "embedding_model_dims": settings.embedding_dim,
+                        "path": storage_dir,
+                    },
+                },
+            }
         )
+        return cls(memory)
+
+    async def extract(self, transcript: str) -> list[ExtractedFact]:
+        text = transcript.strip()
+        if not text:
+            return []
+
+        try:
+            response = await self._memory.add(  # type: ignore[attr-defined]
+                text, user_id="baseline", infer=True
+            )
+        except Exception as exc:  # noqa: BLE001 - a baseline failure is a data point
+            log.error("extraction.mem0_failed", error=str(exc))
+            return []
+
+        return _coerce_mem0(response)
+
+    async def reset(self) -> None:
+        """Empty the store so the next document starts from nothing."""
+        with contextlib.suppress(Exception):
+            await self._memory.reset()  # type: ignore[attr-defined]
+
+    def close(self) -> None:
+        close = getattr(self._memory, "close", None)
+        if callable(close):
+            with contextlib.suppress(Exception):
+                close()
+
+
+def _coerce_mem0(response: object) -> list[ExtractedFact]:
+    """Read facts out of Mem0's add() envelope.
+
+    Everything lands as `FACT` with no subject: Mem0 does not produce either, and
+    inventing them here would flatter the baseline by crediting it with structure
+    it never returned.
+    """
+    if isinstance(response, dict):
+        rows = response.get("results") or []
+    elif isinstance(response, list):
+        rows = response
+    else:
+        rows = []
+
+    facts: list[ExtractedFact] = []
+    for row in rows:
+        if isinstance(row, str):
+            content = row.strip()
+        elif isinstance(row, dict):
+            if str(row.get("event", "ADD")).upper() == "DELETE":
+                continue
+            content = str(row.get("memory") or row.get("text") or "").strip()
+        else:
+            continue
+        if content:
+            facts.append(ExtractedFact(content=content, category=MemoryCategory.FACT))
+
+    log.info("extraction.mem0_completed", count=len(facts))
+    return facts

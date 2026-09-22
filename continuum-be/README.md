@@ -168,7 +168,7 @@ gitignored.
 
 ```bash
 # from continuum-be/
-uv run pytest                      # 86 tests, no services needed
+uv run pytest                      # 126 tests, no services needed
 uv run ruff check .
 uv run python scripts/seed_demo.py # full pipeline against the running stack
 ```
@@ -284,6 +284,44 @@ read-only chat.
 
 ---
 
+## Evaluation
+
+`AUTO_SUPERSEDE_CONFIDENCE` was 0.80 because 0.80 felt about right. Phase 5
+replaces that with a number.
+
+```bash
+docker compose up -d qdrant ollama ollama-init    # repo root
+cd continuum-be
+
+uv run python scripts/run_eval.py --record eval-run.json   # one slow pass
+uv run python scripts/run_eval.py --replay eval-run.json   # free, repeatable
+```
+
+**Record once, sweep forever.** Each recorded outcome stores the judge's relation
+and confidence *before* the gate was applied, so every other gate value is
+recomputed by arithmetic. A sweep across eight thresholds costs zero LLM calls.
+
+The system fails in two directions and they are not equally bad, so they are
+never averaged into one score:
+
+| Metric | What it catches |
+| --- | --- |
+| `belief_loss_rate` | Retired a belief that should have lived. Information destroyed, silently |
+| `stale_belief_rate` | Should have retired, did not, and did not ask either |
+| `merge_loss_rate` | Folded a distinct fact into an existing one as a duplicate |
+| `escalation_rate` | Sent to a human. A cost, not a failure |
+| `band_miss_rate` | The fact never got near the belief it contradicts — a retrieval problem, not a judgement one |
+
+`recommend_gate` picks the cheapest threshold inside your belief-loss budget
+rather than the best F1: F1 treats a destroyed belief and a wasted minute as the
+same size of mistake.
+
+See [`src/continuum/evaluation/README.md`](src/continuum/evaluation/README.md)
+for the corpus labelling principle, the three cases that are meant to fail, and
+how to read the sweep.
+
+---
+
 ## Roadmap
 
 | Phase | Status |
@@ -292,7 +330,7 @@ read-only chat.
 | **2 — Resolution & decay** | ✅ done |
 | **3 — Memory-augmented chat** | ✅ done *(this release)* — SSE streaming, retrieval ranked by similarity × confidence × recency, disagreement surfaced rather than resolved |
 | **4 — Belief graph UI** | ⬜ next — `continuum-fe`: React + shadcn + Three.js force-directed graph off `/memories/graph`, the contradiction inbox, and a chat panel alongside |
-| **5 — Evaluation** | ⬜ labelled contradiction corpus; measure supersede precision/recall, escalation rate, belief-loss rate; tune the gate against numbers rather than vibes |
+| **5 — Evaluation** | ✅ done *(this release)* — 28-case labelled corpus, belief-loss / stale-belief / merge-loss measured separately, and a gate sweep that replays one recorded run at every threshold for free |
 
 See [`../CLAUDE.md`](../CLAUDE.md) for the full engineering brief, layering rules
 and conventions, and [`../README.md`](../README.md) for the project overview.

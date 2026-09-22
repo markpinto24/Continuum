@@ -53,7 +53,9 @@ they are not traded away to simplify an implementation.
 
 The single most consequential setting is `AUTO_SUPERSEDE_CONFIDENCE` (default
 `0.80`): how sure the judge must be before retiring a belief without asking.
-Raise it and you escalate more; lower it and you silently lose beliefs.
+Raise it and you escalate more; lower it and you silently lose beliefs. It is set
+against [a labelled corpus](continuum-be/src/continuum/evaluation/README.md), not
+against intuition.
 
 ---
 
@@ -160,9 +162,9 @@ land in an inbox with three verdicts, one of which is *both are true*.
 | **2 — Resolution & decay** | ✅ | The judge + confidence gate, supersede edges, contradiction inbox, per-category exponential decay with archival |
 | **3 — Memory-augmented chat** | ✅ | SSE streaming, retrieval ranked by similarity × confidence × recency, disagreement surfaced rather than resolved |
 | **4 — Belief graph UI** | ✅ | `continuum-fe`: Three.js force-directed graph off `/memories/graph`, provenance panel, contradiction inbox, streaming chat |
-| **5 — Evaluation** | ⬜ | Labelled contradiction corpus; supersede precision/recall, escalation rate, belief-loss rate. Tune the gate against numbers rather than vibes |
+| **5 — Evaluation** | ✅ | 28-case labelled corpus; belief-loss, stale-belief and merge-loss measured separately; a gate sweep that replays one recorded run at every threshold for free |
 
-Backend: 86 tests. Frontend: 23. Neither needs a running service.
+Backend: 126 tests. Frontend: 23. Neither needs a running service.
 
 ---
 

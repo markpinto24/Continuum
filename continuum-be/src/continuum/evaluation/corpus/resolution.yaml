@@ -1,0 +1,507 @@
+# Labelled contradiction corpus.
+#
+# Every case carries a `why`. A label without a rationale is a guess, and a
+# corpus of guesses will happily certify a broken gate.
+#
+# Labels are ACTIONS, not verdicts — see evaluation/types.py for why.
+#
+#   retire     the old belief is superseded without asking
+#   escalate   the pair goes to the contradiction inbox
+#   reinforce  the fact is already known; confirm it, store nothing
+#   store      store the fact, touch nothing
+#
+# The single labelling principle: the incoming fact is always the later one, by
+# construction — it is being ingested now. So a plain reversal IS a supersede,
+# and "the timing is unclear" is not on its own a reason to escalate. What earns
+# an escalation is *partial overlap*: when some of the old belief survives and a
+# human has to say how much.
+#
+# Cases tagged `known-gap` are ones the system is expected to get wrong today.
+# They are here deliberately. A corpus containing only passes measures nothing.
+
+# =============================================================================
+# retire — a belief was genuinely replaced
+# =============================================================================
+
+- id: db-swap-explicit
+  why: >
+    Same subject, same slot, flatly incompatible storage engines. Only one can be
+    the event store, and the incoming statement is the later one. This is the
+    case the whole supersede path exists for; if it does not retire here, the
+    gate is too high.
+  existing:
+    content: Atlas stores events in Postgres
+    category: decision
+    subject: atlas
+    age_days: 60
+  incoming:
+    content: Atlas stores events in MongoDB
+    category: decision
+    subject: atlas
+  expect: retire
+  tags: [reversal, decision]
+
+- id: comms-preference-flip
+  why: >
+    An explicit reversal of a stated preference, with the old position named in
+    the new statement. A person cannot simultaneously prefer calls and prefer not
+    to have them.
+  existing:
+    content: Acme prefers a weekly status call
+    category: preference
+    subject: acme
+    age_days: 90
+  incoming:
+    content: Acme prefers written async updates instead of calls
+    category: preference
+    subject: acme
+  expect: retire
+  tags: [reversal, preference]
+
+- id: budget-cap-raised
+  why: >
+    A cap is a single number. 5k and 8k cannot both be the cap, and no scope
+    qualifier distinguishes them.
+  existing:
+    content: Acme's budget is capped at 5k per month
+    category: constraint
+    subject: acme
+    age_days: 45
+  incoming:
+    content: Acme's budget is capped at 8k per month
+    category: constraint
+    subject: acme
+  expect: retire
+  tags: [reversal, constraint]
+
+- id: runtime-migration
+  why: >
+    A service runs on one orchestrator at a time. The statement replaces a stable
+    fact about the world rather than adding to it.
+  existing:
+    content: The billing service runs on ECS
+    category: fact
+    subject: billing-service
+    age_days: 120
+  incoming:
+    content: The billing service runs on EKS
+    category: fact
+    subject: billing-service
+  expect: retire
+  tags: [reversal, fact]
+
+- id: role-change-explicit
+  why: >
+    The incoming statement says outright that the old arrangement ended. Without
+    the "has moved off" clause this would be co-ownership and therefore an
+    escalation — the explicitness is what makes it safe to apply.
+  existing:
+    content: Sara leads the data platform
+    category: person
+    subject: sara
+    age_days: 200
+  incoming:
+    content: Sara has moved off the data platform and now leads infrastructure
+    category: person
+    subject: sara
+  expect: retire
+  tags: [reversal, person]
+
+- id: deadline-moved
+  why: >
+    A launch date is a single value and the new one is stated as a move. Note the
+    category is constraint, not event — the launch has not happened, so nothing
+    here is immutable history.
+  existing:
+    content: The Atlas launch is set for 14 March
+    category: constraint
+    subject: atlas
+    age_days: 30
+  incoming:
+    content: The Atlas launch has moved to 2 April
+    category: constraint
+    subject: atlas
+  expect: retire
+  tags: [reversal, constraint]
+
+- id: vendor-dropped
+  why: >
+    "Dropped X and moved in-house" names the thing it replaces. Nothing of the
+    original decision survives.
+  existing:
+    content: Chose Auth0 for authentication to save build time
+    category: decision
+    subject: auth
+    age_days: 150
+  incoming:
+    content: Dropped Auth0 and moved authentication in-house
+    category: decision
+    subject: auth
+  expect: retire
+  tags: [reversal, decision]
+
+# =============================================================================
+# escalate — partial overlap; a human decides how much of the old belief lives
+# =============================================================================
+
+- id: narrowing-qualifier
+  why: >
+    The canonical hard case. "Postgres stays for reporting only" neither confirms
+    nor replaces "Atlas stores events in Postgres" — it carves the original down
+    and leaves a remainder nobody has written. Auto-retiring here throws away the
+    part that is still true; auto-storing leaves two beliefs that read as a
+    contradiction. Only a human can say which.
+  existing:
+    content: Atlas stores events in Postgres
+    category: decision
+    subject: atlas
+    age_days: 60
+  incoming:
+    content: Postgres stays for reporting only
+    category: decision
+    subject: atlas
+  expect: escalate
+  tags: [narrowing, decision, flagship]
+
+- id: tool-split-by-work-type
+  why: >
+    Jira for work and Linear for bugs may be a migration in progress or a
+    deliberate split. Both readings are ordinary, and the statements do not
+    settle it.
+  existing:
+    content: The team tracks work in Jira
+    category: fact
+    subject: team
+    age_days: 90
+  incoming:
+    content: The team tracks bugs in Linear
+    category: fact
+    subject: team
+  expect: escalate
+  tags: [partial-scope, fact]
+
+- id: ownership-handover-or-shared
+  why: >
+    One service, two named owners. A handover and a co-ownership look identical
+    at this level of detail, and guessing handover silently erases a real owner.
+  existing:
+    content: Sara owns the billing service
+    category: person
+    subject: billing-service
+    age_days: 100
+  incoming:
+    content: Raj owns the billing service
+    category: person
+    subject: billing-service
+  expect: escalate
+  tags: [ownership, person, flagship]
+
+- id: rule-with-exception
+  why: >
+    The exception falsifies the original as written ("all deploys") without
+    replacing it. The correct repair is to rewrite the first belief, which is
+    editorial work, not a lookup.
+  existing:
+    content: All deploys go through the staging gate
+    category: constraint
+    subject: deploys
+    age_days: 60
+  incoming:
+    content: Hotfixes can skip the staging gate
+    category: constraint
+    subject: deploys
+  expect: escalate
+  tags: [exception, constraint]
+
+- id: one-off-or-new-baseline
+  why: >
+    An approval for one quarter is not obviously a change to the standing cap.
+    Retiring the cap on this evidence would quietly raise a budget nobody raised.
+  existing:
+    content: Acme's budget is capped at 5k per month
+    category: constraint
+    subject: acme
+    age_days: 45
+  incoming:
+    content: Acme has approved 8k for Q3
+    category: constraint
+    subject: acme
+  expect: escalate
+  tags: [partial-scope, constraint]
+
+- id: standard-with-carve-out
+  why: >
+    An ML workload on another cloud is a carve-out from the standard, not an
+    abandonment of it. How much of "we standardised on AWS" survives is a
+    judgement call about intent.
+  existing:
+    content: The team standardised on AWS for all infrastructure
+    category: decision
+    subject: infra
+    age_days: 180
+  incoming:
+    content: The ML training workloads run on GCP
+    category: decision
+    subject: infra
+  expect: escalate
+  tags: [exception, decision]
+
+- id: degree-not-direction
+  why: >
+    Both statements point the same way and disagree only on strength. Retiring
+    the first loses the stated reason; storing both reads as a contradiction.
+    A human should merge them.
+  existing:
+    content: Acme dislikes long meetings
+    category: preference
+    subject: acme
+    age_days: 40
+  incoming:
+    content: Acme will not attend any meeting longer than 30 minutes
+    category: preference
+    subject: acme
+  expect: escalate
+  tags: [narrowing, preference]
+
+# =============================================================================
+# reinforce — already known
+# =============================================================================
+
+- id: reworded-preference
+  why: >
+    Same assertion, different words. Storing a second copy inflates the graph and
+    double-counts the belief in retrieval.
+  existing:
+    content: Acme prefers written async updates over calls
+    category: preference
+    subject: acme
+    age_days: 30
+  incoming:
+    content: Acme would rather get written updates than get on a call
+    category: preference
+    subject: acme
+  expect: reinforce
+  tags: [duplicate, preference]
+
+- id: same-fact-shorter
+  why: >
+    An abbreviation of an existing fact. Nothing new is asserted.
+  existing:
+    content: The billing service runs on ECS
+    category: fact
+    subject: billing-service
+    age_days: 60
+  incoming:
+    content: Billing runs on ECS
+    category: fact
+    subject: billing-service
+  expect: reinforce
+  tags: [duplicate, fact]
+
+- id: restated-decision-with-reason
+  why: >
+    The reason was already recorded; repeating it is confirmation, not new
+    information.
+  existing:
+    content: Chose Postgres over Mongo because reporting needs real joins
+    category: decision
+    subject: atlas
+    age_days: 75
+  incoming:
+    content: Postgres was picked over Mongo since reporting needs real joins
+    category: decision
+    subject: atlas
+  expect: reinforce
+  tags: [duplicate, decision]
+
+# =============================================================================
+# store — both can be true, or nothing comparable exists
+# =============================================================================
+
+- id: complementary-stack-slot
+  why: >
+    A cache and an event store are different slots. Redis does not contest
+    Postgres, so both beliefs stand.
+  existing:
+    content: Atlas stores events in Postgres
+    category: decision
+    subject: atlas
+    age_days: 60
+  incoming:
+    content: Atlas uses Redis for caching
+    category: decision
+    subject: atlas
+  expect: store
+  tags: [complementary, decision]
+
+- id: two-shipments
+  why: >
+    History is append-only. Two releases both happened, and no amount of
+    similarity should let one overwrite the other. This must be settled by the
+    event-category rule without an LLM call.
+  existing:
+    content: Shipped Atlas v1 to staging on 4 March
+    category: event
+    subject: atlas
+    age_days: 120
+  incoming:
+    content: Shipped Atlas v2 to production on 1 June
+    category: event
+    subject: atlas
+  expect: store
+  tags: [immutable-history, event, free-expected]
+
+- id: event-cannot-be-superseded-by-decision
+  why: >
+    A decision never retires a thing that happened, whatever the wording overlap.
+    The category filter should settle this for free.
+  existing:
+    content: Shipped Atlas v1 to staging on 4 March
+    category: event
+    subject: atlas
+    age_days: 120
+  incoming:
+    content: Atlas stores events in MongoDB
+    category: decision
+    subject: atlas
+  expect: store
+  tags: [immutable-history, free-expected]
+
+- id: same-words-different-project
+  why: >
+    Near-identical phrasing about a different system. The subject filter should
+    settle this before an LLM call — this is the case that filter exists for.
+  existing:
+    content: Atlas stores events in Postgres
+    category: decision
+    subject: atlas
+    age_days: 60
+  incoming:
+    content: Orion stores events in DynamoDB
+    category: decision
+    subject: orion
+  expect: store
+  tags: [different-subject, free-expected]
+
+- id: different-category-same-client
+  why: >
+    A budget and a communication preference are unrelated claims about the same
+    client. The category filter should settle it for free.
+  existing:
+    content: Acme prefers written async updates over calls
+    category: preference
+    subject: acme
+    age_days: 30
+  incoming:
+    content: Acme's budget is capped at 5k per month
+    category: constraint
+    subject: acme
+  expect: store
+  tags: [different-category, free-expected]
+
+- id: unrelated-fact
+  why: >
+    Nothing in the graph is close. The baseline case: an empty conflict band
+    means store, and it should cost nothing.
+  existing:
+    content: Atlas stores events in Postgres
+    category: decision
+    subject: atlas
+    age_days: 60
+  incoming:
+    content: The office moved to the third floor in April
+    category: fact
+    subject: office
+  expect: store
+  tags: [unrelated, free-expected]
+
+- id: two-people-two-services
+  why: >
+    Different owners of different services. Similar sentence shape, no contest.
+  existing:
+    content: Sara owns the billing service
+    category: person
+    subject: billing-service
+    age_days: 100
+  incoming:
+    content: Raj owns the search service
+    category: person
+    subject: search-service
+  expect: store
+  tags: [different-subject, free-expected]
+
+- id: reason-added-to-decision
+  why: >
+    A rationale attached to a decision already on record. It neither replaces nor
+    duplicates the original, and losing it would lose the most valuable part of a
+    decision memory.
+  existing:
+    content: Atlas stores events in Postgres
+    category: decision
+    subject: atlas
+    age_days: 60
+  incoming:
+    content: Postgres was chosen for Atlas because the team already runs it in production
+    category: decision
+    subject: atlas
+  expect: store
+  tags: [complementary, decision, hard]
+
+# =============================================================================
+# known gaps — expected to fail today. Kept so the number is honest.
+# =============================================================================
+
+- id: role-contested-via-person-subject
+  why: >
+    The same contest as `ownership-handover-or-shared`, but the extractor keyed
+    the subject to the person rather than the service. Different subjects, so the
+    cheap filter routes it to `store` and the dispute is never raised. The filter
+    is doing what it was designed to do; the design has a blind spot when the
+    contested thing is a role and the subject is a person.
+  existing:
+    content: Sara leads the data platform
+    category: person
+    subject: sara
+    age_days: 200
+  incoming:
+    content: Raj leads the data platform
+    category: person
+    subject: raj
+  expect: escalate
+  tags: [known-gap, subject-filter, person]
+
+- id: constraint-contested-across-subjects
+  why: >
+    A company-wide cap and a project cap are the same constraint at different
+    scopes, but the subjects differ, so the filter separates them and no dispute
+    is raised. Cross-scope contradiction is not something subject filtering can
+    see.
+  existing:
+    content: No project may exceed 5k per month
+    category: constraint
+    subject: company
+    age_days: 90
+  incoming:
+    content: Atlas is budgeted at 9k per month
+    category: constraint
+    subject: atlas
+  expect: escalate
+  tags: [known-gap, subject-filter, constraint]
+
+- id: implicit-reversal-without-naming
+  why: >
+    A reversal that never names what it replaces and shares little vocabulary
+    with it. If the embedding does not put these in the conflict band, the
+    resolver never sees a candidate and the stale belief survives at full
+    confidence. This case measures retrieval reach, not judgement.
+  existing:
+    content: Atlas stores events in Postgres
+    category: decision
+    subject: atlas
+    age_days: 60
+  incoming:
+    content: The team is standardising on a document store for Atlas
+    category: decision
+    subject: atlas
+  expect: retire
+  tags: [known-gap, retrieval-reach, hard]

@@ -1,0 +1,429 @@
+[
+  {
+    "case_id": "db-swap-explicit",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "decision"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.55,
+    "similarity": 0.8913523567009721,
+    "gate": 0.8,
+    "reason": "one short sentence"
+  },
+  {
+    "case_id": "comms-preference-flip",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "preference"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.85,
+    "similarity": 0.6630063497530552,
+    "gate": 0.8,
+    "reason": "The new statement suggests a change in the preferred method of communication from weekly status calls to written asynchronous updates."
+  },
+  {
+    "case_id": "budget-cap-raised",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "constraint"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.967275801399766,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.967)"
+  },
+  {
+    "case_id": "runtime-migration",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "fact"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.8,
+    "similarity": 0.8249506938373989,
+    "gate": 0.8,
+    "reason": "both statements assert the location of the billing service but disagree on whether it runs on ECS or EKS."
+  },
+  {
+    "case_id": "role-change-explicit",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "person"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.55,
+    "similarity": 0.8926232796573198,
+    "gate": 0.8,
+    "reason": "one short sentence"
+  },
+  {
+    "case_id": "deadline-moved",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "constraint"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.9223912355842501,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.922)"
+  },
+  {
+    "case_id": "vendor-dropped",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "decision"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.95,
+    "similarity": 0.5992434194893985,
+    "gate": 0.8,
+    "reason": "The new statement clearly indicates a change from using Auth0 to handling authentication internally, which replaces the original decision."
+  },
+  {
+    "case_id": "narrowing-qualifier",
+    "expect": "escalate",
+    "tags": [
+      "narrowing",
+      "decision",
+      "flagship"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.55,
+    "similarity": 0.6585393691536432,
+    "gate": 0.8,
+    "reason": "one short sentence"
+  },
+  {
+    "case_id": "tool-split-by-work-type",
+    "expect": "escalate",
+    "tags": [
+      "partial-scope",
+      "fact"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 1.0,
+    "similarity": 0.6264003925824305,
+    "gate": 0.8,
+    "reason": "different aspects of the same subject"
+  },
+  {
+    "case_id": "ownership-handover-or-shared",
+    "expect": "escalate",
+    "tags": [
+      "ownership",
+      "person",
+      "flagship"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.55,
+    "similarity": 0.7805893827060117,
+    "gate": 0.8,
+    "reason": "one short sentence"
+  },
+  {
+    "case_id": "rule-with-exception",
+    "expect": "escalate",
+    "tags": [
+      "exception",
+      "constraint"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.85,
+    "similarity": 0.7380057710622252,
+    "gate": 0.8,
+    "reason": "The new statement introduces an exception to the existing rule for hotfixes."
+  },
+  {
+    "case_id": "one-off-or-new-baseline",
+    "expect": "escalate",
+    "tags": [
+      "partial-scope",
+      "constraint"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.75,
+    "similarity": 0.6441650081313823,
+    "gate": 0.8,
+    "reason": "The new statement provides a specific budget approval that seems to contradict the existing cap."
+  },
+  {
+    "case_id": "standard-with-carve-out",
+    "expect": "escalate",
+    "tags": [
+      "exception",
+      "decision"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": null,
+    "gate": 0.8,
+    "reason": "no similar memories"
+  },
+  {
+    "case_id": "degree-not-direction",
+    "expect": "escalate",
+    "tags": [
+      "narrowing",
+      "preference"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.95,
+    "similarity": 0.8454978516884963,
+    "gate": 0.8,
+    "reason": "The new statement provides a specific threshold for what Acme dislikes, which directly replaces the general preference against long meetings."
+  },
+  {
+    "case_id": "reworded-preference",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "preference"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.55,
+    "similarity": 0.8566993963233833,
+    "gate": 0.8,
+    "reason": "both statements express preferences for written updates but the wording is slightly different and could be interpreted as nuanced differences."
+  },
+  {
+    "case_id": "same-fact-shorter",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "fact"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.9739815807241865,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.974)"
+  },
+  {
+    "case_id": "restated-decision-with-reason",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "decision"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.9575072129711117,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.958)"
+  },
+  {
+    "case_id": "complementary-stack-slot",
+    "expect": "store",
+    "tags": [
+      "complementary",
+      "decision"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 1.0,
+    "similarity": 0.613776612435547,
+    "gate": 0.8,
+    "reason": "different aspects of the system"
+  },
+  {
+    "case_id": "two-shipments",
+    "expect": "store",
+    "tags": [
+      "immutable-history",
+      "event",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.9101702825305434,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "event-cannot-be-superseded-by-decision",
+    "expect": "store",
+    "tags": [
+      "immutable-history",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.572157350949333,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "same-words-different-project",
+    "expect": "store",
+    "tags": [
+      "different-subject",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.4210145039985233,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "different-category-same-client",
+    "expect": "store",
+    "tags": [
+      "different-category",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.4636138423579867,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "unrelated-fact",
+    "expect": "store",
+    "tags": [
+      "unrelated",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": null,
+    "gate": 0.8,
+    "reason": "no similar memories"
+  },
+  {
+    "case_id": "two-people-two-services",
+    "expect": "store",
+    "tags": [
+      "different-subject",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": null,
+    "gate": 0.8,
+    "reason": "no similar memories"
+  },
+  {
+    "case_id": "reason-added-to-decision",
+    "expect": "store",
+    "tags": [
+      "complementary",
+      "decision",
+      "hard"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.55,
+    "similarity": 0.7189596848000718,
+    "gate": 0.8,
+    "reason": "the new statement provides a reason for choosing Postgres, which is not directly contradictory but also not a superset of the existing memory."
+  },
+  {
+    "case_id": "role-contested-via-person-subject",
+    "expect": "escalate",
+    "tags": [
+      "known-gap",
+      "subject-filter",
+      "person"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.6801130807176076,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "constraint-contested-across-subjects",
+    "expect": "escalate",
+    "tags": [
+      "known-gap",
+      "subject-filter",
+      "constraint"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "similarity": 0.4257112274194409,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "implicit-reversal-without-naming",
+    "expect": "retire",
+    "tags": [
+      "known-gap",
+      "retrieval-reach",
+      "hard"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.55,
+    "similarity": 0.6196381655813441,
+    "gate": 0.8,
+    "reason": "one short sentence"
+  }
+]
