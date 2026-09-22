@@ -54,7 +54,13 @@ be the UI deciding the very thing the backend escalated to you.
   `similarity × confidence × recency` breakdown — while it is still being
   written. When those memories disagree, a banner says so above the answer.
   Every turn is fed back through ingest, so the graph refreshes when a
-  conversation changes it.
+  conversation changes it — and the turn says what it did, including when
+  nothing durable was found.
+- **Answers render as Markdown**: highlighted, language-labelled code blocks
+  with a copy button, lists, bold. Model output is untrusted, so HTML it emits
+  is shown as text rather than injected.
+- **Drag the sidebar's left edge to resize it** (arrow keys work when it is
+  focused; double-click resets). The width is remembered per browser.
 
 ---
 
@@ -79,7 +85,7 @@ absolute origin directly.
 ```bash
 npm run lint           # eslint, flat config, TypeScript
 npm run build          # tsc -b, then vite build
-npm test               # vitest, jsdom — 23 tests, no backend needed
+npm test               # vitest, jsdom — 40 tests, no backend needed
 ```
 
 ---

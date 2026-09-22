@@ -227,6 +227,50 @@ the intuition would have put it.
 
 ---
 
+## 7. Extraction had no place for what someone is working on
+
+*Found in real use, 2026-09-23, after the first run.* The chat turn "i am
+currently working on fastapi project with poetry env" stored nothing. The logs
+showed the write-back ran and `extraction.completed count=0`; replaying the call
+showed the model returning `{}` deterministically. Not a parse drop.
+
+Varying the input isolated it: dropping "currently", dropping the `user:`
+prefix, even rewriting it as "Mark is working on a FastAPI project that uses
+Poetry" all extracted nothing. Only "our fastapi project uses poetry for
+dependency management" got through. The six categories cover decisions,
+preferences, stable facts, events, people and constraints — and **not what
+someone is working on**, which is the most basic work memory there is.
+
+The sentence became corpus case `current-work-and-stack` (two labelled facts,
+because the tooling can change without the project changing). Prompt variants
+were then compared over **three runs each**, because a single draw on nine
+documents moves by a fact or two on noise alone:
+
+| variant | F1 | precision | recall | category | current-work |
+| --- | --- | --- | --- | --- | --- |
+| v0 committed | 0.58 | 70% | 50% | 71% | 0/2 |
+| v2 explicit rule, names `` `fact` `` | 0.64 | 67% | 62% | 54% | 2/2 |
+| v3–v5 guidance inside the category list | 0.44–0.56 | 56–69% | 36–48% | 40–55% | 0/2 |
+| **v6 explicit rule, no category named** | **0.82** | **83%** | **81%** | 64% | **2/2** |
+
+Two findings worth keeping:
+
+- **Naming a category in an example biases a small model toward it.** Every one
+  of v2's extra category errors was a `constraint` filed as `fact` — the budget
+  cap, the deploy days, the SOC2 audit. Removing the single word `` `fact` ``
+  from the directive recovered most of it.
+- **Editing the category definitions made everything worse**, including cases
+  the edit had nothing to do with. v5 changed one line of the `fact` definition
+  and category accuracy fell from 71% to 40%. With a 7B extractor, put new
+  guidance in the rules, not in the list it chooses categories from.
+
+v6 shipped. Its category *rate* is below v0's, but it matches far more facts
+(~11 vs 7), so it yields more correctly-categorised memories in absolute terms
+(~7 vs 5). Both empty-is-correct cases stay empty on every run. Subject accuracy
+is unchanged at ~12–14% — still open item 4 below.
+
+---
+
 ## What this changes
 
 Nothing in this file is a tuning problem. In priority order:

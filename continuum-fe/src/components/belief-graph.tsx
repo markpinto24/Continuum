@@ -88,6 +88,22 @@ export function BeliefGraph({ data, selectedId, onSelect }: BeliefGraphProps) {
     graph.d3Force('link')?.distance(48)
   }, [graphData])
 
+  // Frame the graph once per dataset, when the layout first settles. Without
+  // this the camera stays where the library put it before the simulation ran:
+  // a sparse graph with no edges repels itself out of frame, and nodes end up
+  // under the legend. Only once per dataset — refitting on every settle would
+  // yank the camera back each time someone orbits away to look at something.
+  const framed = useRef(false)
+  useEffect(() => {
+    framed.current = false
+  }, [graphData])
+
+  const frameOnce = useCallback(() => {
+    if (framed.current) return
+    framed.current = true
+    graphRef.current?.zoomToFit(600, 90)
+  }, [])
+
   const linkColor = useCallback(
     (link: SceneLink) => {
       const base = EDGE_COLOR[link.kind]
@@ -98,26 +114,21 @@ export function BeliefGraph({ data, selectedId, onSelect }: BeliefGraphProps) {
     [isMuted],
   )
 
-  if (data.nodes.length === 0) {
-    return (
-      <div
-        ref={containerRef}
-        className="flex h-full items-center justify-center text-center text-sm text-muted"
-      >
-        <div className="max-w-sm px-6">
-          <p className="mb-1 font-medium text-foreground">No memories yet</p>
-          <p className="leading-relaxed">
-            Feed this user a note through <code className="text-accent">POST /ingest</code>, or
-            just talk to them in the chat panel — every turn is extracted and lands here.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div ref={containerRef} className="h-full w-full">
-      {width > 0 && height > 0 && (
+      {data.nodes.length === 0 ? (
+        <div className="flex h-full items-center justify-center text-center text-sm text-muted">
+          <div className="max-w-sm px-6">
+            <p className="mb-1 font-medium text-foreground">No memories yet</p>
+            <p className="leading-relaxed">
+              Feed this user a note through <code className="text-accent">POST /ingest</code>,
+              or just talk to them in the chat panel — every turn is extracted and lands here.
+            </p>
+          </div>
+        </div>
+      ) : (
+        width > 0 &&
+        height > 0 && (
         <ForceGraph3D<SceneNode, SceneLink>
           ref={graphRef}
           width={width}
@@ -150,8 +161,10 @@ export function BeliefGraph({ data, selectedId, onSelect }: BeliefGraphProps) {
           onBackgroundClick={() => onSelect(null)}
           cooldownTicks={120}
           warmupTicks={30}
+          onEngineStop={frameOnce}
           enableNodeDrag={false}
         />
+        )
       )}
     </div>
   )

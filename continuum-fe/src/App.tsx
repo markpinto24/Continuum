@@ -7,8 +7,10 @@ import { ChatPanel } from '@/components/chat-panel'
 import { ContradictionInbox } from '@/components/contradiction-inbox'
 import { GraphLegend } from '@/components/graph-legend'
 import { MemoryDetail } from '@/components/memory-detail'
+import { PanelResizer } from '@/components/panel-resizer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { useResizablePanel } from '@/hooks/use-resizable-panel'
 import { useResource } from '@/hooks/use-resource'
 import { api } from '@/lib/api'
 import type { GraphResponse, MemoryStatus } from '@/lib/types'
@@ -23,6 +25,7 @@ export default function App() {
   const [includeArchived, setIncludeArchived] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [tab, setTab] = useState('chat')
+  const panel = useResizablePanel()
 
   const health = useResource(() => api.health(), [])
   const graph = useResource(
@@ -88,7 +91,13 @@ export default function App() {
             )}
           </main>
 
-          <aside className="flex w-[26rem] shrink-0 flex-col border-l border-border">
+          <PanelResizer
+            width={panel.width}
+            dragging={panel.dragging}
+            {...panel.handleProps}
+          />
+
+          <aside className="flex shrink-0 flex-col" style={{ width: panel.width }}>
             <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
               <div className="p-3 pb-2">
                 <TabsList className="w-full">

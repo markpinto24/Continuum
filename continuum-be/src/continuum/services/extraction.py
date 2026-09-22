@@ -36,6 +36,14 @@ You are building the long-term memory of a professional. Capture only what will
 still be worth knowing weeks from now. Ignore pleasantries, restated questions,
 and anything transient.
 
+"Transient" means one-off logistics: moving or rescheduling a meeting, running
+late, appointments and personal errands, who is out today, what someone is doing
+this afternoon. Never record these, even when the user says them about themself.
+It does NOT mean ongoing work. What someone is working on, and the
+tools, frameworks and environments that work uses, is exactly the durable
+memory you are here to keep - even when it is phrased as "currently" or "right
+now".
+
 For each memory, choose exactly one category:
 - decision   : a choice that was made, ideally with its reason
 - preference : how someone likes to work or be communicated with
@@ -48,6 +56,14 @@ Rules:
 - Write each memory as a standalone third-person statement. It must be
   understandable with no surrounding context. Resolve pronouns to real names
   where the text makes them unambiguous.
+- In a conversation, lines starting "user:" come from the person whose memory
+  this is. Write their first-person statements ("I", "we", "our") as "The
+  user ...".
+- For work in progress, record the project and each tool it uses as SEPARATE
+  memories, with the project as the subject. "I'm on a FastAPI project
+  using Poetry" is two memories - "The user is working on a FastAPI project"
+  and "The FastAPI project uses Poetry" - because the tooling can change
+  without the project changing.
 - One fact per memory. Never join two ideas with "and".
 - Preserve the REASON when one is given. "Chose Postgres over Mongo for
   relational integrity" is worth far more than "Chose Postgres".

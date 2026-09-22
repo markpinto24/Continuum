@@ -9,6 +9,11 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': path.resolve(import.meta.dirname, './src') },
+    // Exactly one three.js, always. The graph renderer builds scene objects in
+    // three-forcegraph and draws them in three-render-objects; if those resolve
+    // to different copies, the render loop throws `intersectsFrustum is not a
+    // function` every frame and the canvas stays blank with no visible error.
+    dedupe: ['three'],
   },
   build: {
     rollupOptions: {
@@ -18,6 +23,9 @@ export default defineConfig({
         // ship a small chunk and the big one stays in the browser cache.
         manualChunks: {
           graph: ['three', 'react-force-graph-3d'],
+          // The Markdown parser plus highlight.js's language grammars — another
+          // large, rarely-changing block that should not ride along with app edits.
+          markdown: ['react-markdown', 'remark-gfm', 'rehype-highlight'],
         },
       },
     },
