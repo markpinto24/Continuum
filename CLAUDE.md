@@ -319,7 +319,14 @@ is genuinely uncertain. Keep it that way.
   refreshes it
 - `three` + `react-force-graph-3d` split into their own chunk — ~85% of the
   bundle, and they change only when bumped
-- 23 tests (vitest + jsdom), eslint clean, no backend needed
+- Assistant answers render as Markdown — highlighted, language-labelled code
+  blocks with copy, lists, bold — from untrusted model output, so no
+  `rehype-raw`: HTML the model emits is shown as text, never injected
+- The sidebar is resizable by dragging its edge (pointer capture, so the drag
+  survives crossing the WebGL canvas); width is remembered per viewer
+- Each chat turn says what it did to the graph, including "nothing stored" —
+  silence used to look identical to memory being switched off
+- 40 tests (vitest + jsdom), eslint clean, no backend needed
 
 ### ✅ Phase 5 — Evaluation (done, this release)
 - **28-case labelled contradiction corpus**, every case carrying a `why`. The
@@ -406,6 +413,11 @@ bias works. These are open issues, not fixed ones.
   stops a node reading amber in the canvas and grey in the sidebar.
 - Node size uses `confidence ** 3` because `nodeVal` is a sphere *volume*. Linear
   confidence makes a 0.9 belief look barely larger than a 0.3 one.
+- **Exactly one copy of three.js.** `3d-force-graph` needs `three >= 0.179`;
+  pinning the direct dependency below that made npm install a second copy, and
+  the renderer threw `intersectsFrustum is not a function` every frame — a blank
+  canvas with the legend drawn over it. `vite.config.ts` dedupes `three`; when
+  bumping it, check `npm ls three` shows a single version.
 
 **Config**
 - Every tunable goes in `continuum-be/src/continuum/config.py` with a comment on
@@ -495,6 +507,10 @@ uv run python scripts/run_eval.py --replay eval-run.json
 - **Baking `VITE_API_URL` into the Docker image.** Vite inlines env vars at build
   time, so it could not be overridden at run time anyway; nginx proxies
   same-origin `/api` instead.
+- **Naming a category in an extraction-prompt example, or editing the category
+  list to add guidance.** Both measurably skew a 7B extractor (FINDINGS §7). Add
+  guidance as a rule, and re-run the extraction corpus three times before and
+  after — one draw is noise.
 - **Dropping a memory's disputed counterpart because it did not make top-k.**
   Then the agent reports one half of an open disagreement as settled fact.
 - **Reinforcing every memory that retrieval returns.** Being retrieved is not

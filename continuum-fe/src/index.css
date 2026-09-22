@@ -75,3 +75,14 @@
     animation: caret-blink 1.1s steps(1) infinite;
   }
 }
+
+/*
+  highlight.js ships unlayered CSS, and in Tailwind v4 an unlayered rule beats
+  every @layer utility regardless of specificity — so `p-0` on the code element
+  cannot undo its `pre code.hljs { padding: 1em }`. This has to be unlayered too,
+  and it wins on source order because index.css loads after the component CSS.
+*/
+pre code.hljs {
+  padding: 0;
+  background: transparent;
+}

@@ -1,11 +1,13 @@
 import { AlertTriangle, CornerDownLeft, Loader2, Square } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { Markdown } from '@/components/markdown'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { streamChat } from '@/lib/api'
 import type { ChatContext, ChatDone, ChatMessage, Disagreement } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { describeWriteBack } from '@/lib/write-back'
 
 interface Turn {
   role: 'user' | 'assistant'
@@ -222,7 +224,7 @@ function TurnView({ turn, onSelectMemory }: { turn: Turn; onSelectMemory: (id: s
       )}
 
       {turn.content ? (
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">{turn.content}</p>
+        <Markdown>{turn.content}</Markdown>
       ) : (
         !turn.error && (
           <p className="flex items-center gap-1.5 text-xs text-muted">
@@ -237,14 +239,8 @@ function TurnView({ turn, onSelectMemory }: { turn: Turn; onSelectMemory: (id: s
         </p>
       )}
 
-      {turn.done?.remembered && turn.done.remembered.extracted > 0 && (
-        <p className="text-[11px] text-muted/70">
-          Remembered {turn.done.remembered.extracted} from this turn
-          {turn.done.remembered.reinforced.length > 0 &&
-            ` · confirmed ${turn.done.remembered.reinforced.length}`}
-          {turn.done.remembered.conflicts_raised.length > 0 &&
-            ` · raised ${turn.done.remembered.conflicts_raised.length} dispute`}
-        </p>
+      {turn.done && describeWriteBack(turn.done.remembered) && (
+        <p className="text-[11px] text-muted/70">{describeWriteBack(turn.done.remembered)}</p>
       )}
     </div>
   )

@@ -138,3 +138,23 @@
       category: constraint
       subject: soc2
   tags: [noise-rejection, precision]
+
+- id: current-work-and-stack
+  why: >
+    Found in real use. "i am currently working on fastapi project with poetry
+    env" extracted nothing: the categories cover decisions, preferences, stable
+    facts, events, people and constraints, but not what someone is working on,
+    so a 7B extractor returned {}. What a person is working on, and with what, is
+    the most basic work memory there is. It is two facts rather than one because
+    they change independently - moving off Poetry later must supersede the
+    tooling without retiring the project.
+  text: >
+    user: i am currently working on fastapi project with poetry env
+  expect:
+    - content: The user is working on a FastAPI project
+      category: fact
+      subject: fastapi-project
+    - content: The FastAPI project uses Poetry to manage its environment
+      category: fact
+      subject: fastapi-project
+  tags: [current-work, one-fact-per-memory, found-in-use]

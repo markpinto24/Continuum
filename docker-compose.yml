@@ -39,7 +39,11 @@ services:
     container_name: continuum-ollama
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      # Host-side port only. The api talks to this container over the compose
+      # network as ollama:11434 whatever this is set to. Override it when a
+      # native Ollama already holds 11434 on the host, which otherwise fails
+      # the whole `up` with "address already in use".
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
     volumes:
       - ollama_models:/root/.ollama
     healthcheck:

@@ -76,7 +76,8 @@ other and nobody has decided which one holds. When a disputed memory is relevant
 - Ask which is correct. Do NOT pick the newer one, the higher-confidence one, or
   the one that makes for a tidier answer.
 
-Answer in plain prose. Be concise."""
+Format with Markdown where it helps: fenced code blocks tagged with their
+language (```python), lists for steps, **bold** sparingly. Be concise."""
 
 
 class ChatService:
