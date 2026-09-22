@@ -167,6 +167,66 @@ detail is not durable, and the extraction prompt says so explicitly.
 
 ---
 
+## 6. The Mem0 baseline: a near-tie on facts, a rout on structure
+
+Same corpus, same judge model, Mem0's own extraction against an isolated store
+reset between documents.
+
+| | continuum | mem0 |
+| --- | --- | --- |
+| facts extracted (12 labelled) | 10 | 14 |
+| precision | **70.0%** | 57.1% |
+| recall | 58.3% | **66.7%** |
+| F1 | 0.64 | 0.62 |
+| category accuracy | **71.4%** | 0.0% |
+| subject accuracy | **14.3%** | 0.0% |
+| provenance (excerpt) | **100.0%** | 0.0% |
+
+On raw fact-finding they are within noise of each other — Mem0 trades precision
+for recall, and F1 lands at 0.64 against 0.62. **The domain-tuned prompt is not
+meaningfully better at finding facts.**
+
+The structural columns are the whole argument. Mem0 returns flat strings, so
+every fact arrives with no category, no subject and no source excerpt. A fact
+with no category cannot be routed by resolution policy — `event` immutability,
+per-category half-lives and the category filter all become inoperative. A fact
+with no subject cannot be filtered before the judge, so every neighbour in the
+cosine band costs an LLM call. And with no excerpt there is no provenance, which
+was failure #4 on the list this project exists to fix.
+
+### What Mem0 actually emitted
+
+Three failures worth naming, because they are the ones the domain prompt was
+written against:
+
+**It recorded questions as beliefs.** From `question-not-fact` ("Should we move
+the event store to Mongo? ... has anyone looked at the Redis bill?") it produced
+*"User suggests moving the event store to Mongo and proposes discussing it at the
+next sync"* and *"User asks if anyone has looked at the Redis bill."* Neither is
+a durable fact. A proposal recorded as memory is a belief nobody holds. (It did
+correctly return nothing for pure chatter.)
+
+**It joined unrelated facts with "and".** From the noise transcript: *"Auth0 will
+be dropped and the review scheduled for Thursday has been pushed to Friday due to
+a dentist appointment."* Two unrelated claims and one non-durable one, welded
+into a single memory. That memory cannot be superseded: retiring the Auth0
+decision later would retire the dentist appointment with it. This is precisely
+why the extraction prompt says *one fact per memory, never join two ideas with
+"and"* — the rule is load-bearing for the belief graph, not a style preference.
+
+**It framed statements relative to the speaker.** *"User kicked off the Atlas
+project today"*, *"User's company is moving authentication in-house"*. Standalone
+third-person phrasing is what makes a memory readable months later with no
+surrounding context.
+
+So the honest summary: Mem0's extraction is competitive at the task it was built
+for, and the structure this project layers on top is what the resolution layer
+consumes. The benchmark supports keeping the native extractor — but on the
+grounds of structure and one-fact-per-memory, not on fact recall, which is where
+the intuition would have put it.
+
+---
+
 ## What this changes
 
 Nothing in this file is a tuning problem. In priority order:
@@ -182,7 +242,8 @@ Nothing in this file is a tuning problem. In priority order:
 3. **Stop treating `auto_supersede_confidence` as the main dial** until the judge
    produces calibrated confidence. Right now the band thresholds do the work.
 4. **Fix subject normalisation** in extraction before relying on the subject
-   filter.
+   filter. At 14% agreement it is barely better than Mem0's 0%, and it is the
+   filter that decides what reaches the judge.
 
 The gate was never the binding constraint. It was just the only knob with a
 comment on it.

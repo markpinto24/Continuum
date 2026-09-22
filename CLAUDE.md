@@ -343,8 +343,13 @@ is genuinely uncertain. Keep it that way.
 - Per-tag scoring, so a regression localises to a kind of case
 - Three cases tagged `known-gap` are expected to fail today and are kept. A
   corpus of only passes measures nothing
-- `Mem0Extractor` implemented against a throwaway embedded-Qdrant store per
-  document, so Mem0's own update pass cannot turn an extraction miss into a hit
+- `Mem0Extractor` implemented, running against an isolated embedded-Qdrant store
+  reset between documents so Mem0's own update pass cannot turn an extraction
+  miss into a hit. **The benchmark is a near-tie on fact F1 (0.64 vs 0.62) and a
+  rout on structure** (category 71% vs 0%, provenance 100% vs 0%). It justifies
+  the native extractor on structure and one-fact-per-memory, not on fact recall
+  — Mem0 joined two unrelated facts with "and" into one unsupersedable memory,
+  and recorded a question as a belief
 - `preflight.py` refuses to report resolution numbers when the embedding model
   cannot distinguish an entity swap — added because the first real run produced a
   confident, well-formatted, completely meaningless table
