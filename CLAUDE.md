@@ -62,7 +62,7 @@ simplify an implementation.**
 | Packaging | **uv** | not poetry, not pip |
 | Vector DB | Qdrant (Docker) | accessed directly, not via a framework facade |
 | LLM | Any OpenAI-compatible endpoint | Ollama local / vLLM / Groq — `.env` switch |
-| Embeddings | `nomic-embed-text`, 768-dim | same OpenAI-compatible client |
+| Embeddings | `bge-m3`, 1024-dim | same client. Was nomic until it proved blind to entity swaps (FINDINGS §1, §8) |
 | Extraction | Mem0-inspired, domain-tuned prompt | `mem0ai` is a dependency; its `add()` is not used |
 | Scheduling | APScheduler | decay sweep |
 | Logging | structlog | request-scoped contextvars |
@@ -92,7 +92,7 @@ Continuum/                            ← git root
 ├── CLAUDE.md                         this file — the engineering brief
 ├── .env.example                      every setting, with provider presets
 ├── .gitignore                        covers both projects
-├── docker-compose.yml                full stack: qdrant + ollama + api
+├── docker-compose.yml                full stack: qdrant + api + web (Ollama on host)
 ├── .github/workflows/
 │   ├── backend.yml                   paths: ['continuum-be/**']
 │   └── frontend.yml                  paths: ['continuum-fe/**']
@@ -125,12 +125,15 @@ Continuum/                            ← git root
 │   │   │   ├── memory_store.py       domain ops over Qdrant
 │   │   │   ├── decay.py              confidence decay + archival sweep
 │   │   │   ├── retrieval.py          ★ similarity × confidence × recency rank
-│   │   │   └── chat.py               ★ prompt assembly; surfaces disputes
+│   │   │   ├── chat.py               ★ prompt assembly; surfaces disputes
+│   │   │   ├── subjects.py           one entity, one slug (atlas = atlas-project)
+│   │   │   └── reindex.py            ★ re-embed on model change; crash-safe
 │   │   ├── evaluation/               ← Phase 5: the instrument
 │   │   │   ├── README.md             what each metric means, how to read it
 │   │   │   ├── FINDINGS.md           ★ what the first real run found
 │   │   │   ├── baselines/            recorded runs, replayable at any gate
 │   │   │   ├── preflight.py          ★ can the embedder see an entity swap?
+│   │   │   ├── calibrate.py          ★ derive both cosine bands for a model
 │   │   │   ├── types.py              Action vocabulary, corpus + outcome models
 │   │   │   ├── corpus.py             strict loading; rejects unlabelled cases
 │   │   │   ├── corpus/*.yaml         ★ the labelled data
@@ -232,19 +235,39 @@ ingest (note / transcript)
    │
    ▼  embed whole batch in ONE call; reuse each vector for lookup AND write
    │
+   ▼  canonicalise subjects onto slugs the graph already uses (subjects.py)
+   │
    ▼  ResolutionService.resolve(fact, neighbours)
    │
-   ├─ score ≥ 0.94 ..................... DUPLICATE     → reinforce, no write
+   ├─ score ≥ dup band ................. DUPLICATE     → reinforce, no write
+   │     └─ unless a number, date, name or negation differs → judged instead ★
    ├─ different category ............... NEW           → free, no LLM call
    ├─ different subject ................ NEW           → free, no LLM call
    ├─ either side is an event .......... NEW           → free, no LLM call
-   └─ score ≥ 0.78, same kind ......... judge (LLM call)
+   └─ score ≥ conflict band, same kind . judge (LLM call, reason first)
          ├─ duplicate ................... reinforce
-         ├─ supersedes, conf ≥ 0.80 ..... SUPERSEDES   → write edges, retire old
-         ├─ supersedes, conf < 0.80 ..... CONFLICT     → escalate to human ★
+         ├─ supersedes, p ≥ 0.80 ........ SUPERSEDES   → write edges, retire old
+         │     └─ a role (owns, maintains, reviews, leads…) and the new
+         │        statement never says the old holder stopped → CONFLICT ★
+         ├─ supersedes, p < 0.80 ........ CONFLICT     → escalate to human ★
          ├─ conflict .................... CONFLICT     → escalate to human
          └─ independent ................. store, no edges
 ```
+
+**The bands belong to the embedding model** — bge-m3: duplicate 0.86, conflict
+0.45 — and come from `CALIBRATED_THRESHOLDS` in `config.py`, derived by
+`run_eval.py --calibrate`. Never set them by feel.
+
+**`p` is a probability, not a number the judge wrote.** It is the model's token
+probability for the relation it chose, read from logprobs. A 7B judge's written
+confidence is canned (every supersede came back at exactly 0.95), which left the
+gate inert. The written value is kept for audit and as a fallback for providers
+without logprobs.
+
+**The duplicate guard exists because DUPLICATE is the only verdict that discards
+the incoming fact.** Embeddings are measurably blind to exactly the changes that
+make a contradiction — one number, one name — so near-identical scores are not
+trusted when the words say otherwise.
 
 **`auto_supersede_confidence` (default 0.80) is the single most consequential
 setting in the project.** Raise it and you escalate more; lower it and you
@@ -362,14 +385,31 @@ is genuinely uncertain. Keep it that way.
   confident, well-formatted, completely meaningless table
 - 40 evaluation tests; the instrument is tested before it is trusted
 
-**The first run found three broken mechanisms — see `FINDINGS.md`.** In short:
-`nomic-embed-text` returns byte-identical vectors for `Postgres` vs `MongoDB`, so
-contradictions were classified duplicates and silently discarded; the cosine
-thresholds are model-specific constants that predate having a model to calibrate
-them against, and the duplicate band cannot be made sound by any threshold; and
-`auto_supersede_confidence` is inert, because `qwen2.5:7b-instruct` returns every
-`supersedes` at exactly 0.95. Belief loss stayed at 3.6% throughout — the safety
-bias works. These are open issues, not fixed ones.
+**The first run found three broken mechanisms; Priority 1 fixed most of them —
+see `FINDINGS.md` §8–§9.** On the same corpus and judge: merge loss 10.7% → 0%,
+stale belief 14.3% → 0%, band misses 25% → 7.1%, accuracy 46.4% → 75.0%, retire
+recall 25% → 62.5%, judge agreement 44% → 78%.
+
+- **Duplicate guard** — a number, date, name or negation that differs withholds
+  the duplicate shortcut. This alone took merge loss to zero.
+- **bge-m3**, thresholds calibrated per model, and a **crash-safe re-embedding
+  migration** — tested for real when the disk filled mid-copy nine times.
+- **Subject canonicalisation** — `atlas` and `atlas-project` are one entity.
+- **The judge was copying its prompt's worked example** on a third of its calls.
+  Now: a placeholder template, reason before relation, confidence from token
+  probabilities, and the judge is told the NEW statement is always the later one
+  — the gap that made it escalate clear reversals.
+
+**The last lost belief was a class, and it is closed (§10).** Held-out cases,
+written before any fix ran, showed a second owner / maintainer / reviewer /
+rotation member superseded at ≈1.0 every time. Asking the model a narrower
+question did nothing — it agreed with itself at 1.00. What works reads the
+words: a supersede about a role (owns, maintains, reviews, leads — keyed on the
+words, not the category, since the extractor files ownership as `fact`) applies
+only if the new statement says the old holder stopped. **Belief loss 8.7% → 0% on 46 cases**, including a held-out
+set written to test that rule. `auto_supersede_confidence` stays at 0.80: after
+the rule, all 25 gate-eligible supersedes were correct in every band, and the
+0.50–0.80 band holds only 3 — no evidence to move it.
 
 ---
 
@@ -434,10 +474,12 @@ bias works. These are open issues, not fixed ones.
 
 ### Running it — one command
 
-The whole stack is defined in compose: Qdrant, Ollama, a one-shot job that pulls
-the models, and the API. The API waits for Qdrant to be healthy and for the model
-pull to complete, then creates its own Qdrant collection in the FastAPI lifespan
-hook and starts the decay scheduler.
+The whole stack is defined in compose: Qdrant, a one-shot `models` job, the API
+and the web UI. **Ollama is not a container** — it runs on the host, and the
+containers reach it as `host.docker.internal`. The `models` job asks it to pull
+the configured models (from an 8 MB alpine image, via Ollama's HTTP API). The API
+waits for Qdrant and the models, then creates or re-embeds its collection in the
+FastAPI lifespan hook and starts the decay scheduler.
 
 ```bash
 docker compose up -d --build        # from the repo root
@@ -454,7 +496,7 @@ docker compose down -v     # wipes memories
 ```
 
 A local `.env` at the repo root overrides the compose defaults — that is how you
-point at Groq or a remote vLLM instead of the bundled Ollama.
+point the LLM at Groq or a remote vLLM instead of the host's Ollama.
 
 ### Developing against it
 
@@ -462,7 +504,7 @@ Compose runs from the repo root; `uv` runs from `continuum-be/`. Nothing binds
 the two, which is the point — the backend is a self-contained uv project.
 
 ```bash
-docker compose up -d qdrant ollama ollama-init   # repo root
+docker compose up -d qdrant                      # repo root; Ollama on host
 
 cd continuum-be
 uv sync --extra dev
@@ -471,11 +513,13 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 126 tests, no services needed
+uv run pytest                          # 207 tests, no services needed
 uv run ruff check . --fix
 uv run python scripts/seed_demo.py     # end-to-end against a running stack
 
-# Phase 5: one slow pass, then sweep the gate for free
+# Phase 5: check the embedder, then one slow pass, then sweep the gate for free
+uv run python scripts/run_eval.py --preflight
+uv run python scripts/run_eval.py --crowded     # right memory judged in a crowded graph?
 uv run python scripts/run_eval.py --record eval-run.json
 uv run python scripts/run_eval.py --replay eval-run.json
 ```
@@ -496,6 +540,10 @@ uv run python scripts/run_eval.py --replay eval-run.json
 - **Adding a workspace tool to "tie the monorepo together".** Nx, Turborepo and
   uv workspaces all solve shared-dependency problems these two projects do not
   have. Their only relationship is an HTTP contract.
+- **Putting Ollama back in a container "to be self-contained".** It keeps a
+  private copy of every model — 11.6 GB of pure duplication on a machine that
+  already runs Ollama, which is what filled this disk. The `models` job keeps the
+  one-command contract without it.
 - **Adding a manual setup step to the README instead of the compose graph.**
   `up -d --build` is the whole contract. Bootstrap belongs in the lifespan hook
   or in `depends_on`.
@@ -525,6 +573,30 @@ uv run python scripts/run_eval.py --replay eval-run.json
 - **Adding a corpus case without a rationale, or "fixing" the corpus when a
   number looks bad.** The corpus is the instrument. Relabelling a case to make a
   gate look good is how an evaluation stops measuring anything.
+- **Showing the judge a worked example answer.** A 7B model copies it —
+  relation, confidence and placeholder reason — on a third of its calls. Show a
+  template with placeholders.
+- **Trusting the confidence number an LLM writes.** Use token probabilities; the
+  written value is canned.
+- **Setting the cosine bands by hand, or keeping them when changing embedding
+  model.** They belong to the model. `run_eval.py --calibrate`, then add the pair
+  to `CALIBRATED_THRESHOLDS`.
+- **Asking the model again to catch an error it is confident about.** A second
+  call shares the first one's prior: the replacement check agreed with the judge
+  at 1.00 that ownership is exclusive. When the model is certain and wrong, read
+  the words instead (the duplicate guard, `states_a_change`).
+- **Relaxing the person-role rule because the judge is confident.** It was
+  confident — at 1.0 — on every belief it lost. Confidence is not the signal for
+  this class; the words are.
+- **Keying a resolution rule on the extracted category.** The extractor files
+  "Sara owns billing" as `fact`; a `person`-only rule passed every corpus test and
+  failed the first live one. The corpus skips extraction, so check live.
+- **Validating a fix on the cases that inspired it.** Write held-out cases first,
+  label them before running, and include one labelled against the fix so its cost
+  is visible.
+- **Adding one more judge rule to fix the last failing case.** Tried for the
+  shared-ownership case: it fixed that and broke another. Check the whole sweep,
+  twice, before keeping a prompt change.
 - **Reporting one blended accuracy number for the resolver.** Belief loss and
   stale beliefs trade against each other as the gate moves; a single figure hides
   exactly the thing you are trying to tune.

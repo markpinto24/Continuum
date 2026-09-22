@@ -1,0 +1,485 @@
+[
+  {
+    "case_id": "db-swap-explicit",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "decision"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9963175394793751,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "similarity": 0.834717090866269,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the storage from Postgres to MongoDB for Atlas."
+  },
+  {
+    "case_id": "comms-preference-flip",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "preference"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9997858801923275,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.7783142397594978,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the preferred method of communication from calls to written updates."
+  },
+  {
+    "case_id": "budget-cap-raised",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "constraint"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999931754421,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "similarity": 0.9684813175182773,
+    "gate": 0.8,
+    "reason": "The new budget amount replaces the old one entirely. [scored 0.968 against an existing memory, but 5k, 8k differ]"
+  },
+  {
+    "case_id": "runtime-migration",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "fact"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9646208999910969,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "similarity": 0.8817938588919502,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the runtime environment of the billing service from ECS to EKS. [scored 0.882 against an existing memory, but ECS, EKS differ]"
+  },
+  {
+    "case_id": "role-change-explicit",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "person"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.5688356826281205,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.849291936589091,
+    "gate": 0.8,
+    "reason": "The NEW statement updates Sara's role from leading the data platform to leading infrastructure. (judge confidence 0.57 below auto-resolve gate)"
+  },
+  {
+    "case_id": "deadline-moved",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "constraint"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999891050168,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "similarity": 0.8427312029243568,
+    "gate": 0.8,
+    "reason": "The new date replaces the old one for the same event."
+  },
+  {
+    "case_id": "vendor-dropped",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "decision"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999691535932,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "similarity": 0.6658325885348568,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the decision made in the EXISTING memory by replacing Auth0 with an in-house solution."
+  },
+  {
+    "case_id": "narrowing-qualifier",
+    "expect": "escalate",
+    "tags": [
+      "narrowing",
+      "decision",
+      "flagship"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999991030681241,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.6515934692623193,
+    "gate": 0.8,
+    "reason": "The NEW statement narrows the purpose of Postgres as used by Atlas."
+  },
+  {
+    "case_id": "tool-split-by-work-type",
+    "expect": "escalate",
+    "tags": [
+      "partial-scope",
+      "fact"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.515353484558295,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.7278137771213723,
+    "gate": 0.8,
+    "reason": "The new information specifies a different tool than the existing one."
+  },
+  {
+    "case_id": "ownership-handover-or-shared",
+    "expect": "escalate",
+    "tags": [
+      "ownership",
+      "person",
+      "flagship"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999996541824946,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "similarity": 0.7787475292070398,
+    "gate": 0.8,
+    "reason": "The NEW statement changes ownership of the billing service from Sara to Raj."
+  },
+  {
+    "case_id": "rule-with-exception",
+    "expect": "escalate",
+    "tags": [
+      "exception",
+      "constraint"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999928511122083,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.6733796712479321,
+    "gate": 0.8,
+    "reason": "The NEW statement provides an exception to the rule stated in the EXISTING memory."
+  },
+  {
+    "case_id": "one-off-or-new-baseline",
+    "expect": "escalate",
+    "tags": [
+      "partial-scope",
+      "constraint"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.999999430805573,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.7218741545291006,
+    "gate": 0.8,
+    "reason": "The new statement provides a specific budget approval that contradicts and thus conflicts with the existing cap on Acme's monthly budget."
+  },
+  {
+    "case_id": "standard-with-carve-out",
+    "expect": "escalate",
+    "tags": [
+      "exception",
+      "decision"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9987027286036486,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.4863167550424118,
+    "gate": 0.8,
+    "reason": "The new statement specifies a different cloud provider for a specific workload while maintaining AWS as the standard for general infrastructure."
+  },
+  {
+    "case_id": "degree-not-direction",
+    "expect": "escalate",
+    "tags": [
+      "narrowing",
+      "preference"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9505143820974632,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.8308523093285101,
+    "gate": 0.8,
+    "reason": "The NEW statement provides a specific limit on the duration of meetings that Acme dislikes, which is more restrictive than the general dislike for long meetings in the EXISTING memory."
+  },
+  {
+    "case_id": "reworded-preference",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "preference"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": 0.87739202197688,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.877)"
+  },
+  {
+    "case_id": "same-fact-shorter",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "fact"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": 0.9516789100121434,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.952)"
+  },
+  {
+    "case_id": "restated-decision-with-reason",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "decision"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": "duplicate",
+    "judge_confidence": 0.9998272072621497,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "similarity": 0.9623694727822277,
+    "gate": 0.8,
+    "reason": "The new statement reiterates the reason for choosing Postgres over Mongo, which is identical to the existing memory. [scored 0.962 against an existing memory, but Chose differ]"
+  },
+  {
+    "case_id": "complementary-stack-slot",
+    "expect": "store",
+    "tags": [
+      "complementary",
+      "decision"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9999004881505039,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.6320793329569747,
+    "gate": 0.8,
+    "reason": "The NEW statement introduces a new use case for Atlas (caching) without contradicting or replacing the existing information about storing events in Postgres."
+  },
+  {
+    "case_id": "two-shipments",
+    "expect": "store",
+    "tags": [
+      "immutable-history",
+      "event",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": 0.8029834985799815,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "event-cannot-be-superseded-by-decision",
+    "expect": "store",
+    "tags": [
+      "immutable-history",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": 0.506069778285234,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "same-words-different-project",
+    "expect": "store",
+    "tags": [
+      "different-subject",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": 0.6279673764517646,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "different-category-same-client",
+    "expect": "store",
+    "tags": [
+      "different-category",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": 0.5186651413252992,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "unrelated-fact",
+    "expect": "store",
+    "tags": [
+      "unrelated",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": null,
+    "gate": 0.8,
+    "reason": "no similar memories"
+  },
+  {
+    "case_id": "two-people-two-services",
+    "expect": "store",
+    "tags": [
+      "different-subject",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": 0.6291126003097176,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "reason-added-to-decision",
+    "expect": "store",
+    "tags": [
+      "complementary",
+      "decision",
+      "hard"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.997626616814481,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.7037471043829743,
+    "gate": 0.8,
+    "reason": "The NEW statement provides a reason why Postgres was chosen, which is additional information to the EXISTING memory."
+  },
+  {
+    "case_id": "role-contested-via-person-subject",
+    "expect": "escalate",
+    "tags": [
+      "known-gap",
+      "subject-filter",
+      "person"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": 0.7802295139975522,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "constraint-contested-across-subjects",
+    "expect": "escalate",
+    "tags": [
+      "known-gap",
+      "subject-filter",
+      "constraint"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "similarity": 0.6242066901317409,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "implicit-reversal-without-naming",
+    "expect": "retire",
+    "tags": [
+      "known-gap",
+      "retrieval-reach",
+      "hard"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999992802792753,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "similarity": 0.6368042433554828,
+    "gate": 0.8,
+    "reason": "The new statement changes the storage choice from Postgres to a document store, conflicting with the existing memory."
+  }
+]

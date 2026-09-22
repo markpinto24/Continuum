@@ -109,6 +109,18 @@ class CaseOutcome(BaseModel):
         description="What the judge said before the gate. None means no LLM call was made.",
     )
     judge_confidence: float | None = None
+    confidence_source: str | None = Field(
+        default=None,
+        description="'logprob' or 'self_report' — which number judge_confidence is.",
+    )
+    self_reported_confidence: float | None = Field(
+        default=None,
+        description="The confidence the judge wrote, kept even when logprobs were used.",
+    )
+    forced_escalation: bool = Field(
+        default=False,
+        description="Escalated by policy regardless of confidence; no gate replays it.",
+    )
     similarity: float | None = Field(
         default=None, description="Cosine score of the candidate the resolver picked."
     )

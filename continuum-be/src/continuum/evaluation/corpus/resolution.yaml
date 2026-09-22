@@ -505,3 +505,369 @@
     subject: atlas
   expect: retire
   tags: [known-gap, retrieval-reach, hard]
+
+# =============================================================================
+# held-out — written 2026-09-23, BEFORE any variant was run against them.
+#
+# Every fix after §9 was designed having seen the ownership failure, so it can
+# only be trusted if it also holds on cases it was never tuned on. These keep
+# the same labelling principle as above, and none of their labels were changed
+# after seeing a result. Tagged `holdout` so they can be scored separately.
+# =============================================================================
+
+- id: staging-db-engine
+  why: >
+    A database runs on one engine at a time. Same subject, same slot, the new
+    value replaces the old one outright.
+  existing:
+    content: The staging database runs on RDS Postgres
+    category: fact
+    subject: staging-db
+    age_days: 70
+  incoming:
+    content: The staging database runs on Aurora
+    category: fact
+    subject: staging-db
+  expect: retire
+  tags: [holdout, reversal, single-slot]
+
+- id: release-cadence
+  why: >
+    A cadence is a single value. "Now ship every week" replaces "every two weeks";
+    nothing of the old cadence survives.
+  existing:
+    content: Releases ship every two weeks
+    category: decision
+    subject: releases
+    age_days: 90
+  incoming:
+    content: Releases now ship every week
+    category: decision
+    subject: releases
+  expect: retire
+  tags: [holdout, reversal, single-slot]
+
+- id: primary-contact-changed
+  why: >
+    "Primary" makes this a single slot, and "now" marks the change. A person
+    memory that genuinely should be retired — the counterweight to the
+    shared-role cases, so a fix that simply refuses to retire people is visible
+    as a cost.
+  existing:
+    content: Dana is Acme's primary contact
+    category: person
+    subject: acme
+    age_days: 120
+  incoming:
+    content: Lee is now Acme's primary contact
+    category: person
+    subject: acme
+  expect: retire
+  tags: [holdout, reversal, single-slot, person]
+
+- id: explicit-handover
+  why: >
+    The new statement names the handover: Nia took over FROM Tom. Unlike a bare
+    second name, it says the earlier arrangement ended.
+  existing:
+    content: Tom leads the mobile team
+    category: person
+    subject: mobile-team
+    age_days: 150
+  incoming:
+    content: Nia has taken over from Tom as lead of the mobile team
+    category: person
+    subject: mobile-team
+  expect: retire
+  tags: [holdout, reversal, person]
+
+- id: api-default-version
+  why: >
+    An API has one default version. The new default replaces the old.
+  existing:
+    content: The public API defaults to v1
+    category: decision
+    subject: public-api
+    age_days: 200
+  incoming:
+    content: The public API now defaults to v2
+    category: decision
+    subject: public-api
+  expect: retire
+  tags: [holdout, reversal, single-slot]
+
+- id: second-reviewer
+  why: >
+    Code review is shared work; two reviewers is ordinary. Nothing says Priya
+    stopped. Same shape as the Sara/Raj ownership case, different words — the
+    test of whether a fix generalises or just memorised one sentence.
+  existing:
+    content: Priya reviews all auth pull requests
+    category: person
+    subject: auth
+    age_days: 60
+  incoming:
+    content: Tom reviews auth pull requests
+    category: person
+    subject: auth
+  expect: escalate
+  tags: [holdout, shared-role, person]
+
+- id: second-maintainer
+  why: >
+    Components routinely have several maintainers. A second name is not evidence
+    the first one left, and guessing so erases a real maintainer.
+  existing:
+    content: Aiko maintains the search indexer
+    category: person
+    subject: search-indexer
+    age_days: 80
+  incoming:
+    content: Ben maintains the search indexer
+    category: person
+    subject: search-indexer
+  expect: escalate
+  tags: [holdout, shared-role, person]
+
+- id: deploy-pipeline-carve-out
+  why: >
+    One service on a different pipeline is an exception to "all services", not a
+    replacement of it. The rule as written is now false, but most of it holds.
+  existing:
+    content: All services deploy through GitHub Actions
+    category: constraint
+    subject: deploys
+    age_days: 100
+  incoming:
+    content: The billing service deploys through Jenkins
+    category: constraint
+    subject: deploys
+  expect: escalate
+  tags: [holdout, exception, partial-scope]
+
+- id: rate-limit-tier
+  why: >
+    A higher limit for one customer tier narrows the scope of the general limit
+    rather than raising it for everyone. Retiring the 100 req/s limit would
+    silently lift it for every non-enterprise customer.
+  existing:
+    content: The API is rate limited to 100 requests per second
+    category: constraint
+    subject: public-api
+    age_days: 45
+  incoming:
+    content: Enterprise customers get 1000 requests per second
+    category: constraint
+    subject: public-api
+  expect: escalate
+  tags: [holdout, exception, partial-scope]
+
+- id: standup-exception
+  why: >
+    Cancelling Friday standups carves one day out of "daily"; Monday to Thursday
+    still stand. A human should rewrite the original.
+  existing:
+    content: Standups are held daily at 9am
+    category: decision
+    subject: standups
+    age_days: 30
+  incoming:
+    content: Friday standups are cancelled
+    category: decision
+    subject: standups
+  expect: escalate
+  tags: [holdout, exception, partial-scope]
+
+- id: maintainer-of-another-component
+  why: >
+    Same person, different component. The subject filter should settle it
+    before any judge call.
+  existing:
+    content: Aiko maintains the search indexer
+    category: person
+    subject: search-indexer
+    age_days: 80
+  incoming:
+    content: Aiko maintains the billing exporter
+    category: person
+    subject: billing-exporter
+  expect: store
+  tags: [holdout, different-subject, free-expected]
+
+- id: api-complementary-facts
+  why: >
+    Where an API is served from and what format it returns are independent facts
+    about the same thing. Both stand.
+  existing:
+    content: The public API is served from us-east-1
+    category: fact
+    subject: public-api
+    age_days: 60
+  incoming:
+    content: The public API returns JSON
+    category: fact
+    subject: public-api
+  expect: store
+  tags: [holdout, complementary]
+
+- id: cadence-reworded
+  why: >
+    The same cadence in different words. Nothing new is asserted.
+  existing:
+    content: Releases ship every two weeks
+    category: decision
+    subject: releases
+    age_days: 90
+  incoming:
+    content: We release on a two-week cycle
+    category: decision
+    subject: releases
+  expect: reinforce
+  tags: [holdout, duplicate]
+
+# =============================================================================
+# held-out 2 — person roles, written 2026-09-23 BEFORE option C (explicit change
+# language required to retire a person memory) was run. Option C was designed
+# having seen every case above, so only these can say whether it generalises.
+# =============================================================================
+
+- id: rotation-member
+  why: >
+    An on-call rotation has many members by definition. A second name on it says
+    nothing about the first leaving.
+  existing:
+    content: Hana is on the payments on-call rotation
+    category: person
+    subject: payments
+    age_days: 40
+  incoming:
+    content: Ivan is on the payments on-call rotation
+    category: person
+    subject: payments
+  expect: escalate
+  tags: [holdout2, shared-role, person]
+
+- id: second-design-reviewer
+  why: >
+    Several people review design documents. No statement that Lena stopped.
+  existing:
+    content: Lena reviews design documents
+    category: person
+    subject: design-docs
+    age_days: 90
+  incoming:
+    content: Marco reviews design documents
+    category: person
+    subject: design-docs
+  expect: escalate
+  tags: [holdout2, shared-role, person]
+
+- id: account-manager-no-longer
+  why: >
+    "No longer" says outright that the old arrangement ended, and names the
+    successor. A handover that is safe to apply.
+  existing:
+    content: Dev manages the Acme account
+    category: person
+    subject: acme
+    age_days: 120
+  incoming:
+    content: Dev no longer manages the Acme account and Zoe has taken it over
+    category: person
+    subject: acme
+  expect: retire
+  tags: [holdout2, reversal, person]
+
+- id: team-lead-now
+  why: >
+    A team has one lead, and "now" marks the change. Safe to apply.
+  existing:
+    content: Carl leads the infrastructure team
+    category: person
+    subject: infra-team
+    age_days: 200
+  incoming:
+    content: Dina now leads the infrastructure team
+    category: person
+    subject: infra-team
+  expect: retire
+  tags: [holdout2, reversal, person]
+
+- id: single-contact-without-marker
+  why: >
+    "The QA contact" reads as a single slot, so a careful human would likely
+    retire Kim. But nothing in the text says Kim stopped, and the statement is
+    compatible with Pat covering while Kim is away. Labelled retire, honestly:
+    this is the case where a words-based rule is expected to pay a cost —
+    escalating a change that was probably real. It measures that cost rather
+    than hiding it.
+  existing:
+    content: Kim is the QA contact for Globex
+    category: person
+    subject: globex
+    age_days: 60
+  incoming:
+    content: Pat is the QA contact for Globex
+    category: person
+    subject: globex
+  expect: retire
+  tags: [holdout2, reversal, person, expected-cost]
+
+# =============================================================================
+# found in live use, 2026-09-23 — roles filed as `fact`.
+#
+# The person-role rule keyed on category `person`. Live, the extractor files
+# "Sara owns the billing service" as `fact` (its own definition of fact lists
+# "ownership"), so the rule never fired and Raj superseded Sara. This corpus
+# supplies categories directly and skips extraction, which is why it could not
+# see that. These cases carry the categories the extractor actually produced.
+# =============================================================================
+
+- id: ownership-filed-as-fact
+  why: >
+    The live Sara/Raj case exactly as extracted: both statements categorised
+    `fact`. Same reasoning as ownership-handover-or-shared — a service can have
+    two owners, and nothing says Sara stopped.
+  existing:
+    content: Sara owns the billing service
+    category: fact
+    subject: billing-service
+    age_days: 30
+  incoming:
+    content: Raj owns the billing service
+    category: fact
+    subject: billing-service
+  expect: escalate
+  tags: [found-in-use, shared-role, role-as-fact]
+
+- id: maintainer-filed-as-fact
+  why: >
+    A second maintainer, categorised as a fact about the component. Shared role,
+    no statement the first one left.
+  existing:
+    content: Aiko maintains the search indexer
+    category: fact
+    subject: search-indexer
+    age_days: 80
+  incoming:
+    content: Ben maintains the search indexer
+    category: fact
+    subject: search-indexer
+  expect: escalate
+  tags: [found-in-use, shared-role, role-as-fact]
+
+- id: handover-filed-as-fact
+  why: >
+    A stated handover filed as `fact`. The change language is there, so the rule
+    must still let it through — whatever the category.
+  existing:
+    content: Carl owns the deploy pipeline
+    category: fact
+    subject: deploy-pipeline
+    age_days: 150
+  incoming:
+    content: Dina has taken over ownership of the deploy pipeline from Carl
+    category: fact
+    subject: deploy-pipeline
+  expect: retire
+  tags: [found-in-use, reversal, role-as-fact]

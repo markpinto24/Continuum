@@ -34,15 +34,26 @@ tell your entities apart:
 uv run python scripts/run_eval.py --preflight
 ```
 
-A model that scores `Postgres` against `MongoDB` inside the duplicate band makes
-the contradiction invisible: it is classified a duplicate, the old belief is
-reinforced, and the new fact is discarded before reaching the judge. `--record`
-refuses to run when this fails, unless you pass `--force`.
+It fails a model whose vectors are effectively identical for an entity swap
+(nomic scored `Postgres` vs `MongoDB` at 1.0000) — retrieval cannot tell those
+entities apart, whatever else is fixed. A high score is not by itself a failure
+any more: the duplicate guard reads the words and catches a changed name or
+number. `--record` refuses to run when preflight fails, unless you pass `--force`.
+
+Then derive the two cosine bands the model needs:
+
+```bash
+uv run python scripts/run_eval.py --calibrate
+```
+
+The conflict band goes just below the lowest pair that must be judged; the
+duplicate band just above every non-duplicate the guard cannot see. Add the pair
+to `CALIBRATED_THRESHOLDS` in `config.py`.
 
 Then, with a reachable LLM and embedding endpoint:
 
 ```bash
-docker compose up -d qdrant ollama ollama-init     # from the repo root
+docker compose up -d qdrant     # from the repo root; Ollama runs on the host
 cd continuum-be
 
 uv run python scripts/run_eval.py --record eval-run.json   # one slow pass
@@ -143,6 +154,8 @@ evaluation/
 ├── FINDINGS.md     ★ what the first real run found
 ├── baselines/      recorded runs, replayable at any gate
 ├── preflight.py    ★ can the embedding model see an entity swap?
+├── calibrate.py    ★ derive both cosine bands for one embedding model
+├── crowded.py      does the resolver judge the RIGHT memory in a crowded graph?
 ├── types.py        Action vocabulary, corpus and outcome models
 ├── corpus.py       strict loading and validation
 ├── corpus/*.yaml   the labelled data

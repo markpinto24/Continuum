@@ -58,7 +58,7 @@ def replay(outcome: CaseOutcome, gate: float) -> Action:
     Everything else — the free filters, a `duplicate`, a judge that already said
     `conflict` — is gate-independent, so it replays unchanged.
     """
-    if outcome.judge_relation is not Verdict.SUPERSEDES:
+    if outcome.judge_relation is not Verdict.SUPERSEDES or outcome.forced_escalation:
         return outcome.action
     confidence = outcome.judge_confidence or 0.0
     return Action.RETIRE if confidence >= gate else Action.ESCALATE

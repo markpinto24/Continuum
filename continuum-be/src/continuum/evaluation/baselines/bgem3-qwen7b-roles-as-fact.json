@@ -1,0 +1,59 @@
+[
+  {
+    "case_id": "ownership-filed-as-fact",
+    "expect": "escalate",
+    "tags": [
+      "found-in-use",
+      "shared-role",
+      "role-as-fact"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999994250608479,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.7787475292070398,
+    "gate": 0.8,
+    "reason": "The NEW statement changes ownership of the billing service from Sara to Raj. (a new name for a role that is often shared, and nothing says the earlier person stopped \u2014 escalated)"
+  },
+  {
+    "case_id": "maintainer-filed-as-fact",
+    "expect": "escalate",
+    "tags": [
+      "found-in-use",
+      "shared-role",
+      "role-as-fact"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9858756212599267,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.801730833039697,
+    "gate": 0.8,
+    "reason": "The NEW statement changes who maintains the search indexer. (a new name for a role that is often shared, and nothing says the earlier person stopped \u2014 escalated)"
+  },
+  {
+    "case_id": "handover-filed-as-fact",
+    "expect": "retire",
+    "tags": [
+      "found-in-use",
+      "reversal",
+      "role-as-fact"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.7138998537975374,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.8137015028093775,
+    "gate": 0.8,
+    "reason": "The new information indicates a change in ownership for the same subject."
+  }
+]

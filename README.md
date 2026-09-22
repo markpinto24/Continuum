@@ -61,23 +61,27 @@ against intuition.
 
 ## Quickstart
 
+Needs [Ollama](https://ollama.com) running on the host — the stack uses it
+directly rather than shipping its own copy.
+
 ```bash
 git clone <your-remote> Continuum && cd Continuum
 docker compose up -d --build
 ```
 
-That is the whole contract. Compose brings up Qdrant, Ollama, a one-shot job that
-pulls the models, the API — which waits for both, then creates its Qdrant
-collection and starts the decay scheduler from its own FastAPI lifespan hook —
-and the web UI. There is no separate migrate, init or model-pull step.
+That is the whole contract. Compose brings up Qdrant, a one-shot job that asks
+the host's Ollama for the configured models, the API — which waits for both,
+then creates its Qdrant collection and starts the decay scheduler from its own
+FastAPI lifespan hook — and the web UI. There is no separate migrate, init or
+model-pull step.
 
 **Belief graph: <http://localhost:3000>**
 
 API docs: <http://localhost:8000/docs> · Qdrant dashboard:
 <http://localhost:6333/dashboard>
 
-> First start pulls a ~5 GB model. `docker compose logs -f ollama-init` shows
-> progress.
+> The first start pulls ~6 GB of models into your Ollama if they are not there
+> already. `docker compose logs -f models` shows progress.
 
 Then watch it handle a reversed decision end to end:
 
@@ -85,7 +89,7 @@ Then watch it handle a reversed decision end to end:
 cd continuum-be && uv run python scripts/seed_demo.py
 ```
 
-To point at Groq or a hosted vLLM instead of the bundled Ollama, copy
+To point the LLM at Groq or a hosted vLLM instead of your local Ollama, copy
 [`.env.example`](.env.example) to `.env` at this root — compose reads it and
 overrides its defaults.
 
@@ -124,18 +128,21 @@ ingest (note / transcript)
    │
    ▼  embed the batch once; reuse each vector for lookup AND write
    │
-   ├─ score ≥ 0.94 ..................... duplicate     → reinforce, write nothing
+   ├─ near-identical score ............. duplicate     → reinforce, write nothing
+   │     └─ unless a number, date, name or negation changed → judged instead
    ├─ different category / subject ..... new           → free, no LLM call
    ├─ either side is an event .......... new           → free, no LLM call
-   └─ score ≥ 0.78, same kind .......... judge (one LLM call)
-         ├─ supersedes, conf ≥ 0.80 .... SUPERSEDES    → write edges, retire old
-         ├─ supersedes, conf < 0.80 .... CONFLICT      → escalate to a human ★
+   └─ related, same kind ............... judge (one LLM call)
+         ├─ supersedes, p ≥ 0.80 ....... SUPERSEDES    → write edges, retire old
+         ├─ supersedes, p < 0.80 ....... CONFLICT      → escalate to a human ★
          ├─ conflict ................... CONFLICT      → escalate to a human
          └─ independent ................ store, no edges
 ```
 
 Every failure path escalates. A judge timeout, an unparseable response, an
-unknown verdict — none of them can retire a memory.
+unknown verdict — none of them can retire a memory. `p` is the model's own token
+probability for its verdict, not a number it wrote; the similarity bands are
+calibrated per embedding model against the evaluation corpus.
 
 Retrieval then ranks by `similarity × confidence × recency`, and **contradicted
 memories are deliberately still retrieved**. When two beliefs disagree, the
@@ -164,14 +171,14 @@ land in an inbox with three verdicts, one of which is *both are true*.
 | **4 — Belief graph UI** | ✅ | `continuum-fe`: Three.js force-directed graph off `/memories/graph`, provenance panel, contradiction inbox, streaming chat |
 | **5 — Evaluation** | ✅ | 28-case labelled corpus; belief-loss, stale-belief and merge-loss measured separately; a gate sweep that replays one recorded run at every threshold for free |
 
-Backend: 126 tests. Frontend: 40. Neither needs a running service.
+Backend: 207 tests. Frontend: 40. Neither needs a running service.
 
 ---
 
 ## Stack
 
 **Backend** — FastAPI · uv · Qdrant · any OpenAI-compatible LLM (Ollama / vLLM /
-Groq) · `nomic-embed-text` embeddings · structlog · APScheduler.
+Groq) · `bge-m3` embeddings · structlog · APScheduler.
 
 **Frontend** — React 19 · TypeScript · Vite · Tailwind v4 · shadcn-style
 primitives · Three.js via `react-force-graph-3d` · vitest.

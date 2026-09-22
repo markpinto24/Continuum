@@ -12,14 +12,17 @@
     # just check the embedding model can tell your entities apart
     uv run python scripts/run_eval.py --preflight
 
+    # derive the two cosine thresholds for the configured embedding model
+    EMBEDDING_MODEL=all-minilm EMBEDDING_DIM=384 uv run python scripts/run_eval.py --calibrate
+
 The split matters. Resolution needs a judge call per ambiguous case, which is the
 slow and non-deterministic part; the gate sweep needs none, because the recorded
 outcome holds the judge's answer from *before* the gate was applied. Run the
 corpus once, then argue about the dial with arithmetic.
 
-Requires a reachable LLM and embedding endpoint (the bundled Ollama is fine):
+Requires a reachable LLM and embedding endpoint — the host's Ollama by default:
 
-    docker compose up -d qdrant ollama ollama-init      # from the repo root
+    ollama pull qwen2.5:7b-instruct && ollama pull bge-m3
 """
 
 from __future__ import annotations
@@ -35,6 +38,8 @@ from continuum.clients.llm import LLMClient
 from continuum.config import get_settings
 from continuum.core.logging import configure_logging
 from continuum.evaluation import corpus, metrics, report
+from continuum.evaluation.calibrate import calibrate, render_calibration
+from continuum.evaluation.crowded import load_crowded, render_crowded, run_crowded
 from continuum.evaluation.extraction import score_extraction
 from continuum.evaluation.preflight import render_preflight, run_preflight
 from continuum.evaluation.runner import ResolutionRunner
@@ -166,6 +171,16 @@ async def main() -> None:
         "--preflight", action="store_true", help="Only check the embedding model, then stop."
     )
     parser.add_argument(
+        "--crowded",
+        action="store_true",
+        help="Check the resolver judges the right memory in crowded graphs. Embeddings only.",
+    )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Derive both cosine thresholds for the configured embedding model. No LLM calls.",
+    )
+    parser.add_argument(
         "--force", action="store_true", help="Run even if the embedding preflight fails."
     )
     args = parser.parse_args()
@@ -178,6 +193,24 @@ async def main() -> None:
             sys.exit(0 if await check_embedding(llm) else 1)
         finally:
             await llm.aclose()
+
+    if args.crowded:
+        llm = LLMClient(get_settings())
+        try:
+            _rule("CROWDED GRAPHS — is the right memory the one that gets judged?")
+            print(render_crowded(await run_crowded(llm, load_crowded())))
+        finally:
+            await llm.aclose()
+        return
+
+    if args.calibrate:
+        llm = LLMClient(get_settings())
+        try:
+            _rule("CALIBRATION — thresholds this embedding model needs")
+            print(render_calibration(await calibrate(llm, corpus.load_resolution_cases())))
+        finally:
+            await llm.aclose()
+        return
 
     if args.extraction:
         await run_extraction(args.baseline)

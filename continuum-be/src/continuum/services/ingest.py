@@ -26,6 +26,7 @@ from continuum.models.schemas import IngestRequest, IngestResponse, ResolutionRe
 from continuum.services.extraction import FactExtractor
 from continuum.services.memory_store import MemoryStore
 from continuum.services.resolution import Resolution, ResolutionService, Verdict
+from continuum.services.subjects import canonical_subject
 
 log = structlog.get_logger(__name__)
 
@@ -54,6 +55,24 @@ class IngestService:
         if not facts:
             log.info("ingest.no_facts")
             return IngestResponse(source_id=source_id, extracted=0)
+
+        # Snap each subject onto the slug the graph already uses for that
+        # entity, before embedding: the subject filter compares slugs exactly,
+        # and the `[subject]` prefix is part of the embedded text. Facts earlier
+        # in this batch count as known too, so one note cannot introduce two
+        # spellings of the same thing.
+        known = await self.memories.distinct_subjects(user_id=request.user_id)
+        renamed = 0
+        for fact in facts:
+            canonical = canonical_subject(fact.subject, known)
+            if canonical != fact.subject:
+                renamed += 1
+                fact.subject = canonical
+            if fact.subject:
+                known.add(fact.subject)
+        if renamed:
+            # A count only: subject slugs are user data.
+            log.info("ingest.subjects_canonicalised", count=renamed)
 
         candidates = [
             fact.to_memory(
