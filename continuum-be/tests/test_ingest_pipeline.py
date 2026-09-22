@@ -8,6 +8,7 @@ it reaches a running stack.
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 from qdrant_client import AsyncQdrantClient
@@ -86,6 +87,10 @@ class StubLLM:
         batch = self.scripted[min(self.calls, len(self.scripted) - 1)]
         self.calls += 1
         return {"memories": batch}
+
+    async def complete_json_with_logprobs(self, *, system: str, user: str, **kwargs):  # noqa: ARG002
+        payload = await self.complete_json(system=system, user=user)
+        return payload, json.dumps(payload), None
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [_deterministic_vector(t) for t in texts]
@@ -337,3 +342,52 @@ async def test_resolution_records_are_returned_for_audit(store, settings):
     record = result.resolutions[0]
     assert record.verdict == "new"
     assert record.memory_id == result.created[0].id
+
+
+async def test_two_spellings_of_one_subject_are_still_judged_against_each_other(store, settings):
+    """`atlas-project` then `atlas`: before canonicalisation the subject filter treated
+    them as different entities and the reversal was stored as NEW — never judged."""
+    postgres = {"content": "Atlas uses Postgres", "category": "decision",
+                "subject": "atlas-project"}
+    mongo = {"content": "Atlas uses Mongo", "category": "decision", "subject": "atlas"}
+    llm = StubLLM(
+        [[postgres], [mongo]],
+        judgement={"relation": "supersedes", "confidence": 0.95, "reason": "later choice"},
+    )
+    service = build_service(store, llm, settings)
+    memories = MemoryStore(store, llm, settings)  # type: ignore[arg-type]
+
+    first = (await service.ingest(IngestRequest(user_id="mark", text="a"))).created[0]
+    second = await service.ingest(IngestRequest(user_id="mark", text="b"))
+
+    assert llm.judge_calls == 1
+    assert second.superseded == [first.id]
+    assert second.created[0].subject == "atlas-project"   # the graph's existing spelling
+    old = await memories.get(first.id)
+    assert old is not None and old.status is MemoryStatus.SUPERSEDED
+
+
+async def test_one_note_cannot_introduce_two_spellings(store, settings):
+    llm = StubLLM([[
+        {"content": "Acme prefers async updates", "category": "preference", "subject": "acme"},
+        {"content": "Acme budget is 5k", "category": "constraint", "subject": "acme-corp"},
+    ]])
+    service = build_service(store, llm, settings)
+
+    result = await service.ingest(IngestRequest(user_id="mark", text="notes"))
+
+    assert {m.subject for m in result.created} == {"acme"}
+
+
+async def test_subjects_are_scoped_per_user(store, settings):
+    """Another user's slug must never become this user's canonical spelling."""
+    llm = StubLLM([
+        [{"content": "Atlas uses Postgres", "category": "decision", "subject": "atlas-project"}],
+        [{"content": "Atlas uses Mongo", "category": "decision", "subject": "atlas"}],
+    ])
+    service = build_service(store, llm, settings)
+
+    await service.ingest(IngestRequest(user_id="someone-else", text="a"))
+    mine = await service.ingest(IngestRequest(user_id="mark", text="b"))
+
+    assert mine.created[0].subject == "atlas"

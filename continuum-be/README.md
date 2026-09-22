@@ -43,8 +43,8 @@ call. Unused memories decay rather than persist.
                      ▼
         ┌────────────────────────┐
         │   Triage (Phase 1)     │  cosine bands against existing memories:
-        │   → Resolver (Phase 2) │    ≥0.94 duplicate   → reinforce
-        └────────────┬───────────┘    ≥0.78 conflict    → resolve / escalate
+        │   → Resolver (Phase 2) │    ≥0.86 duplicate   → reinforce (guarded)
+        └────────────┬───────────┘    ≥0.45 conflict    → resolve / escalate
                      │                 else  new        → create
                      ▼
         ┌────────────────────────┐
@@ -91,7 +91,7 @@ A memory carries far more than its text:
 | Packaging | uv |
 | Vector DB | Qdrant (Docker) |
 | LLM | Any OpenAI-compatible endpoint — Ollama, vLLM, Groq, Together |
-| Embeddings | `nomic-embed-text` via Ollama (768-dim) |
+| Embeddings | `bge-m3` via Ollama (1024-dim). Switching model re-embeds automatically |
 | Extraction | Mem0-inspired, domain-tuned prompt |
 | Logging | structlog |
 
@@ -111,10 +111,17 @@ Swapping providers is an `.env` change — no code touches required.
 docker compose up -d --build        # from the repo root
 ```
 
-That brings up Qdrant, Ollama, a one-shot job that pulls the models, and the API.
-The API waits for Qdrant to report healthy and for the model pull to finish, then
-creates its Qdrant collection and starts the decay scheduler from inside its own
-FastAPI lifespan hook.
+That brings up Qdrant, a one-shot job that makes sure the host's Ollama has the
+configured models, the API and the web UI. The API waits for Qdrant to report
+healthy and for the models to be ready, then creates its Qdrant collection —
+re-embedding every memory if the embedding model changed — and starts the decay
+scheduler from inside its own FastAPI lifespan hook.
+
+**Ollama runs on the host, not in a container.** A containerised Ollama keeps
+its own copy of every model; on a machine that already runs Ollama that was a
+5.5 GB image and 6.1 GB of duplicated models. The containers reach the host
+daemon as `host.docker.internal`, so Ollama must listen beyond loopback — the
+Linux installer's default (`*:11434`). Set `OLLAMA_URL` to use another daemon.
 
 There is no separate migrate, init or model-pull step to run by hand.
 
@@ -126,8 +133,8 @@ docker compose down -v    # wipes them
 
 API docs: <http://localhost:8000/docs> · Qdrant dashboard: <http://localhost:6333/dashboard>
 
-> First start pulls a ~5 GB model, so give it a few minutes. `docker compose logs
-> -f ollama-init` shows the progress.
+> If the models are not in your Ollama yet, the first start pulls ~6 GB.
+> `docker compose logs -f models` shows the progress.
 
 ### Using a hosted LLM instead
 
@@ -140,17 +147,18 @@ LLM_API_KEY=gsk_...
 LLM_MODEL=llama-3.3-70b-versatile
 ```
 
-Embeddings still come from the bundled Ollama unless you override
-`EMBEDDING_BASE_URL` too. If you change the embedding model, set `EMBEDDING_DIM`
-to match and recreate the collection — vector size is fixed at creation.
+Embeddings still come from your Ollama unless you override `EMBEDDING_BASE_URL`
+too. Changing the embedding model is safe: set `EMBEDDING_DIM` to match, and on
+the next start every memory is re-embedded into a collection for the new model.
+Nothing is deleted, and switching back works.
 
 ### Developing with reload
 
 Run the dependencies in Docker and the API on the host:
 
 ```bash
-# repo root — dependencies only
-docker compose up -d qdrant ollama ollama-init
+# repo root — dependencies only (Ollama is already on the host)
+docker compose up -d qdrant
 
 # continuum-be/ — the API on the host
 cd continuum-be
@@ -168,7 +176,7 @@ gitignored.
 
 ```bash
 # from continuum-be/
-uv run pytest                      # 126 tests, no services needed
+uv run pytest                      # 207 tests, no services needed
 uv run ruff check .
 uv run python scripts/seed_demo.py # full pipeline against the running stack
 ```
@@ -206,16 +214,22 @@ curl -X POST localhost:8000/api/v1/ingest \
 ## The resolution pipeline
 
 ```
-score ≥ 0.94 ..................... duplicate     → reinforce, write nothing
+score ≥ 0.86 ..................... duplicate     → reinforce, write nothing
+  └─ unless a number, date, name or negation differs → judged instead
 different category ............... new           → free, no LLM call
 different subject ................ new           → free, no LLM call
 either side is an event .......... new           → free, no LLM call
-score ≥ 0.78, same kind .......... judge (LLM)
-      ├─ supersedes, conf ≥ 0.80 .. SUPERSEDES   → write edges, retire old
-      ├─ supersedes, conf < 0.80 .. CONFLICT     → escalate to a human ★
+score ≥ 0.45, same kind .......... judge (LLM, reason before verdict)
+      ├─ supersedes, p ≥ 0.80 ..... SUPERSEDES   → write edges, retire old
+      ├─ supersedes, p < 0.80 ..... CONFLICT     → escalate to a human ★
       ├─ conflict ................. CONFLICT     → escalate to a human
       └─ independent .............. store, no edges
 ```
+
+The bands (0.86 / 0.45) are bge-m3's, derived by `run_eval.py --calibrate`;
+another embedding model gets its own pair from `CALIBRATED_THRESHOLDS`. `p` is
+the judge's token probability for its verdict — the confidence it *writes* is
+canned on a 7B model and was leaving the gate inert.
 
 ★ **`AUTO_SUPERSEDE_CONFIDENCE` is the most consequential setting in the
 project.** Raise it and you escalate more; lower it and you silently lose
@@ -290,9 +304,12 @@ read-only chat.
 replaces that with a number.
 
 ```bash
-docker compose up -d qdrant ollama ollama-init    # repo root
+docker compose up -d qdrant    # repo root; Ollama runs on the host
 cd continuum-be
 
+uv run python scripts/run_eval.py --preflight             # can the embedder see a swap?
+uv run python scripts/run_eval.py --calibrate             # which bands does it need?
+uv run python scripts/run_eval.py --crowded               # right memory judged when crowded?
 uv run python scripts/run_eval.py --record eval-run.json   # one slow pass
 uv run python scripts/run_eval.py --replay eval-run.json   # free, repeatable
 ```

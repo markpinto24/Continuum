@@ -18,6 +18,14 @@ to it.
 No judge prompt and no gate value can recover from that, so the resolution
 metrics are not worth reading until this check passes. It runs first, and it
 reports rather than assumes.
+
+Since the duplicate guard landed, a swap that merely scores *high* is not
+disqualifying on its own: the guard reads the words, sees "Postgres" vs
+"MongoDB", and sends the pair to the judge whatever the cosine. Two things still
+are. A **blind** pair — vectors effectively identical — means retrieval cannot
+tell the entities apart either, so a question about MongoDB surfaces the
+Postgres memory at equal rank. An **unsafe** pair — inside the duplicate band
+with no difference the guard can see — would still be silently discarded.
 """
 
 from __future__ import annotations
@@ -25,6 +33,10 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from continuum.clients.llm import LLMClient
+from continuum.services.resolution import material_difference
+
+#: At or above this the two vectors are, for retrieval purposes, the same point.
+BLIND_COSINE = 0.99
 
 #: Minimal pairs: one entity swapped, everything else held constant. Each pair
 #: MUST land well below the duplicate threshold, or the swap is invisible.
@@ -55,6 +67,9 @@ class PairScore(BaseModel):
     identical: bool = Field(
         ..., description="Byte-identical vectors — the model saw no difference at all."
     )
+    guarded: bool = Field(
+        default=False, description="The duplicate guard sees a material difference in the words."
+    )
 
 
 class PreflightReport(BaseModel):
@@ -65,12 +80,28 @@ class PreflightReport(BaseModel):
 
     @property
     def blind_pairs(self) -> list[PairScore]:
-        """Entity swaps the model cannot see — scored at or above the duplicate band."""
-        return [p for p in self.entity_pairs if p.cosine >= self.duplicate_threshold]
+        """Entity swaps the embedding cannot see at all. Retrieval is blind to these too."""
+        return [p for p in self.entity_pairs if p.identical or p.cosine >= BLIND_COSINE]
+
+    @property
+    def unsafe_pairs(self) -> list[PairScore]:
+        """In the duplicate band with nothing for the guard to catch: silently discarded."""
+        return [
+            p for p in self.entity_pairs
+            if p.cosine >= self.duplicate_threshold and not p.guarded
+        ]
+
+    @property
+    def guard_dependent_pairs(self) -> list[PairScore]:
+        """In the duplicate band, but saved by the guard. Fine — worth knowing."""
+        return [
+            p for p in self.entity_pairs
+            if p.cosine >= self.duplicate_threshold and p.guarded and p not in self.blind_pairs
+        ]
 
     @property
     def usable(self) -> bool:
-        return not self.blind_pairs
+        return not self.blind_pairs and not self.unsafe_pairs
 
 
 async def run_preflight(llm: LLMClient, duplicate_threshold: float) -> PreflightReport:
@@ -87,7 +118,12 @@ async def run_preflight(llm: LLMClient, duplicate_threshold: float) -> Preflight
 async def _score(llm: LLMClient, label: str, left: str, right: str) -> PairScore:
     a, b = await llm.embed([left, right])
     return PairScore(
-        label=label, left=left, right=right, cosine=round(cosine(a, b), 4), identical=a == b
+        label=label,
+        left=left,
+        right=right,
+        cosine=round(cosine(a, b), 4),
+        identical=a == b,
+        guarded=bool(material_difference(left, right)),
     )
 
 
@@ -102,11 +138,22 @@ def render_preflight(report: PreflightReport) -> str:
         f"  embedding model: {report.embedding_model}",
         f"  duplicate threshold: {report.duplicate_threshold:.2f}",
         "",
-        "  entity swaps — these MUST score well below the duplicate threshold",
+        "  entity swaps — must not be blind, and must not be both in the duplicate",
+        "  band AND invisible to the duplicate guard",
     ]
+    blind = {id(p) for p in report.blind_pairs}
+    unsafe = {id(p) for p in report.unsafe_pairs}
+    leaning = {id(p) for p in report.guard_dependent_pairs}
     for pair in report.entity_pairs:
-        flag = "  <-- BLIND" if pair.cosine >= report.duplicate_threshold else ""
         identical = " (byte-identical vectors)" if pair.identical else ""
+        if id(pair) in blind:
+            flag = "  <-- BLIND"
+        elif id(pair) in unsafe:
+            flag = "  <-- UNSAFE: duplicate band, guard sees nothing"
+        elif id(pair) in leaning:
+            flag = "  (in the duplicate band; the guard catches it)"
+        else:
+            flag = ""
         lines.append(f"    {pair.cosine:.4f}  {pair.label:<12}{identical}{flag}")
 
     lines += ["", "  paraphrases — these should stay high"]
@@ -115,16 +162,22 @@ def render_preflight(report: PreflightReport) -> str:
 
     if report.usable:
         lines += ["", "  OK — the model can tell these entities apart."]
-    else:
-        blind = ", ".join(p.label for p in report.blind_pairs)
+        return "\n".join(lines)
+
+    lines.append("")
+    if report.blind_pairs:
+        names = ", ".join(p.label for p in report.blind_pairs)
         lines += [
-            "",
-            f"  UNUSABLE — {len(report.blind_pairs)} entity swap(s) invisible: {blind}.",
-            "",
-            "  A swap at or above the duplicate threshold is classified a DUPLICATE:",
-            "  the old belief is reinforced and the contradicting fact is discarded",
-            "  without ever reaching the judge. No gate value fixes this.",
-            "",
-            "  The resolution numbers below are not meaningful until this passes.",
+            f"  UNUSABLE — {len(report.blind_pairs)} entity swap(s) invisible: {names}.",
+            "  The vectors are effectively identical, so retrieval cannot tell these",
+            "  entities apart: a question about one surfaces the other at equal rank.",
+            "  The duplicate guard protects ingest, but it cannot fix the ranking.",
         ]
+    if report.unsafe_pairs:
+        names = ", ".join(p.label for p in report.unsafe_pairs)
+        lines += [
+            f"  UNSAFE — {names}: inside the duplicate band with no difference the",
+            "  guard can see. These would be classified DUPLICATE and discarded.",
+        ]
+    lines += ["", "  The resolution numbers below are not meaningful until this passes."]
     return "\n".join(lines)

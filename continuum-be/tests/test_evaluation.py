@@ -12,6 +12,8 @@ gate.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from continuum.evaluation import metrics
@@ -379,6 +381,10 @@ class StubJudgeLLM:
         self.judge_calls += 1
         return self.judgement
 
+    async def complete_json_with_logprobs(self, *, system: str, user: str, **kwargs):  # noqa: ARG002
+        payload = await self.complete_json(system=system, user=user)
+        return payload, json.dumps(payload), None
+
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._vector(t) for t in texts]
 
@@ -588,3 +594,122 @@ def test_cosine_handles_a_zero_vector_without_dividing_by_zero():
     from continuum.evaluation.preflight import cosine
 
     assert cosine([0.0, 0.0], [1.0, 1.0]) == 0.0
+
+
+def _pair(label: str, cosine: float, *, guarded: bool, identical: bool = False):
+    from continuum.evaluation.preflight import PairScore
+
+    return PairScore(
+        label=label, left="a", right="b", cosine=cosine, identical=identical, guarded=guarded
+    )
+
+
+def _report(*pairs):
+    from continuum.evaluation.preflight import PreflightReport
+
+    return PreflightReport(
+        embedding_model="m", duplicate_threshold=0.86, entity_pairs=list(pairs), paraphrase_pairs=[]
+    )
+
+
+def test_a_high_score_the_guard_catches_does_not_fail_preflight():
+    """mxbai scores Postgres/MongoDB at 0.91: above its band, and harmless — the guard
+    reads the names."""
+    report = _report(_pair("datastore", 0.91, guarded=True))
+
+    assert report.usable
+    assert [p.label for p in report.guard_dependent_pairs] == ["datastore"]
+
+
+def test_a_high_score_the_guard_cannot_see_is_unsafe():
+    report = _report(_pair("vocabulary-only", 0.93, guarded=False))
+
+    assert not report.usable
+    assert [p.label for p in report.unsafe_pairs] == ["vocabulary-only"]
+
+
+def test_effectively_identical_vectors_fail_even_when_guarded():
+    """The guard protects ingest; nothing protects retrieval ranking from a blind model."""
+    report = _report(_pair("datastore", 0.995, guarded=True))
+
+    assert not report.usable
+    assert [p.label for p in report.blind_pairs] == ["datastore"]
+
+
+# --- Threshold calibration ----------------------------------------------------
+
+
+def _sim(case_id, expect, cosine, *, comparable=True, guarded=False):
+    from continuum.evaluation.calibrate import PairSimilarity
+
+    return PairSimilarity(
+        case_id=case_id, expect=expect, cosine=cosine, comparable=comparable, guarded=guarded
+    )
+
+
+def test_conflict_band_reaches_below_the_lowest_pair_that_must_be_judged():
+    from continuum.evaluation.calibrate import CONFLICT_MARGIN, derive
+
+    cal = derive("m", [
+        _sim("reversal", Action.RETIRE, 0.62),
+        _sim("narrowing", Action.ESCALATE, 0.55),
+        _sim("unrelated", Action.STORE, 0.10),     # store pairs never drag the band down
+    ])
+
+    assert cal.conflict_threshold == pytest.approx(round(0.55 - CONFLICT_MARGIN, 2), abs=0.011)
+    assert cal.conflict_threshold <= 0.55
+
+
+def test_an_unreachable_pair_does_not_drag_the_conflict_band_down():
+    """A different-subject pair is decided by the filter whatever its score."""
+    from continuum.evaluation.calibrate import derive
+
+    cal = derive("m", [
+        _sim("reachable", Action.RETIRE, 0.70),
+        _sim("other-subject", Action.ESCALATE, 0.20, comparable=False),
+    ])
+
+    assert cal.conflict_threshold > 0.6
+    assert cal.unreachable == ["other-subject"]
+
+
+def test_duplicate_band_sits_above_every_non_duplicate_the_guard_cannot_see():
+    from continuum.evaluation.calibrate import derive
+
+    cal = derive("m", [
+        _sim("vocab-only-reversal", Action.RETIRE, 0.89, guarded=False),
+        _sim("number-swap", Action.RETIRE, 0.97, guarded=True),   # the guard saves this one
+        _sim("real-dup", Action.REINFORCE, 0.95),
+    ])
+
+    assert cal.duplicate_threshold > 0.89
+    assert cal.duplicate_threshold < 0.95   # the guarded 0.97 does not push it up
+
+
+def test_duplicates_below_the_band_are_reported_not_hidden():
+    """The safe direction — a judge call instead of a free reinforce — but it is named."""
+    from continuum.evaluation.calibrate import derive
+
+    cal = derive("m", [
+        _sim("vocab-only-reversal", Action.RETIRE, 0.92),
+        _sim("real-dup", Action.REINFORCE, 0.90),
+    ])
+
+    assert cal.duplicates_needing_judge == ["real-dup"]
+
+
+def test_the_duplicate_band_always_sits_above_the_conflict_band():
+    from continuum.evaluation.calibrate import derive
+
+    cal = derive("m", [_sim("reversal", Action.RETIRE, 0.90), _sim("x", Action.STORE, 0.10)])
+
+    assert cal.duplicate_threshold > cal.conflict_threshold
+
+
+def test_a_policy_escalation_is_never_promoted_by_a_lower_gate():
+    """Replaying at gate 0.5 must not 'retire' something policy refused to retire."""
+    forced = CaseOutcome(
+        case_id="x", expect=Action.ESCALATE, verdict=Verdict.CONFLICT, action=Action.ESCALATE,
+        judge_relation=Verdict.SUPERSEDES, judge_confidence=1.0, gate=0.8, forced_escalation=True,
+    )
+    assert metrics.replay(forced, 0.5) is Action.ESCALATE

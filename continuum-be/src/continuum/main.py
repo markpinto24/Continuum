@@ -21,6 +21,7 @@ from continuum.services.decay import DecayService
 from continuum.services.extraction import FactExtractor
 from continuum.services.ingest import IngestService
 from continuum.services.memory_store import MemoryStore
+from continuum.services.reindex import EmbeddingMigration
 from continuum.services.resolution import ResolutionService
 from continuum.services.retrieval import RetrievalService
 
@@ -58,6 +59,10 @@ async def lifespan(app: FastAPI):
     llm = LLMClient(settings)
     qdrant = QdrantStore(settings)
     await qdrant.ensure_collection()
+    # Re-embed from the previously active collection if the embedding model
+    # changed. Runs before the API reports healthy, so compose's depends_on
+    # holds traffic until the memories are all in the new vector space.
+    migration = await EmbeddingMigration(qdrant, llm).run()
 
     memories = MemoryStore(qdrant, llm, settings)
     extractor = FactExtractor(llm)
@@ -88,7 +93,8 @@ async def lifespan(app: FastAPI):
         environment=settings.environment,
         llm_model=settings.llm_model,
         embedding_model=settings.embedding_model,
-        collection=settings.qdrant_collection,
+        collection=qdrant.collection,
+        reindexed=migration.memories if migration.migrated else 0,
         decay_enabled=settings.decay_enabled,
         auto_supersede_gate=settings.auto_supersede_confidence,
     )

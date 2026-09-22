@@ -1,0 +1,855 @@
+[
+  {
+    "case_id": "db-swap-explicit",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "decision"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9963175394793751,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.834717090866269,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the storage from Postgres to MongoDB for Atlas."
+  },
+  {
+    "case_id": "comms-preference-flip",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "preference"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9997858801923275,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7783142397594978,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the preferred method of communication from calls to written updates."
+  },
+  {
+    "case_id": "budget-cap-raised",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "constraint"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999924955998,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.9684813175182773,
+    "gate": 0.8,
+    "reason": "The new budget amount replaces the old one for Acme. [scored 0.968 against an existing memory, but 5k, 8k differ]"
+  },
+  {
+    "case_id": "runtime-migration",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "fact"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9646208999910969,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.8817938588919502,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the runtime environment of the billing service from ECS to EKS. [scored 0.882 against an existing memory, but ECS, EKS differ]"
+  },
+  {
+    "case_id": "role-change-explicit",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "person"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999918288314,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.849291936589091,
+    "gate": 0.8,
+    "reason": "The NEW statement provides updated information about Sara's role, replacing the previous claim."
+  },
+  {
+    "case_id": "deadline-moved",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "constraint"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999891050168,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.8427312029243568,
+    "gate": 0.8,
+    "reason": "The new date replaces the old one for the same event."
+  },
+  {
+    "case_id": "vendor-dropped",
+    "expect": "retire",
+    "tags": [
+      "reversal",
+      "decision"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999936017814,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.6658325885348568,
+    "gate": 0.8,
+    "reason": "The NEW statement replaces the choice of Auth0 with a new decision to handle authentication in-house."
+  },
+  {
+    "case_id": "narrowing-qualifier",
+    "expect": "escalate",
+    "tags": [
+      "narrowing",
+      "decision",
+      "flagship"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999991030681241,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.6515934692623193,
+    "gate": 0.8,
+    "reason": "The NEW statement narrows the purpose of Postgres as used by Atlas."
+  },
+  {
+    "case_id": "tool-split-by-work-type",
+    "expect": "escalate",
+    "tags": [
+      "partial-scope",
+      "fact"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.515353484558295,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7278137771213723,
+    "gate": 0.8,
+    "reason": "The new information specifies a different tool than the existing one."
+  },
+  {
+    "case_id": "ownership-handover-or-shared",
+    "expect": "escalate",
+    "tags": [
+      "ownership",
+      "person",
+      "flagship"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999996541824946,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.7787475292070398,
+    "gate": 0.8,
+    "reason": "The NEW statement changes ownership of the billing service from Sara to Raj. (a new name for a role that is often shared, and nothing says the earlier person stopped \u2014 escalated)"
+  },
+  {
+    "case_id": "rule-with-exception",
+    "expect": "escalate",
+    "tags": [
+      "exception",
+      "constraint"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999899059100591,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.6733796712479321,
+    "gate": 0.8,
+    "reason": "The NEW statement provides an exception to the rule in the EXISTING memory."
+  },
+  {
+    "case_id": "one-off-or-new-baseline",
+    "expect": "escalate",
+    "tags": [
+      "partial-scope",
+      "constraint"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.999950132740946,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7218741545291006,
+    "gate": 0.8,
+    "reason": "The new statement provides a specific budget approval that contradicts the existing cap."
+  },
+  {
+    "case_id": "standard-with-carve-out",
+    "expect": "escalate",
+    "tags": [
+      "exception",
+      "decision"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9999191528650667,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.4863167550424118,
+    "gate": 0.8,
+    "reason": "The new statement specifies a different cloud provider for a specific workload while the existing memory is about the overall standardisation."
+  },
+  {
+    "case_id": "degree-not-direction",
+    "expect": "escalate",
+    "tags": [
+      "narrowing",
+      "preference"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9505143820974632,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.8308523093285101,
+    "gate": 0.8,
+    "reason": "The NEW statement provides a specific limit on the duration of meetings that Acme dislikes, which is more restrictive than the general dislike for long meetings in the EXISTING memory."
+  },
+  {
+    "case_id": "reworded-preference",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "preference"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.87739202197688,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.877)"
+  },
+  {
+    "case_id": "same-fact-shorter",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "fact"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.9516789100121434,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.952)"
+  },
+  {
+    "case_id": "restated-decision-with-reason",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "decision"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": "duplicate",
+    "judge_confidence": 0.9998272072621497,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.9623694727822277,
+    "gate": 0.8,
+    "reason": "The new statement reiterates the reason for choosing Postgres over Mongo, which is identical to the existing memory. [scored 0.962 against an existing memory, but Chose differ]"
+  },
+  {
+    "case_id": "complementary-stack-slot",
+    "expect": "store",
+    "tags": [
+      "complementary",
+      "decision"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9999002848222969,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.6320793329569747,
+    "gate": 0.8,
+    "reason": "The NEW statement changes how Atlas handles data but does not affect its storage of events in Postgres."
+  },
+  {
+    "case_id": "two-shipments",
+    "expect": "store",
+    "tags": [
+      "immutable-history",
+      "event",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.8029834985799815,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "event-cannot-be-superseded-by-decision",
+    "expect": "store",
+    "tags": [
+      "immutable-history",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.506069778285234,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "same-words-different-project",
+    "expect": "store",
+    "tags": [
+      "different-subject",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.6279673764517646,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "different-category-same-client",
+    "expect": "store",
+    "tags": [
+      "different-category",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.5186651413252992,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "unrelated-fact",
+    "expect": "store",
+    "tags": [
+      "unrelated",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": null,
+    "gate": 0.8,
+    "reason": "no similar memories"
+  },
+  {
+    "case_id": "two-people-two-services",
+    "expect": "store",
+    "tags": [
+      "different-subject",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.6291126003097176,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "reason-added-to-decision",
+    "expect": "store",
+    "tags": [
+      "complementary",
+      "decision",
+      "hard"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9990515975661591,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7037471043829743,
+    "gate": 0.8,
+    "reason": "The NEW statement provides a reason why Postgres is used for Atlas, which is additional information to the EXISTING memory."
+  },
+  {
+    "case_id": "role-contested-via-person-subject",
+    "expect": "escalate",
+    "tags": [
+      "known-gap",
+      "subject-filter",
+      "person"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.7802295139975522,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "constraint-contested-across-subjects",
+    "expect": "escalate",
+    "tags": [
+      "known-gap",
+      "subject-filter",
+      "constraint"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.6242066901317409,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "implicit-reversal-without-naming",
+    "expect": "retire",
+    "tags": [
+      "known-gap",
+      "retrieval-reach",
+      "hard"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999992802792753,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.6368042433554828,
+    "gate": 0.8,
+    "reason": "The new statement changes the storage choice from Postgres to a document store, conflicting with the existing memory."
+  },
+  {
+    "case_id": "staging-db-engine",
+    "expect": "retire",
+    "tags": [
+      "holdout",
+      "reversal",
+      "single-slot"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9997615549704589,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.8372086260758833,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the type of database running for the same subject."
+  },
+  {
+    "case_id": "release-cadence",
+    "expect": "retire",
+    "tags": [
+      "holdout",
+      "reversal",
+      "single-slot"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999890538711195,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.8623156918605531,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the frequency of releases from every two weeks to every week. [scored 0.862 against an existing memory, but now, two, week, weeks differ]"
+  },
+  {
+    "case_id": "primary-contact-changed",
+    "expect": "retire",
+    "tags": [
+      "holdout",
+      "reversal",
+      "single-slot",
+      "person"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.984153883781164,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.7830986944527071,
+    "gate": 0.8,
+    "reason": "The NEW statement updates who Acme's primary contact is."
+  },
+  {
+    "case_id": "explicit-handover",
+    "expect": "retire",
+    "tags": [
+      "holdout",
+      "reversal",
+      "person"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9996891155349704,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.7972542609240957,
+    "gate": 0.8,
+    "reason": "The NEW statement updates who is leading the mobile team."
+  },
+  {
+    "case_id": "api-default-version",
+    "expect": "retire",
+    "tags": [
+      "holdout",
+      "reversal",
+      "single-slot"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999869667316,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.9121834277956149,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the default version of the public API from v1 to v2. [scored 0.912 against an existing memory, but now, v1, v2 differ]"
+  },
+  {
+    "case_id": "second-reviewer",
+    "expect": "escalate",
+    "tags": [
+      "holdout",
+      "shared-role",
+      "person"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9962148453829087,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.760534715888386,
+    "gate": 0.8,
+    "reason": "The NEW statement introduces a different reviewer for auth pull requests than the EXISTING one."
+  },
+  {
+    "case_id": "second-maintainer",
+    "expect": "escalate",
+    "tags": [
+      "holdout",
+      "shared-role",
+      "person"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9993863812100314,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.801730833039697,
+    "gate": 0.8,
+    "reason": "The NEW statement changes who maintains the search indexer. (a new name for a role that is often shared, and nothing says the earlier person stopped \u2014 escalated)"
+  },
+  {
+    "case_id": "deploy-pipeline-carve-out",
+    "expect": "escalate",
+    "tags": [
+      "holdout",
+      "exception",
+      "partial-scope"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9999984333323897,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.6220352104165994,
+    "gate": 0.8,
+    "reason": "The new statement specifies a different deployment method for a different service."
+  },
+  {
+    "case_id": "rate-limit-tier",
+    "expect": "escalate",
+    "tags": [
+      "holdout",
+      "exception",
+      "partial-scope"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999935448241062,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.6918193161164252,
+    "gate": 0.8,
+    "reason": "The NEW statement provides an exception to the rate limit for a specific group of users."
+  },
+  {
+    "case_id": "standup-exception",
+    "expect": "escalate",
+    "tags": [
+      "holdout",
+      "exception",
+      "partial-scope"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999887640816685,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.6138045651942593,
+    "gate": 0.8,
+    "reason": "The new statement specifies an exception to the existing general rule about standups."
+  },
+  {
+    "case_id": "maintainer-of-another-component",
+    "expect": "store",
+    "tags": [
+      "holdout",
+      "different-subject",
+      "free-expected"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.7419582501228738,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "api-complementary-facts",
+    "expect": "store",
+    "tags": [
+      "holdout",
+      "complementary"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9992064397241319,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7220307265605891,
+    "gate": 0.8,
+    "reason": "The new information about the format of the public API does not contradict or replace the location information."
+  },
+  {
+    "case_id": "cadence-reworded",
+    "expect": "reinforce",
+    "tags": [
+      "holdout",
+      "duplicate"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": "duplicate",
+    "judge_confidence": 0.9997359807720192,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.8277971013163307,
+    "gate": 0.8,
+    "reason": "The new statement reiterates the existing information about the release schedule without any additional details or changes."
+  },
+  {
+    "case_id": "rotation-member",
+    "expect": "escalate",
+    "tags": [
+      "holdout2",
+      "shared-role",
+      "person"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.999999164707982,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.8130500521964293,
+    "gate": 0.8,
+    "reason": "The NEW statement changes who is on the payments on-call rotation. (a new name for a role that is often shared, and nothing says the earlier person stopped \u2014 escalated)"
+  },
+  {
+    "case_id": "second-design-reviewer",
+    "expect": "escalate",
+    "tags": [
+      "holdout2",
+      "shared-role",
+      "person"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9723939245939489,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.7813078796380108,
+    "gate": 0.8,
+    "reason": "The NEW statement introduces a different person reviewing design documents compared to the EXISTING one."
+  },
+  {
+    "case_id": "account-manager-no-longer",
+    "expect": "retire",
+    "tags": [
+      "holdout2",
+      "reversal",
+      "person"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.774784265228094,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.8165186032577713,
+    "gate": 0.8,
+    "reason": "The NEW statement contradicts the EXISTING one by specifying a change in responsibility. (judge confidence 0.77 below auto-resolve gate)"
+  },
+  {
+    "case_id": "team-lead-now",
+    "expect": "retire",
+    "tags": [
+      "holdout2",
+      "reversal",
+      "person"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999998030245325,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.6880636076116105,
+    "gate": 0.8,
+    "reason": "The NEW statement updates the leadership of the infra-team from Carl to Dina."
+  },
+  {
+    "case_id": "single-contact-without-marker",
+    "expect": "retire",
+    "tags": [
+      "holdout2",
+      "reversal",
+      "person",
+      "expected-cost"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999847291277,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.7850660995381826,
+    "gate": 0.8,
+    "reason": "The new information replaces who the QA contact is for Globex. (a new name for a role that is often shared, and nothing says the earlier person stopped \u2014 escalated)"
+  }
+]

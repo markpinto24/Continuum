@@ -41,9 +41,12 @@ class MemoryStore:
         Prefixing the subject keeps 'Sara owns billing' and 'Raj owns billing'
         far enough apart in vector space that the conflict band stays meaningful.
         """
-        if memory.subject:
-            return f"[{memory.subject}] {memory.content}"
-        return memory.content
+        return MemoryStore.embedding_text_for(memory.content, memory.subject)
+
+    @staticmethod
+    def embedding_text_for(content: str, subject: str | None) -> str:
+        """The format itself, usable on a raw payload without building a Memory."""
+        return f"[{subject}] {content}" if subject else content
 
     # --- Writes ------------------------------------------------------------
 
@@ -184,6 +187,10 @@ class MemoryStore:
         payloads = await self.store.get_many(memory_ids)
         memories = [Memory.from_payload(p) for p in payloads]
         return {m.id: m for m in memories}
+
+    async def distinct_subjects(self, *, user_id: str) -> set[str]:
+        """Subject slugs already in this user's graph — what canonicalisation snaps to."""
+        return await self.store.distinct_subjects(user_id=user_id)
 
     async def distinct_user_ids(self, limit: int = 10_000) -> list[str]:
         """Every user id present in the collection.

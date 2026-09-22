@@ -11,10 +11,11 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from continuum.config import Settings, get_settings
@@ -26,6 +27,15 @@ _JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 class LLMError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class TokenLogprob:
+    """One generated token, with the alternatives the model weighed at that position."""
+
+    token: str
+    logprob: float
+    top: tuple[tuple[str, float], ...]
 
 
 class LLMClient:
@@ -41,6 +51,7 @@ class LLMClient:
             api_key=self.settings.embedding_api_key,
             timeout=self.settings.llm_timeout_seconds,
         )
+        self._logprobs_unsupported = False
 
     # --- Chat --------------------------------------------------------------
 
@@ -112,6 +123,65 @@ class LLMClient:
             delta = chunk.choices[0].delta
             if delta and delta.content:
                 yield delta.content
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception_type(Exception),
+        reraise=True,
+    )
+    async def complete_json_with_logprobs(
+        self, *, system: str, user: str, top_logprobs: int = 5
+    ) -> tuple[Any, str, list[TokenLogprob] | None]:
+        """JSON completion plus per-token log-probabilities, where the provider has them.
+
+        Returns (parsed payload, raw text, tokens). `tokens` is None when the
+        provider does not support logprobs — the caller decides what that means;
+        this adapter only reports it. A provider that rejects the parameter
+        outright is remembered, so it costs one failed request, not one per call.
+        """
+        if self._logprobs_unsupported:
+            raw = await self.complete(system=system, user=user, json_mode=True)
+            return parse_json(raw), raw, None
+
+        try:
+            response = await self._chat.chat.completions.create(
+                model=self.settings.llm_model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=self.settings.llm_temperature,
+                max_tokens=self.settings.llm_max_tokens,
+                response_format={"type": "json_object"},
+                logprobs=True,
+                top_logprobs=top_logprobs,
+            )
+        except BadRequestError as exc:
+            log.warning("llm.logprobs_unsupported", error=str(exc))
+            self._logprobs_unsupported = True
+            raw = await self.complete(system=system, user=user, json_mode=True)
+            return parse_json(raw), raw, None
+
+        choice = response.choices[0]
+        raw = choice.message.content or ""
+        if not raw:
+            raise LLMError("LLM returned an empty completion")
+
+        content = choice.logprobs.content if choice.logprobs else None
+        tokens = (
+            [
+                TokenLogprob(
+                    token=t.token,
+                    logprob=t.logprob,
+                    top=tuple((a.token, a.logprob) for a in (t.top_logprobs or [])),
+                )
+                for t in content
+            ]
+            if content
+            else None
+        )
+        return parse_json(raw), raw, tokens
 
     # --- Embeddings --------------------------------------------------------
 

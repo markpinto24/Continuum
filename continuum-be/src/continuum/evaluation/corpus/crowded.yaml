@@ -1,0 +1,74 @@
+# Crowded graphs: does the resolver judge the RIGHT memory?
+#
+# The resolver judges only the single top-scoring comparable candidate. In a
+# graph holding several same-category memories about different entities, a new
+# fact with no subject competes on cosine alone — if the wrong entity scores
+# highest, the real contradiction is never judged. The resolution corpus cannot
+# see this: every case there has exactly one existing memory.
+#
+# Each scenario runs twice, with subjects as the extractor usually leaves them
+# (null) and as they should be. Only embeddings are used — no judge calls.
+# `target` is the index in `graph` of the memory the incoming fact contradicts.
+
+- id: three-client-budgets
+  graph:
+    - {content: "Acme's budget is capped at 5k per month", category: constraint, subject: acme}
+    - {content: "Globex's budget is capped at 7k per month", category: constraint, subject: globex}
+    - {content: "Initech's budget is capped at 3k per month", category: constraint, subject: initech}
+  incoming: {content: "Globex's budget is now capped at 9k per month", category: constraint, subject: globex}
+  target: 1
+
+- id: three-service-owners
+  graph:
+    - {content: "Sara owns the billing service", category: person, subject: billing-service}
+    - {content: "Raj owns the search service", category: person, subject: search-service}
+    - {content: "Mei owns the payments service", category: person, subject: payments-service}
+  incoming: {content: "Tom now owns the search service", category: person, subject: search-service}
+  target: 1
+
+- id: three-event-stores
+  graph:
+    - {content: "Atlas stores events in Postgres", category: decision, subject: atlas}
+    - {content: "Orion stores events in DynamoDB", category: decision, subject: orion}
+    - {content: "Vega stores events in Cassandra", category: decision, subject: vega}
+  incoming: {content: "Orion now stores events in MongoDB", category: decision, subject: orion}
+  target: 1
+
+- id: one-project-two-decisions
+  graph:
+    - {content: "Atlas uses Redis for caching", category: decision, subject: atlas}
+    - {content: "Atlas stores events in Postgres", category: decision, subject: atlas}
+  incoming: {content: "Atlas stores events in MongoDB", category: decision, subject: atlas}
+  target: 1
+
+- id: clients-with-similar-preferences
+  graph:
+    - {content: "Acme prefers a weekly status call", category: preference, subject: acme}
+    - {content: "Globex prefers a weekly status call", category: preference, subject: globex}
+    - {content: "Initech prefers email updates", category: preference, subject: initech}
+  incoming: {content: "Globex now prefers written async updates instead of calls", category: preference, subject: globex}
+  target: 1
+
+- id: deadlines-across-projects
+  graph:
+    - {content: "The Atlas launch is set for 14 March", category: constraint, subject: atlas}
+    - {content: "The Orion launch is set for 2 May", category: constraint, subject: orion}
+    - {content: "The Vega launch is set for 20 June", category: constraint, subject: vega}
+  incoming: {content: "The Orion launch has moved to 9 July", category: constraint, subject: orion}
+  target: 1
+
+- id: people-and-their-teams
+  graph:
+    - {content: "Sara leads the data platform", category: person, subject: sara}
+    - {content: "Raj leads the mobile team", category: person, subject: raj}
+    - {content: "Mei leads infrastructure", category: person, subject: mei}
+  incoming: {content: "Raj has moved off mobile and now leads the web team", category: person, subject: raj}
+  target: 1
+
+- id: limits-across-tiers
+  graph:
+    - {content: "The free tier is limited to 10 requests per second", category: constraint, subject: api}
+    - {content: "The pro tier is limited to 100 requests per second", category: constraint, subject: api}
+    - {content: "Enterprise is limited to 1000 requests per second", category: constraint, subject: api}
+  incoming: {content: "The pro tier is now limited to 200 requests per second", category: constraint, subject: api}
+  target: 1
