@@ -21,13 +21,12 @@ from __future__ import annotations
 
 import contextlib
 
-import structlog
-
 from continuum.clients.llm import LLMClient
 from continuum.config import Settings
+from continuum.core.logger import get_logger
 from continuum.models.memory import ExtractedFact, MemoryCategory
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 
 EXTRACTION_SYSTEM_PROMPT = """You extract durable work memories from text.

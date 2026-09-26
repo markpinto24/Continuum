@@ -59,6 +59,11 @@ be the UI deciding the very thing the backend escalated to you.
 - **Answers render as Markdown**: highlighted, language-labelled code blocks
   with a copy button, lists, bold. Model output is untrusted, so HTML it emits
   is shown as text rather than injected.
+- **Dictate instead of typing.** The microphone in the chat box records; your
+  own server transcribes it with a local Whisper model (never a cloud service)
+  and the text lands in the box for you to check before sending. Esc cancels.
+  Needs `localhost` or HTTPS — browsers only offer the microphone to secure pages.
+- **Read an answer aloud** with the button under it, using your system's voices.
 - **Drag the sidebar's left edge to resize it** (arrow keys work when it is
   focused; double-click resets). The width is remembered per browser.
 
@@ -66,27 +71,32 @@ be the UI deciding the very thing the backend escalated to you.
 
 ## Running it
 
-With the stack up (`docker compose up -d` from the repo root), `web` is served at
-<http://localhost:3000> and nginx proxies `/api` to the API container.
-
-For hot reload against a locally running backend:
+The UI is not a container. Start the backend with `docker-compose -f local.yml up -d --build`
+from `continuum-be/`, then:
 
 ```bash
 cd continuum-fe
-npm install
-npm run dev            # http://localhost:5173
+yarn                   # install (yarn 1; the version is pinned in package.json)
+yarn dev               # http://localhost:5173
 ```
 
-Vite proxies `/api` to `http://localhost:8000`, so the browser sees one origin
-and CORS never enters the picture. Point it elsewhere with
-`VITE_API_PROXY=http://host:port npm run dev`, or set `VITE_API_URL` to call an
-absolute origin directly.
+Vite proxies `/api` to `http://localhost:8000`, so the browser sees one origin:
+CORS never enters the picture, and the SameSite=Strict session cookie works.
+Point it elsewhere with `VITE_API_PROXY=http://host:port yarn dev`. The dev
+server listens on localhost only; `yarn dev --host` exposes it on your network.
 
 ```bash
-npm run lint           # eslint, flat config, TypeScript
-npm run build          # tsc -b, then vite build
-npm test               # vitest, jsdom — 40 tests, no backend needed
+yarn lint              # eslint, flat config, TypeScript
+yarn build             # tsc -b, then vite build
+yarn test              # vitest, jsdom — 76 tests, no backend needed
 ```
+
+Two yarn-specific details, both in `package.json` / `.yarnrc`:
+
+- `resolutions.vite` keeps vitest on the app's vite. Yarn 1 would otherwise nest
+  a separate vite 7 under vitest and the config stops typechecking.
+- `.yarnrc` ignores engine checks: a few eslint dependencies declare node
+  >= 20.19 and work fine on 20.16. Delete it once node is upgraded.
 
 ---
 

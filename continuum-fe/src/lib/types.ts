@@ -75,7 +75,6 @@ export interface ConflictListResponse {
 }
 
 export interface ConflictResolutionRequest {
-  user_id: string
   winner_id: string
   loser_ids: string[]
   keep_both: boolean
@@ -153,9 +152,66 @@ export interface HealthResponse {
   environment: string
   qdrant: string
   llm: string
+  database: string
 }
 
 export interface MemoryListResponse {
   total: number
   memories: Memory[]
+}
+
+// --- Authentication ----------------------------------------------------------
+// The memory owner is whoever the session or API key belongs to. No request
+// body carries a user_id any more; the server refuses one if sent.
+
+export interface AuthStatus {
+  needs_setup: boolean
+  web_setup_allowed: boolean
+}
+
+export interface Me {
+  user_id: string
+  email: string
+  is_admin: boolean
+  via: 'session' | 'api_key'
+}
+
+export interface ApiKeySummary {
+  id: string
+  name: string
+  /** The first characters of the key — enough to recognise it, not to use it. */
+  prefix: string
+  created_at: string
+  last_used_at: string | null
+  revoked_at: string | null
+}
+
+export interface ApiKeyCreated {
+  key: ApiKeySummary
+  /** The full key. Returned once, by the create call, and never again. */
+  secret: string
+}
+
+export interface UserSummary {
+  id: string
+  email: string
+  is_admin: boolean
+  disabled: boolean
+  created_at: string
+}
+
+// --- Dictation ---------------------------------------------------------------
+
+export interface SpeechStatus {
+  enabled: boolean
+  /** Model loaded. False during the server's first download — dictation still works, slower. */
+  ready: boolean
+  max_seconds: number
+  language: string | null
+}
+
+export interface Transcription {
+  text: string
+  language: string
+  duration_seconds: number
 }

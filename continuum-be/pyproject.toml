@@ -21,6 +21,12 @@ dependencies = [
     # evaluation package imports it directly, and depending on someone
     # else's dependency is how a build breaks for no visible reason.
     "pyyaml>=6.0.1",
+    "argon2-cffi>=23.1.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "faster-whisper>=1.1.0",
+    "python-multipart>=0.0.18",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +36,7 @@ dev = [
     "ruff>=0.7.0",
     "mypy>=1.13.0",
     "respx>=0.21.1",
+    "aiosqlite>=0.20.0",
 ]
 
 [build-system]

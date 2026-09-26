@@ -53,7 +53,7 @@ to `CALIBRATED_THRESHOLDS` in `config.py`.
 Then, with a reachable LLM and embedding endpoint:
 
 ```bash
-docker compose up -d qdrant     # from the repo root; Ollama runs on the host
+docker-compose -f local.yml up -d qdrant     # from continuum-be/; Ollama runs on the host
 cd continuum-be
 
 uv run python scripts/run_eval.py --record eval-run.json   # one slow pass

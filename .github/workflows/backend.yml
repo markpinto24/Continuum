@@ -24,6 +24,22 @@ jobs:
       run:
         working-directory: continuum-be
 
+    # Only for the Postgres-only tests. Everything else runs on in-memory SQLite
+    # and Qdrant; this is here because SQLite cannot show a write race — and the
+    # first-admin race is a real bug it once hid.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: continuum
+          POSTGRES_PASSWORD: continuum
+          POSTGRES_DB: continuum_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U continuum -d continuum_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -40,8 +56,11 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
-      # No services needed: the integration tests run against
-      # AsyncQdrantClient(":memory:") with a stubbed LLM, so this is real Qdrant
-      # indexing and real cosine scores without Docker or a model.
+      # The integration tests run against AsyncQdrantClient(":memory:") with a
+      # stubbed LLM — real Qdrant indexing and cosine scores without a model —
+      # and apply the real Alembic migrations to in-memory SQLite. With
+      # TEST_DATABASE_URL set, the Postgres-only tests run too instead of skipping.
       - name: Test
+        env:
+          TEST_DATABASE_URL: postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test
         run: uv run pytest

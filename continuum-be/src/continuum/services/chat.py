@@ -30,11 +30,10 @@ import re
 import uuid
 from collections.abc import AsyncIterator
 
-import structlog
-
 from continuum.clients.llm import LLMClient
 from continuum.config import Settings, get_settings
-from continuum.core import logging as clog
+from continuum.core import logger as clog
+from continuum.core.logger import get_logger
 from continuum.models.memory import Memory
 from continuum.models.schemas import (
     ChatContext,
@@ -48,7 +47,7 @@ from continuum.models.schemas import (
 from continuum.services.ingest import IngestService
 from continuum.services.retrieval import RetrievalService
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 # Matches the [1] / [3] citations the model is asked to emit.
 _CITATION = re.compile(r"\[(\d{1,2})\]")

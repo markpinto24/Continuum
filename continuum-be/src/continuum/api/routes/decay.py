@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from continuum.api.deps import DecayDep
+from continuum.api.deps import CurrentUser, DecayDep
 from continuum.models.schemas import DecaySweepRequest
 from continuum.services.decay import DecayReport
 
@@ -17,6 +17,8 @@ router = APIRouter(prefix="/decay", tags=["decay"])
 
 
 @router.post("/sweep", response_model=DecayReport)
-async def sweep(request: DecaySweepRequest, decay: DecayDep) -> DecayReport:
-    """Apply confidence decay for one user. Set `dry_run` to preview."""
-    return await decay.sweep(user_id=request.user_id, dry_run=request.dry_run)
+async def sweep(
+    request: DecaySweepRequest, principal: CurrentUser, decay: DecayDep
+) -> DecayReport:
+    """Apply confidence decay to your own memories. Set `dry_run` to preview."""
+    return await decay.sweep(user_id=principal.user_id, dry_run=request.dry_run)

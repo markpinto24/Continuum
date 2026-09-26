@@ -36,7 +36,7 @@ from pathlib import Path
 
 from continuum.clients.llm import LLMClient
 from continuum.config import get_settings
-from continuum.core.logging import configure_logging
+from continuum.core.logger import configure_logging
 from continuum.evaluation import corpus, metrics, report
 from continuum.evaluation.calibrate import calibrate, render_calibration
 from continuum.evaluation.crowded import load_crowded, render_crowded, run_crowded

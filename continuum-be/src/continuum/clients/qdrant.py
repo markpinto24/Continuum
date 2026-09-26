@@ -14,12 +14,12 @@ import re
 import uuid
 from collections.abc import AsyncIterator
 
-import structlog
 from qdrant_client import AsyncQdrantClient, models
 
 from continuum.config import Settings, get_settings
+from continuum.core.logger import get_logger
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 # Payload fields we filter on often enough to warrant an index.
 _INDEXED_KEYWORD_FIELDS = ("user_id", "status", "category", "subject", "source_id")

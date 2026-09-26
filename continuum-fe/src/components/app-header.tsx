@@ -1,14 +1,14 @@
-import { Archive, RefreshCw, User } from 'lucide-react'
+import { Archive, LogOut, RefreshCw, User } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
-import type { HealthResponse } from '@/lib/types'
+import type { HealthResponse, Me } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 export function AppHeader({
-  userId,
-  onUserId,
+  me,
+  onAccount,
+  onSignOut,
   health,
   nodeCount,
   edgeCount,
@@ -17,8 +17,9 @@ export function AppHeader({
   onRefresh,
   refreshing,
 }: {
-  userId: string
-  onUserId: (value: string) => void
+  me: Me
+  onAccount: () => void
+  onSignOut: () => void
   health: HealthResponse | null
   nodeCount: number
   edgeCount: number
@@ -34,16 +35,12 @@ export function AppHeader({
         <span className="hidden text-[11px] text-muted sm:inline">belief graph</span>
       </div>
 
-      <div className="ml-2 flex items-center gap-1.5">
-        <User className="size-3.5 text-muted" />
-        <Input
-          value={userId}
-          onChange={(event) => onUserId(event.target.value)}
-          placeholder="user id"
-          className="h-7 w-32"
-          aria-label="User id"
-        />
-      </div>
+      <Tooltip label="Account, API keys and users">
+        <Button size="sm" variant="ghost" className="ml-2 max-w-56" onClick={onAccount}>
+          <User />
+          <span className="truncate">{me.email}</span>
+        </Button>
+      </Tooltip>
 
       <span className="hidden text-[11px] text-muted tabular-nums md:inline">
         {nodeCount} beliefs · {edgeCount} edges
@@ -72,6 +69,10 @@ export function AppHeader({
         </Button>
 
         <HealthDot health={health} />
+
+        <Button size="icon" variant="ghost" onClick={onSignOut} aria-label="Sign out">
+          <LogOut />
+        </Button>
       </div>
     </header>
   )
@@ -79,7 +80,7 @@ export function AppHeader({
 
 function HealthDot({ health }: { health: HealthResponse | null }) {
   const label = health
-    ? `Qdrant ${health.qdrant} · LLM ${health.llm} · ${health.environment}`
+    ? `Qdrant ${health.qdrant} · Postgres ${health.database} · LLM ${health.llm} · ${health.environment}`
     : 'Cannot reach the API. Is the stack up?'
   const tone = !health ? 'bg-danger' : health.status === 'ok' ? 'bg-accent' : 'bg-amber-400'
 

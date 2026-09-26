@@ -56,7 +56,6 @@ describe('ContradictionInbox', () => {
   it('shows both sides of a dispute', () => {
     render(
       <ContradictionInbox
-        userId="mark"
         resource={ONE_DISPUTE}
         onResolved={vi.fn()}
         onSelect={vi.fn()}
@@ -72,7 +71,6 @@ describe('ContradictionInbox', () => {
     // that are simply both true, and the UI has to be able to say so.
     render(
       <ContradictionInbox
-        userId="mark"
         resource={ONE_DISPUTE}
         onResolved={vi.fn()}
         onSelect={vi.fn()}
@@ -83,7 +81,6 @@ describe('ContradictionInbox', () => {
 
     await waitFor(() =>
       expect(resolveConflict).toHaveBeenCalledWith({
-        user_id: 'mark',
         winner_id: postgres.id,
         loser_ids: [mongo.id],
         keep_both: true,
@@ -94,7 +91,6 @@ describe('ContradictionInbox', () => {
   it('names the clicked side as the winner, not always the first', async () => {
     render(
       <ContradictionInbox
-        userId="mark"
         resource={ONE_DISPUTE}
         onResolved={vi.fn()}
         onSelect={vi.fn()}
@@ -107,7 +103,6 @@ describe('ContradictionInbox', () => {
 
     await waitFor(() =>
       expect(resolveConflict).toHaveBeenCalledWith({
-        user_id: 'mark',
         winner_id: mongo.id,
         loser_ids: [postgres.id],
         keep_both: false,
@@ -119,7 +114,6 @@ describe('ContradictionInbox', () => {
     const onResolved = vi.fn()
     render(
       <ContradictionInbox
-        userId="mark"
         resource={ONE_DISPUTE}
         onResolved={onResolved}
         onSelect={vi.fn()}
@@ -134,7 +128,6 @@ describe('ContradictionInbox', () => {
   it('says so plainly when there is nothing to decide', () => {
     render(
       <ContradictionInbox
-        userId="mark"
         resource={resource({ total: 0, conflicts: [] })}
         onResolved={vi.fn()}
         onSelect={vi.fn()}

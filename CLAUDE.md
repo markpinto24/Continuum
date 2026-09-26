@@ -4,8 +4,8 @@ Project brief for Claude Code. Read this before touching anything.
 
 This file lives at the **repo root**. Continuum is one repository with two
 projects under it — `continuum-be` and `continuum-fe` — and no workspace tool
-binding them. They build, test and deploy independently; this brief and
-`docker-compose.yml` are the only things that span both.
+binding them. They build, test and deploy independently; this brief, the
+ignore rules and CI are the only things that span both.
 
 ---
 
@@ -65,7 +65,10 @@ simplify an implementation.**
 | Embeddings | `bge-m3`, 1024-dim | same client. Was nomic until it proved blind to entity swaps (FINDINGS §1, §8) |
 | Extraction | Mem0-inspired, domain-tuned prompt | `mem0ai` is a dependency; its `add()` is not used |
 | Scheduling | APScheduler | decay sweep |
-| Logging | structlog | request-scoped contextvars |
+| Logging | `core/logger.py`: line/JSON formatters over structlog | redaction + request context underneath |
+| Relational DB | Postgres 17, SQLAlchemy 2 (async, asyncpg), Alembic | accounts only — memories stay in Qdrant |
+| Auth | sessions + API keys | argon2id passwords; SHA-256-hashed tokens; no JWT |
+| Dictation | faster-whisper (local Whisper, CPU, int8) | speech to text on the server; read-aloud is the browser's |
 | Frontend (planned) | React, shadcn/ui, react-bits, Three.js | |
 
 ### Why we do not use Mem0's `Memory.add()`
@@ -90,14 +93,17 @@ not let us do something.
 Continuum/                            ← git root
 ├── README.md                         the project story; links to each side
 ├── CLAUDE.md                         this file — the engineering brief
-├── .env.example                      every setting, with provider presets
+├── .env.example                      template for continuum-be/.env (uv run)
 ├── .gitignore                        covers both projects
-├── docker-compose.yml                full stack: qdrant + api + web (Ollama on host)
 ├── .github/workflows/
 │   ├── backend.yml                   paths: ['continuum-be/**']
 │   └── frontend.yml                  paths: ['continuum-fe/**']
 ├── continuum-be/
 │   ├── pyproject.toml                uv project, deps, ruff + pytest config
+│   ├── local.yml                     ★ the Docker stack: qdrant, postgres, api
+│   ├── .envs/.local/.api · .postgres its settings (tracked local defaults;
+│   │                                 personal ones in gitignored *.override)
+│   ├── alembic.ini                   migration CLI; DB comes from DATABASE_URL
 │   ├── uv.lock
 │   ├── .dockerignore
 │   ├── Dockerfile                    multi-stage uv build, non-root, healthcheck
@@ -109,22 +115,31 @@ Continuum/                            ← git root
 │   │   ├── main.py                   app factory, lifespan, scheduler wiring
 │   │   ├── config.py                 all settings (pydantic-settings)
 │   │   ├── core/
-│   │   │   ├── logging.py            structlog config, redaction processors
+│   │   │   ├── logger.py             ★ get_logger(); line/JSON output; redaction
 │   │   │   └── middleware.py         request id, timing, context binding
 │   │   ├── clients/                  ← thin, owned I/O adapters
+│   │   │   ├── authdb.py             ★ users, sessions, API keys (SQLAlchemy)
 │   │   │   ├── llm.py                OpenAI-compatible chat + embeddings
 │   │   │   └── qdrant.py             collection bootstrap, filters, scroll
+│   │   ├── db/                       ← relational storage (accounts only)
+│   │   │   ├── models.py             ★ tables; what migrations are checked against
+│   │   │   ├── engine.py             engine + migrate() run at startup
+│   │   │   └── migrations/           Alembic env + versions/, shipped in the image
 │   │   ├── models/
 │   │   │   ├── memory.py             ★ domain model: Memory, categories,
 │   │   │   │                           statuses, half-lives, decay maths
+│   │   │   ├── auth.py               User, ApiKey, Principal
 │   │   │   └── schemas.py            HTTP request/response models
 │   │   ├── services/                 ← all business logic lives here
+│   │   │   ├── auth.py               ★ sign-in, sessions, keys, lockout
+│   │   │   ├── limits.py             sliding windows: lockout + rate limit
 │   │   │   ├── extraction.py         text → ExtractedFact[]
 │   │   │   ├── resolution.py         ★ the judge + confidence gate
 │   │   │   ├── ingest.py             orchestration; applies verdicts to graph
 │   │   │   ├── memory_store.py       domain ops over Qdrant
 │   │   │   ├── decay.py              confidence decay + archival sweep
 │   │   │   ├── retrieval.py          ★ similarity × confidence × recency rank
+│   │   │   ├── speech.py             dictation: local Whisper, audio never kept
 │   │   │   ├── chat.py               ★ prompt assembly; surfaces disputes
 │   │   │   ├── subjects.py           one entity, one slug (atlas = atlas-project)
 │   │   │   └── reindex.py            ★ re-embed on model change; crash-safe
@@ -142,10 +157,10 @@ Continuum/                            ← git root
 │   │   │   ├── extraction.py         token matching + the Mem0 baseline
 │   │   │   └── report.py             plain-text rendering
 │   │   └── api/
-│   │       ├── deps.py               DI wiring from app.state
+│   │       ├── deps.py               ★ DI wiring; get_principal = identity
 │   │       ├── router.py             router aggregation
-│   │       └── routes/               health, ingest, memories, conflicts,
-│   │                                 decay, chat
+│   │       └── routes/               health, auth, admin, ingest, memories,
+│   │                                 conflicts, decay, chat
 │   └── tests/
 │       ├── test_core_logic.py        parsing, coercion, lifecycle (pure)
 │       ├── test_resolution.py        ★ confidence gate, category policy
@@ -153,34 +168,37 @@ Continuum/                            ← git root
 │       ├── test_retrieval.py         ★ ranking formula, dispute assembly
 │       ├── test_chat.py              ★ stream shape, disputed prompt, write-back
 │       ├── test_evaluation.py        ★ the instrument, before it is trusted
+│       ├── test_auth.py              ★ every route guarded; isolation; refusals
 │       └── test_ingest_pipeline.py   end-to-end vs in-memory Qdrant
 └── continuum-fe/                     ← the belief graph UI
-    ├── Dockerfile                    node build -> nginx, proxies /api
-    ├── nginx.conf                    SPA fallback + SSE-safe proxy
-    ├── vite.config.ts
+    ├── package.json · yarn.lock      yarn 1; `resolutions` pins one vite
+    ├── vite.config.ts                dev server + /api proxy (no container)
     └── src/
         ├── lib/
         │   ├── types.ts              ★ the backend contract, mirrored by hand
         │   ├── api.ts                thin typed client + SSE chat stream
         │   ├── sse.ts                ★ incremental SSE framing
         │   └── memory-style.ts       ★ colour/size vocabulary, shared canvas+DOM
-        ├── hooks/                    use-resource, use-element-size
+        ├── hooks/                    use-resource, use-recorder, use-dictation,
+        │                             use-speech-synthesis, use-element-size
         ├── components/
+        │   ├── auth-screen.tsx       sign-in + first-run admin setup
+        │   ├── account-dialog.tsx    API keys, password, users (admins)
         │   ├── belief-graph.tsx      ★ the Three.js scene
         │   ├── memory-detail.tsx     provenance, edges, reinforce/restore
         │   ├── contradiction-inbox.tsx
         │   ├── chat-panel.tsx        ★ streaming, citations, dispute banner
         │   └── ui/                   shadcn-style primitives, owned in-repo
-        └── App.tsx
+        └── App.tsx                   ★ the auth gate, then the workspace
 ```
 
 ★ = the files carrying the novel logic. Change these carefully.
 
 **Repo-level concerns live at the root; project-level ones do not.** The brief,
-the compose file, the ignore rules and the env template describe the whole
-system, so they sit above both projects. The `Dockerfile` and `.dockerignore`
-stay inside `continuum-be/` because they describe how *that* project builds —
-and the compose build context is `./continuum-be`, so they still resolve.
+the ignore rules and CI describe the whole repository, so they sit above both
+projects. Everything Docker is backend-only now that the UI runs on the Vite dev
+server, so `local.yml`, its `.envs/`, the `Dockerfile` and `.dockerignore` all
+live in `continuum-be/`.
 
 **There is deliberately no workspace tool.** No Nx, no Turborepo, no uv
 workspace. Two independent projects under one root is the design: the backend is
@@ -202,6 +220,69 @@ api/routes  →  services  →  clients  →  external
   testable without a database.
 - Dependencies are built once in `lifespan`, stashed on `app.state`, exposed via
   `api/deps.py`. Never construct a client inside a route.
+
+---
+
+## Authentication
+
+**The memory owner comes from the credential and nowhere else.** `get_principal`
+in `api/deps.py` resolves a `Principal` from `Authorization: Bearer ck_...` (an
+agent's API key) or the session cookie (a person in the web UI). Every route
+that touches memories takes `principal: CurrentUser` and passes
+`principal.user_id` to the services. Request bodies have no `user_id`; the
+`ClientBody` base refuses one with a message saying why.
+
+- **New route? Take `CurrentUser`.** `test_every_route_but_the_public_ones_…`
+  walks the OpenAPI schema and fails on any endpoint that answers an anonymous
+  request. The public list is five endpoints; adding to it is a decision, not a
+  convenience.
+- **Fetching by id? Check ownership and answer 404.** `_owned()` in
+  `routes/memories.py`. Qdrant ids are just strings; a lookup by id is the one
+  place a filter by user does not happen for free.
+- **Services stay user-agnostic.** They take a `user_id` argument, as before.
+  `IngestRequest`/`ChatRequest` are the internal commands (body + owner);
+  `IngestBody`/`ChatBody` are what a client may send.
+- **API keys cannot manage credentials** (`SessionUser`, `AdminUser`): a leaked
+  agent key stays a leaked key, not an account takeover.
+- **Cookie writes need the `x-continuum-client` header** (CSRF, on top of
+  SameSite=Strict). The frontend sends it on every request; agents use Bearer
+  and are exempt.
+- Users, sessions and keys are in Postgres (`clients/authdb.py` over the tables
+  in `db/models.py`), not Qdrant: they need unique constraints and an atomic
+  "create only if no account exists". Nothing replayable is stored — argon2id for
+  passwords, SHA-256 for 256-bit tokens.
+- **"Only the first" needs the table lock.** At READ COMMITTED, two racing setups
+  both see an empty `users` table; without `LOCK TABLE` in `insert_user`, eight
+  concurrent setups created 6-8 admins. SQLite hid this — it has one writer —
+  which is why the race test runs against real Postgres.
+
+### Database and migrations
+
+- **Alembic owns the schema.** The API runs `migrate()` on every start, under a
+  Postgres advisory lock so replicas starting together migrate once. There is no
+  separate migrate step, and never `Base.metadata.create_all()`.
+- **Changing a table:** edit `db/models.py`, then from `continuum-be/`:
+  `uv run alembic revision --autogenerate -m "what changed"` (compose Postgres
+  up), read the generated file, commit both. `test_migrations_match_the_models`
+  fails if a model changes without a migration.
+- **Migrations are frozen history.** They never import application code;
+  `env.py` renders `UTCDateTime` as `sa.DateTime(timezone=True)` for this reason.
+  Every migration needs a working `downgrade()` (tested).
+- `UTCDateTime` makes every timestamp timezone-aware UTC in Python. Postgres
+  stores `timestamptz`; SQLite (the tests) stores naive values. Without it,
+  expiry comparisons would work in one database and raise in the other.
+- Tests run the real migrations against in-memory SQLite, so they need no
+  services. Postgres-only behaviour (the setup race, the full flow) runs with
+  `TEST_DATABASE_URL` pointing at a database that may be wiped.
+- `User.id` is the memory owner id and is **never derived from the email**.
+  Random by default; set explicitly (setup, `ADMIN_USER_ID`, admin create) only
+  to adopt memories stored before authentication existed.
+- Lockout and rate limits count in process memory. Correct for one uvicorn
+  process; with several workers, move them to Redis rather than raising limits.
+- Deployment: Qdrant and the api bind to 127.0.0.1 in compose. The UI reaches
+  the api through the Vite dev server's proxy; agents call `:8000` directly
+  (change the port mapping in `local.yml` for remote ones). There is no reverse proxy, so
+  `TRUST_PROXY_HEADERS` stays off and the per-address lockout sees real peers.
 
 ---
 
@@ -400,6 +481,41 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   probabilities, and the judge is told the NEW statement is always the later one
   — the gap that made it escalate clear reversals.
 
+### ✅ Phase 6 — Authentication (done, this release)
+- Accounts, web sessions and per-agent API keys; identity only from the
+  credential, never a request field — before this, any caller could read or
+  write any graph by typing a name, and any memory id opened any memory
+- First admin from a web setup screen (prefilled with the pre-auth user id, so an
+  existing graph is adopted) or from `ADMIN_EMAIL` / `ADMIN_PASSWORD`
+- Account panel: create / revoke keys (secret shown once, with a curl line),
+  change password (signs out other browsers), and user admin — disabling a user
+  ends their sessions and keys but deletes nothing
+- Refusals tested one by one: CSRF, login CSRF, lockout by email and by address,
+  expired sessions, revoked keys, disabled users, last-admin protection, keys
+  that try to manage keys, cross-user reads by id, a body naming another user
+- Account store on Postgres via SQLAlchemy 2 + Alembic, migrated on startup
+- Qdrant and the api moved to loopback; 50k-char input
+  cap; 30 LLM requests per user per minute
+- Verified live end to end: two users, a real LLM ingest by key, zero leakage in
+  graph, lookup by id or retrieval
+- 240 backend tests, 51 frontend tests
+
+### ✅ Phase 7 — Voice (done, this release)
+- **Dictation:** a microphone button in the chat box. The browser records
+  (MediaRecorder: webm/opus in Chrome and Brave, ogg in Firefox, mp4 in Safari);
+  the API transcribes with a **local** Whisper model (`faster-whisper`, `base`,
+  int8 on CPU) — about 1 s for 11 s of speech. The text lands in the box for
+  review; it is never sent, or remembered, on its own
+- Not the browser's `SpeechRecognition`: it streams audio to Google, and Brave
+  switches it off entirely, so for this user it would silently do nothing
+- Audio is transcribed in memory and dropped; logs record duration and length,
+  never the words. Capped at 120 s and 10 MB, checked before any CPU is spent
+- The model preloads in the background at startup, cached on a volume
+- **Read aloud:** a button on each answer, using the browser's speech synthesis
+  (OS voices: speech-dispatcher on Linux). Markdown, code and `[n]` citations are
+  stripped first, and text is queued in sentence-sized chunks — Chromium stops a
+  single long utterance after ~15 s without an error
+
 **The last lost belief was a class, and it is closed (§10).** Held-out cases,
 written before any fix ran, showed a second owner / maintainer / reviewer /
 rotation member superseded at ≈1.0 every time. Asking the model a narrower
@@ -424,11 +540,18 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
   says what it is protecting against.
 
 **Logging**
-- `structlog.get_logger(__name__)`, event names as `noun.verb` —
-  `ingest.resolved`, `decay.archived`.
-- Values as kwargs, never f-strings: `log.info("x", memory_id=id)`.
-- Bind correlation ids with `core.logging.bind()`; the middleware handles
-  `request_id`.
+- `from continuum.core.logger import get_logger`, then `log = get_logger(__name__)`
+  at module level. Event names as `noun.verb` — `ingest.resolved`,
+  `decay.archived`.
+- Values as kwargs, never f-strings: `log.info("x", memory_id=id)`. They render
+  as `| memory_id=…` after the message, or as JSON fields with `LOG_FORMAT=json`.
+- Output is one line per event: `LEVEL: Timestamp | Module | Function | Message`.
+  Module and Function are the caller's, found automatically — do not repeat them.
+- Bind correlation ids with `core.logger.bind()`; the middleware binds
+  `request_id`, the auth dependency `user_id`.
+- New noisy third-party logger? Lower it in the list in `Logger.__init__`. Check
+  the real logger name first — the "HTTP Request" lines came from `httpx2`, not
+  `httpx`.
 - Never log memory content outside a `SENSITIVE_KEYS`-covered field. Redaction is
   automatic in non-local environments — do not route around it.
 
@@ -443,6 +566,10 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
   **If you change the embedding text format, re-check that geometry.**
 
 **Frontend**
+- Every request goes through `lib/api.ts`, which sends the CSRF header and the
+  session cookie and reports a 401 on a data call to `onUnauthorized` — that is
+  how an expired session lands on the sign-in screen instead of on a panel of
+  errors. A 401 from sign-in itself is a wrong password, not a lapsed session.
 - `src/lib/types.ts` mirrors `models/schemas.py` by hand. Small surface, rare
   changes, and a hand-written mirror turns a breaking backend change into a type
   error rather than a runtime `undefined`. **Change both in the same commit.**
@@ -454,35 +581,42 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
 - Node size uses `confidence ** 3` because `nodeVal` is a sphere *volume*. Linear
   confidence makes a 0.9 belief look barely larger than a 0.3 one.
 - **Exactly one copy of three.js.** `3d-force-graph` needs `three >= 0.179`;
-  pinning the direct dependency below that made npm install a second copy, and
-  the renderer threw `intersectsFrustum is not a function` every frame — a blank
-  canvas with the legend drawn over it. `vite.config.ts` dedupes `three`; when
-  bumping it, check `npm ls three` shows a single version.
+  pinning the direct dependency below that made the package manager install a
+  second copy, and the renderer threw `intersectsFrustum is not a function` every
+  frame — a blank canvas with the legend drawn over it. `vite.config.ts` dedupes
+  `three`; when bumping it, check `yarn why three` shows a single copy
+  (`@types/three` is only the type definitions).
 
 **Config**
 - Every tunable goes in `continuum-be/src/continuum/config.py` with a comment on
-  what it trades off, and in the root `.env.example`. No magic numbers in
+  what it trades off, in the root `.env.example`, and in
+  `continuum-be/.envs/.local/.api` if the container should set it. No magic numbers in
   services.
-- Two `.env` locations, both gitignored, because the two entry points have
-  different working directories: the repo root for `docker compose`, and
-  `continuum-be/.env` for a local `uvicorn` run (pydantic-settings resolves
-  `env_file=".env"` against the CWD).
+- **Two sets of backend settings, never mixed.** `continuum-be/.env`
+  (gitignored, from the root `.env.example`) is for `uv run uvicorn` on the host:
+  every URL is `localhost`. `continuum-be/.envs/.local/.api` (tracked) is for the
+  container: compose-network and `host.docker.internal` URLs. `local.yml`
+  interpolates nothing, so Compose's automatic read of the `.env` beside it has
+  no effect — otherwise it would have pushed localhost URLs and a stale embedding
+  model into the container, silently.
 
 ---
 
 ## Commands
 
-### Running it — one command
+### Running it — one command for the backend, one for the UI
 
-The whole stack is defined in compose: Qdrant, a one-shot `models` job, the API
-and the web UI. **Ollama is not a container** — it runs on the host, and the
+Compose defines the backend: Qdrant, a one-shot `models` job and the API. **The
+UI is not a container** — it runs on the Vite dev server with yarn, whose proxy
+makes `/api` same-origin. **Ollama is not a container either** — it runs on the host, and the
 containers reach it as `host.docker.internal`. The `models` job asks it to pull
 the configured models (from an 8 MB alpine image, via Ollama's HTTP API). The API
 waits for Qdrant and the models, then creates or re-embeds its collection in the
 FastAPI lifespan hook and starts the decay scheduler.
 
 ```bash
-docker compose up -d --build        # from the repo root
+cd continuum-be && docker-compose -f local.yml up -d --build   # the backend
+cd continuum-fe && yarn && yarn dev                           # the UI at :5173
 ```
 
 There is deliberately **no** separate migrate, init or model-pull step. If you
@@ -490,32 +624,36 @@ find yourself adding a startup command that has to be run by hand, put it in the
 lifespan hook or the compose graph instead.
 
 ```bash
-docker compose logs -f api
-docker compose down        # keeps volumes
-docker compose down -v     # wipes memories
+docker-compose -f local.yml logs -f api
+docker-compose -f local.yml down        # keeps volumes
+docker-compose -f local.yml down -v     # wipes memories
 ```
 
-A local `.env` at the repo root overrides the compose defaults — that is how you
-point the LLM at Groq or a remote vLLM instead of the host's Ollama.
+Container settings are in `continuum-be/.envs/.local/.api`. Personal ones — a
+Groq key, a different model — go in `.envs/.local/.api.override`, which is
+gitignored and wins over `.api`. `local.yml` pins `name: continuum`: the folder is
+`continuum-be`, and a derived project name would create new, empty volumes.
+It needs Compose v2 (`docker-compose` on this machine is a link to it).
 
 ### Developing against it
 
-Compose runs from the repo root; `uv` runs from `continuum-be/`. Nothing binds
-the two, which is the point — the backend is a self-contained uv project.
+Both run from `continuum-be/`: Docker for the dependencies, `uv` for the API.
 
 ```bash
-docker compose up -d qdrant                      # repo root; Ollama on host
-
-cd continuum-be
+docker-compose -f local.yml up -d qdrant postgres   # Ollama is on the host
 uv sync --extra dev
 uv run uvicorn continuum.main:app --reload
 ```
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 207 tests, no services needed
+uv run pytest                          # 270 tests, no services needed
+TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
+  uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
+uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
+uv run alembic current                 # which revision the database is at
 uv run ruff check . --fix
-uv run python scripts/seed_demo.py     # end-to-end against a running stack
+CONTINUUM_API_KEY=ck_... uv run python scripts/seed_demo.py   # end-to-end, live
 
 # Phase 5: check the embedder, then one slow pass, then sweep the gate for free
 uv run python scripts/run_eval.py --preflight
@@ -528,6 +666,34 @@ uv run python scripts/run_eval.py --replay eval-run.json
 
 ## Things that look like improvements but are not
 
+- **`Base.metadata.create_all()` "to skip Alembic in development".** Then the
+  schema the tests and developers use is not the one the migrations build, and
+  the first deploy finds out. Every environment migrates.
+- **Removing the `LOCK TABLE` in `insert_user` because the tests pass without
+  it.** The SQLite tests always pass without it. The Postgres race test does not.
+- **Moving memories into Postgres "now that we have a database".** The belief
+  graph's access patterns are vector search plus payload filters; that is what
+  Qdrant is for. Postgres holds accounts.
+- **Accepting a `user_id` in a request "for admin tools" or "for testing".**
+  That is exactly the hole authentication closed. An admin acting on someone
+  else's graph needs its own audited endpoint, not a trusted field.
+- **Swapping sessions for JWTs "to be stateless".** A session row can be deleted
+  — sign-out, password change, disabling a user all take effect on the next
+  request. A JWT stays valid until it expires, and revocation then needs the
+  very table JWTs were meant to avoid.
+- **Switching dictation to the browser's `SpeechRecognition` "to drop the
+  model".** It sends every word to Google, and in Brave it does not work at all.
+- **Logging or storing a transcript.** It is user content that the user has not
+  yet chosen to send. Log its length.
+- **Sending a dictated transcript straight to chat.** Whisper mishears names and
+  numbers — the very tokens the resolver cares most about — and a sent message
+  is remembered. The user reviews it first.
+- **Letting API keys manage keys, passwords or users.** Agents run in places a
+  person does not watch; a key that can mint keys turns one leak into permanent
+  access.
+- **Publishing Qdrant or the api port on all interfaces again.** Qdrant has no
+  auth of its own by default; anyone reaching it reads every memory and never
+  meets the API's checks.
 - **Hard-deleting superseded memories to keep the collection small.** Breaks
   commitment 1. Archive instead.
 - **Auto-resolving every conflict with a second LLM call to raise throughput.**
@@ -540,21 +706,34 @@ uv run python scripts/run_eval.py --replay eval-run.json
 - **Adding a workspace tool to "tie the monorepo together".** Nx, Turborepo and
   uv workspaces all solve shared-dependency problems these two projects do not
   have. Their only relationship is an HTTP contract.
+- **Running the stack with Compose v1 (`docker-compose` 1.29).** It cannot parse
+  `local.yml` (`name:`, optional env file), and it crashes with
+  `KeyError: 'ContainerConfig'` on Docker Engine 25+ when recreating a container,
+  leaving the stack stopped with renamed containers. `docker-compose` must be v2
+  (`docker-compose --version`); if a terminal still shows 1.29, run `rehash`.
+- **Adding `${VAR}` interpolation back into `local.yml`.** Compose would fill it
+  from `continuum-be/.env` — the host-run settings, with localhost URLs. Add the
+  setting to `.envs/.local/.api` instead.
+- **Removing `name: continuum` from `local.yml`.** The project name would become
+  `continuum-be` and the stack would start on new, empty volumes.
 - **Putting Ollama back in a container "to be self-contained".** It keeps a
   private copy of every model — 11.6 GB of pure duplication on a machine that
   already runs Ollama, which is what filled this disk. The `models` job keeps the
   one-command contract without it.
 - **Adding a manual setup step to the README instead of the compose graph.**
-  `up -d --build` is the whole contract. Bootstrap belongs in the lifespan hook
+  `up -d --build` is the whole backend contract (and `yarn dev` the UI's). Bootstrap belongs in the lifespan hook
   or in `depends_on`.
 - **Drawing an arrowhead on a `conflicts_with` edge, or sorting disputes so the
   newer belief reads first.** Both are the UI quietly answering the question the
   resolver refused to answer.
 - **Hiding the keep-both verdict behind a menu.** It is the correct answer often
   enough that burying it pushes people toward picking a side they do not believe.
-- **Baking `VITE_API_URL` into the Docker image.** Vite inlines env vars at build
-  time, so it could not be overridden at run time anyway; nginx proxies
-  same-origin `/api` instead.
+- **Setting `VITE_API_URL` to call the API cross-origin.** The session cookie is
+  SameSite=Strict and cookie writes need the CSRF header, so sign-in only works
+  same-origin. Keep going through the dev server's `/api` proxy.
+- **Switching the frontend back to npm, or dropping `resolutions.vite`.** Yarn is
+  the package manager (`packageManager` in package.json, `yarn.lock`, CI). Without
+  the resolution, yarn 1 nests a second vite under vitest.
 - **Naming a category in an extraction-prompt example, or editing the category
   list to add guidance.** Both measurably skew a 7B extractor (FINDINGS §7). Add
   guidance as a rule, and re-run the extraction corpus three times before and
@@ -567,8 +746,9 @@ uv run python scripts/run_eval.py --replay eval-run.json
 - **Ingesting the assistant's reply along with the user's turn.** The reply is
   assembled from memory, so it would re-enter the graph as independent evidence
   for what it was derived from.
-- **Logging with `print` or the stdlib logger.** Use the module-level
-  `structlog.get_logger(__name__)`. Request id and user id are bound by
+- **Logging with `print` or `logging.getLogger()`.** Use
+  `core.logger.get_logger(__name__)`. A plain stdlib logger rejects kwargs, and
+  its records skip nothing — but a `print` skips the redaction entirely. Request id and user id are bound by
   middleware and inherited automatically; re-passing them as kwargs is noise.
 - **Adding a corpus case without a rationale, or "fixing" the corpus when a
   number looks bad.** The corpus is the instrument. Relabelling a case to make a

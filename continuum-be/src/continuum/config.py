@@ -7,6 +7,7 @@ and in production (vLLM / hosted OpenAI-compatible endpoint + managed Qdrant).
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,8 +26,101 @@ class Settings(BaseSettings):
     environment: str = "local"
     debug: bool = True
     log_level: str = "INFO"
+    # "line": one coloured, human-readable line per event (Level, Timestamp,
+    # Module, Function, Message + fields). "json": one object per line, for a log
+    # aggregator. Both go through the same redaction; see core/logger.py.
+    log_format: Literal["line", "json"] = "line"
+    # ANSI colour by level in the line format. Turn off when logs go to a file
+    # or a system that shows escape codes literally.
+    log_colors: bool = True
     api_prefix: str = "/api/v1"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+
+    # --- Relational database -----------------------------------------------
+    # Users, sessions and API keys live in Postgres, not Qdrant: they need unique
+    # constraints and transactions, and a lost vector index must never be able to
+    # take the credentials with it. Postgres rather than a local file so several
+    # API processes can share one account store. Any SQLAlchemy async URL works;
+    # the tests use sqlite+aiosqlite so they need no running service.
+    # The schema is owned by Alembic and upgraded on startup (db/migrate.py).
+    database_url: str = "postgresql+asyncpg://continuum:continuum@localhost:5432/continuum"
+    # Connections held open per API process. Sign-in, session and key checks are
+    # single indexed queries, so a small pool goes a long way; raise it with the
+    # worker count, keeping the total under Postgres's max_connections.
+    database_pool_size: int = 5
+    database_max_overflow: int = 5
+
+    # --- Authentication ----------------------------------------------------
+    # How long a web sign-in lasts. Absolute, not sliding: a stolen cookie stops
+    # working on a fixed date however actively it is used.
+    session_ttl_hours: int = 24 * 14
+    session_cookie_name: str = "continuum_session"
+    # None = decide per request (Secure when the request arrived over HTTPS,
+    # directly or via X-Forwarded-Proto). Force True behind a TLS proxy that
+    # does not forward the scheme; never force False in production.
+    session_cookie_secure: bool | None = None
+    # A browser request authenticated by cookie must carry this header on every
+    # unsafe method. A custom header cannot be set cross-site without a CORS
+    # preflight, which the CORS policy refuses — so a forged form post fails.
+    csrf_header: str = "x-continuum-client"
+    # Behind a reverse proxy every request arrives from the proxy's address, so
+    # the sign-in lockout would count all users as one client. When true, the
+    # X-Real-IP header identifies the client instead. Only enable behind a proxy
+    # that SETS that header (overwriting any a client sent) and when the API is
+    # reachable solely through it — otherwise a caller can forge its address.
+    # The shipped setup has no such proxy (the UI runs on the Vite dev server),
+    # so it stays off; the per-email lockout applies either way.
+    trust_proxy_headers: bool = False
+    password_min_length: int = 10
+    # Failed sign-ins allowed per email and per client address before a lockout.
+    login_max_failures: int = 5
+    login_lockout_minutes: int = 15
+    # While no account exists, the web UI offers "create the first admin". Turn
+    # off on a deployment reachable by strangers and bootstrap from the env pair
+    # below instead — otherwise whoever loads the page first owns the instance.
+    auth_allow_web_setup: bool = True
+    # Creates the first admin at startup when no account exists yet.
+    admin_email: str | None = None
+    admin_password: str | None = None
+    # Memory owner id for that admin. Set it to adopt memories stored before
+    # authentication existed (they are keyed by whatever user_id was sent then).
+    admin_user_id: str | None = None
+
+    # --- Abuse limits ------------------------------------------------------
+    # Requests per user per minute to endpoints that spend an LLM or embedding
+    # call (ingest, chat, retrieval preview, search). Local models are slow and
+    # hosted ones bill per token; one runaway agent should not starve the rest.
+    llm_requests_per_minute: int = 30
+    # Largest note or transcript accepted by ingest and chat, in characters.
+    max_input_chars: int = 50_000
+
+    # --- Speech to text ----------------------------------------------------
+    # Dictation in the chat box. Transcribed HERE, by a local Whisper model —
+    # never by the browser, whose built-in recognition streams audio to Google
+    # (and in Brave is switched off entirely). Audio is transcribed in memory
+    # and discarded; only the text the user then sends is kept.
+    speech_enabled: bool = True
+    # tiny ~75 MB / base ~145 MB / small ~480 MB / medium ~1.5 GB. Bigger is more
+    # accurate and slower. base is quick on a CPU and good on clear speech.
+    # Downloaded once to the Hugging Face cache (a volume in Docker).
+    speech_model: str = "base"
+    speech_device: str = "cpu"  # "cuda" with an NVIDIA GPU and a CUDA build of ctranslate2
+    # int8 on CPU: ~4x smaller and faster than float32, accuracy all but equal.
+    speech_compute_type: str = "int8"
+    # Fixed language skips detection, which is slow and unreliable on a short
+    # clip. None = detect per recording (for multilingual users).
+    speech_language: str | None = "en"
+    speech_beam_size: int = 5
+    # Longest recording accepted. Dictation is a message, not a meeting: a cap
+    # keeps one upload from holding the CPU for minutes.
+    speech_max_seconds: int = 120
+    speech_max_bytes: int = 10 * 1024 * 1024
+    # Transcriptions run one at a time: each already uses every core, and two
+    # together are slower than two in turn.
+    speech_concurrency: int = 1
+    # Load the model in the background at startup, so the first dictation does
+    # not wait for a download. Startup itself does not wait for it.
+    speech_preload: bool = True
 
     # --- Qdrant ------------------------------------------------------------
     qdrant_url: str = "http://localhost:6333"

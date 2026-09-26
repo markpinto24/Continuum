@@ -14,13 +14,13 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-import structlog
 from openai import AsyncOpenAI, BadRequestError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from continuum.config import Settings, get_settings
+from continuum.core.logger import get_logger
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 

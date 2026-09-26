@@ -29,14 +29,13 @@ import re
 from enum import StrEnum
 from typing import NamedTuple, TypeVar
 
-import structlog
-
 from continuum.clients.llm import LLMClient, TokenLogprob
 from continuum.config import Settings, get_settings
+from continuum.core.logger import get_logger
 from continuum.models.memory import ExtractedFact, Memory, MemoryCategory
 from continuum.services.memory_store import MemoryStore
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 
 class Verdict(StrEnum):

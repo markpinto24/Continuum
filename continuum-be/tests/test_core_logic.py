@@ -99,7 +99,7 @@ def test_events_are_immutable():
 
 
 def test_secrets_are_redacted_in_every_environment():
-    from continuum.core.logging import redact_secrets
+    from continuum.core.logger import redact_secrets
 
     out = redact_secrets(None, "info", {
         "event": "llm.call",
@@ -114,7 +114,7 @@ def test_secrets_are_redacted_in_every_environment():
 
 def test_user_content_is_fingerprinted_not_dropped():
     """Same text must produce the same hash, so lines stay correlatable."""
-    from continuum.core.logging import redact_user_content
+    from continuum.core.logger import redact_user_content
 
     a = redact_user_content(None, "info", {"content": "Acme prefers async updates"})
     b = redact_user_content(None, "info", {"content": "Acme prefers async updates"})

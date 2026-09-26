@@ -93,7 +93,7 @@ A memory carries far more than its text:
 | LLM | Any OpenAI-compatible endpoint — Ollama, vLLM, Groq, Together |
 | Embeddings | `bge-m3` via Ollama (1024-dim). Switching model re-embeds automatically |
 | Extraction | Mem0-inspired, domain-tuned prompt |
-| Logging | structlog |
+| Logging | `core/logger.py` — coloured line or JSON output, over structlog for context and redaction |
 
 Swapping providers is an `.env` change — no code touches required.
 
@@ -108,11 +108,12 @@ Swapping providers is an `.env` change — no code touches required.
 ### One command
 
 ```bash
-docker compose up -d --build        # from the repo root
+docker-compose -f local.yml up -d --build        # from continuum-be/
 ```
 
-That brings up Qdrant, a one-shot job that makes sure the host's Ollama has the
-configured models, the API and the web UI. The API waits for Qdrant to report
+That brings up the whole backend: Qdrant, a one-shot job that makes sure the
+host's Ollama has the configured models, and the API. (The UI is not a container
+— `yarn dev` in `continuum-fe/`.) The API waits for Qdrant to report
 healthy and for the models to be ready, then creates its Qdrant collection —
 re-embedding every memory if the embedding model changed — and starts the decay
 scheduler from inside its own FastAPI lifespan hook.
@@ -126,20 +127,21 @@ Linux installer's default (`*:11434`). Set `OLLAMA_URL` to use another daemon.
 There is no separate migrate, init or model-pull step to run by hand.
 
 ```bash
-docker compose logs -f api
-docker compose down       # keeps stored memories
-docker compose down -v    # wipes them
+docker-compose -f local.yml logs -f api
+docker-compose -f local.yml down       # keeps stored memories
+docker-compose -f local.yml down -v    # wipes them
 ```
 
 API docs: <http://localhost:8000/docs> · Qdrant dashboard: <http://localhost:6333/dashboard>
 
 > If the models are not in your Ollama yet, the first start pulls ~6 GB.
-> `docker compose logs -f models` shows the progress.
+> `docker-compose -f local.yml logs -f models` shows the progress.
 
 ### Using a hosted LLM instead
 
-Copy the root `.env.example` to a `.env` beside it and compose picks it up,
-overriding its defaults:
+Container settings live in `.envs/.local/.api` (tracked local defaults). Put
+anything personal — above all a real API key — in `.envs/.local/.api.override`,
+which is gitignored and wins over `.api`:
 
 ```bash
 LLM_BASE_URL=https://api.groq.com/openai/v1
@@ -152,16 +154,19 @@ too. Changing the embedding model is safe: set `EMBEDDING_DIM` to match, and on
 the next start every memory is re-embedded into a collection for the new model.
 Nothing is deleted, and switching back works.
 
+`local.yml` reads nothing from `continuum-be/.env`. That file configures the API
+when you run it with `uv run uvicorn` on the host, where every URL is
+`localhost`; inside a container those would point at the container itself.
+
 ### Developing with reload
 
 Run the dependencies in Docker and the API on the host:
 
 ```bash
-# repo root — dependencies only (Ollama is already on the host)
-docker compose up -d qdrant
+# continuum-be/ — dependencies in Docker (Ollama is already on the host)
+docker-compose -f local.yml up -d qdrant postgres
 
-# continuum-be/ — the API on the host
-cd continuum-be
+# ...and the API on the host, with hot reload
 uv sync --extra dev
 cp ../.env.example .env
 uv run uvicorn continuum.main:app --reload
@@ -176,20 +181,74 @@ gitignored.
 
 ```bash
 # from continuum-be/
-uv run pytest                      # 207 tests, no services needed
+uv run pytest                      # 270 tests, no services needed
 uv run ruff check .
-uv run python scripts/seed_demo.py # full pipeline against the running stack
+CONTINUUM_API_KEY=ck_... uv run python scripts/seed_demo.py  # full pipeline, live
 ```
 
 ---
+
+## Authentication
+
+Every endpoint except `health`, `auth/status`, `auth/setup`, `auth/login` and
+`auth/logout` needs a credential, and **the memory owner is whoever the
+credential belongs to**. No request body or query names a user; a body that
+still sends `user_id` is refused with a 422 saying so.
+
+| Who | Credential | Can |
+| --- | --- | --- |
+| A person in the web UI | session cookie (httpOnly, SameSite=Strict, 14 days) | everything |
+| An agent | `Authorization: Bearer ck_...` | the memory API only — not keys, password or users |
+
+- Accounts, sessions and keys live in Postgres (`DATABASE_URL`), through
+  SQLAlchemy. Passwords are argon2id; session tokens and keys are 256-bit random
+  and stored only as SHA-256. A key's plaintext is shown once, at creation.
+- The first admin comes from the web UI's setup screen, or from `ADMIN_EMAIL` /
+  `ADMIN_PASSWORD` at startup. Set `AUTH_ALLOW_WEB_SETUP=false` on an instance
+  strangers can reach.
+- Cookie-authenticated writes must carry `x-continuum-client` (CSRF). Five failed
+  sign-ins per email, or per client address, lock it for 15 minutes. LLM-spending
+  endpoints are limited to 30 requests per user per minute; inputs to 50k chars.
+- Another user's memory id answers 404, never 403.
+- The limiters count in process memory: correct for the single uvicorn process
+  shipped, wrong for several workers (move them to Redis first).
+
+## Database and migrations
+
+Postgres holds the account store only; memories stay in Qdrant. The schema is
+owned by Alembic, and **the API upgrades it on every start** (under an advisory
+lock, so replicas migrate once) — there is no separate migrate step.
+
+```bash
+# from continuum-be/, with `docker-compose -f local.yml up -d postgres` running
+uv run alembic revision --autogenerate -m "add teams"   # after editing db/models.py
+uv run alembic upgrade head       # the API does this itself; handy for inspection
+uv run alembic current            # which revision the database is at
+uv run alembic downgrade -1
+uv run alembic upgrade head --sql # print the DDL instead of running it
+```
+
+The CLI reads `DATABASE_URL`, the same setting as the API. Tests apply the real
+migrations to in-memory SQLite, and fail if `db/models.py` changes without a
+migration. Behaviour only Postgres can show — two first-admin setups racing —
+runs with `TEST_DATABASE_URL` set to a database the tests may wipe.
 
 ## Endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/health` | Liveness of Qdrant + LLM |
+| `GET` | `/api/v1/health` | Liveness of Qdrant, Postgres and the LLM (public) |
+| `GET` | `/api/v1/auth/status` | Needs first-run setup? (public) |
+| `POST` | `/api/v1/auth/setup` | Create the first admin (public, once) |
+| `POST` | `/api/v1/auth/login` · `/logout` | Web sign-in / sign-out |
+| `GET` | `/api/v1/auth/me` | Who this credential belongs to |
+| `POST` | `/api/v1/auth/password` | Change password; signs out other browsers |
+| `GET` `POST` `DELETE` | `/api/v1/auth/keys[/{id}]` | List, create, revoke API keys (session only) |
+| `GET` `POST` `PATCH` | `/api/v1/admin/users[/{id}]` | Manage accounts (admins, session only) |
+| `GET` | `/api/v1/speech/status` | Is dictation on, is the model loaded, max length |
+| `POST` | `/api/v1/speech/transcribe` | Multipart `audio` → text, by local Whisper; nothing stored |
 | `POST` | `/api/v1/ingest` | Feed a note or transcript; extract, resolve, store |
-| `POST` | `/api/v1/memories/search` | Semantic search over a user's memories |
+| `POST` | `/api/v1/memories/search` | Semantic search over your memories |
 | `GET` | `/api/v1/memories` | List memories |
 | `GET` | `/api/v1/memories/graph` | Belief graph — nodes + edges for the 3D view |
 | `GET` | `/api/v1/memories/{id}` | Fetch one memory |
@@ -205,8 +264,9 @@ Quick check:
 
 ```bash
 curl -X POST localhost:8000/api/v1/ingest \
+  -H "Authorization: Bearer $CONTINUUM_API_KEY" \
   -H 'content-type: application/json' \
-  -d '{"user_id":"mark","text":"We picked Postgres over Mongo because reporting needs real joins. Acme prefers async written updates, not calls."}'
+  -d '{"text":"We picked Postgres over Mongo because reporting needs real joins. Acme prefers async written updates, not calls."}'
 ```
 
 ---
@@ -255,8 +315,9 @@ idempotent and runs every six hours; `dry_run` previews it.
 
 ```bash
 curl -N -X POST localhost:8000/api/v1/chat \
+  -H "Authorization: Bearer $CONTINUUM_API_KEY" \
   -H 'content-type: application/json' \
-  -d '{"user_id":"mark","messages":[{"role":"user","content":"what database are we on?"}]}'
+  -d '{"messages":[{"role":"user","content":"what database are we on?"}]}'
 ```
 
 ```
@@ -304,8 +365,7 @@ read-only chat.
 replaces that with a number.
 
 ```bash
-docker compose up -d qdrant    # repo root; Ollama runs on the host
-cd continuum-be
+docker-compose -f local.yml up -d qdrant    # from continuum-be/; Ollama on the host
 
 uv run python scripts/run_eval.py --preflight             # can the embedder see a swap?
 uv run python scripts/run_eval.py --calibrate             # which bands does it need?
@@ -345,9 +405,10 @@ how to read the sweep.
 | --- | --- |
 | **1 — Ingest & storage** | ✅ done |
 | **2 — Resolution & decay** | ✅ done |
-| **3 — Memory-augmented chat** | ✅ done *(this release)* — SSE streaming, retrieval ranked by similarity × confidence × recency, disagreement surfaced rather than resolved |
-| **4 — Belief graph UI** | ⬜ next — `continuum-fe`: React + shadcn + Three.js force-directed graph off `/memories/graph`, the contradiction inbox, and a chat panel alongside |
-| **5 — Evaluation** | ✅ done *(this release)* — 28-case labelled corpus, belief-loss / stale-belief / merge-loss measured separately, and a gate sweep that replays one recorded run at every threshold for free |
+| **3 — Memory-augmented chat** | ✅ done — SSE streaming, retrieval ranked by similarity × confidence × recency, disagreement surfaced rather than resolved |
+| **4 — Belief graph UI** | ✅ done — `continuum-fe`: React + shadcn + Three.js force-directed graph off `/memories/graph`, the contradiction inbox, and a chat panel alongside |
+| **5 — Evaluation** | ✅ done — 46-case labelled corpus incl. held-out sets, belief-loss / stale-belief / merge-loss measured separately, and a gate sweep that replays one recorded run at every threshold for free |
+| **6 — Authentication** | ✅ done *(this release)* — accounts, sessions and per-agent API keys; identity from the credential only; per-user isolation, CSRF, lockout and rate limits |
 
 See [`../CLAUDE.md`](../CLAUDE.md) for the full engineering brief, layering rules
 and conventions, and [`../README.md`](../README.md) for the project overview.

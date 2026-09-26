@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from continuum.api.deps import MemoryStoreDep
+from continuum.api.deps import CurrentUser, MemoryStoreDep
 from continuum.models.schemas import (
     ConflictListResponse,
     ConflictPair,
@@ -21,15 +21,21 @@ router = APIRouter(prefix="/conflicts", tags=["conflicts"])
 
 @router.get("", response_model=ConflictListResponse)
 async def list_conflicts(
+    principal: CurrentUser,
     memories: MemoryStoreDep,
-    user_id: str = Query(..., min_length=1),
     limit: int = Query(100, ge=1, le=500),
 ) -> ConflictListResponse:
     """Unresolved disagreements awaiting a human decision."""
-    flagged = await memories.list_conflicts(user_id=user_id, limit=limit)
+    flagged = await memories.list_conflicts(user_id=principal.user_id, limit=limit)
 
     referenced = {cid for m in flagged for cid in m.conflicts_with}
-    lookup = await memories.resolve_ids(sorted(referenced))
+    # Ids come from stored edges, which never cross users today — but an id is
+    # just a string, and this is the one place a lookup by id feeds a response.
+    lookup = {
+        mid: m
+        for mid, m in (await memories.resolve_ids(sorted(referenced))).items()
+        if m.user_id == principal.user_id
+    }
 
     seen: set[str] = set()
     pairs: list[ConflictPair] = []
@@ -49,7 +55,7 @@ async def list_conflicts(
 
 @router.post("/resolve", response_model=ConflictResolutionResponse)
 async def resolve_conflict(
-    request: ConflictResolutionRequest, memories: MemoryStoreDep
+    request: ConflictResolutionRequest, principal: CurrentUser, memories: MemoryStoreDep
 ) -> ConflictResolutionResponse:
     """Apply a human verdict.
 
@@ -58,12 +64,12 @@ async def resolve_conflict(
     decision stays auditable and reversible.
     """
     winner = await memories.get(request.winner_id)
-    if not winner or winner.user_id != request.user_id:
+    if not winner or winner.user_id != principal.user_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Winner memory not found")
 
     loser_ids = request.loser_ids or [c for c in winner.conflicts_with]
     lookup = await memories.resolve_ids(loser_ids)
-    losers = [m for m in lookup.values() if m.user_id == request.user_id]
+    losers = [m for m in lookup.values() if m.user_id == principal.user_id]
 
     if request.keep_both:
         for loser in losers:

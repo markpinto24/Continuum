@@ -33,9 +33,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // Dev-only proxy so the browser talks to one origin and CORS never enters
-    // the picture. In Docker the web container is served by nginx, which
-    // proxies /api to the api service the same way — see nginx.conf.
+    // The UI is served by this dev server (`yarn dev`) — there is no web
+    // container. The proxy makes /api same-origin, which is what lets the
+    // SameSite=Strict session cookie work and keeps CORS out of the picture.
+    // SSE passes through unbuffered, so chat still streams token by token.
     proxy: {
       '/api': {
         target: process.env.VITE_API_PROXY ?? 'http://localhost:8000',

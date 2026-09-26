@@ -66,32 +66,48 @@ directly rather than shipping its own copy.
 
 ```bash
 git clone <your-remote> Continuum && cd Continuum
-docker compose up -d --build
+cd continuum-be && docker-compose -f local.yml up -d --build && cd ..   # the backend
+cd continuum-fe && yarn && yarn dev          # the UI at http://localhost:5173
 ```
 
-That is the whole contract. Compose brings up Qdrant, a one-shot job that asks
-the host's Ollama for the configured models, the API — which waits for both,
-then creates its Qdrant collection and starts the decay scheduler from its own
-FastAPI lifespan hook — and the web UI. There is no separate migrate, init or
-model-pull step.
+Docker runs the backend: Qdrant, Postgres, a one-shot job that asks the host's
+Ollama for the configured models, and the API — which waits for all three, then
+upgrades the Postgres schema (Alembic), creates its Qdrant collection and starts
+the decay scheduler from its own FastAPI lifespan hook. There is no separate migrate, init or model-pull step. The UI is not a
+container: it runs on the Vite dev server with yarn, which proxies `/api` to the
+API on `:8000`.
 
-**Belief graph: <http://localhost:3000>**
+**Belief graph: <http://localhost:5173>** — the first visit asks you to create
+the admin account. If you used Continuum before sign-in existed, put your old
+user id in "Keep memories stored under" and your graph carries over.
 
 API docs: <http://localhost:8000/docs> · Qdrant dashboard:
-<http://localhost:6333/dashboard>
+<http://localhost:6333/dashboard> (both loopback-only)
+
+**Connecting an agent.** In the UI, Account → API keys → create one, then:
+
+```bash
+curl -H "Authorization: Bearer ck_..." -H 'content-type: application/json' \
+  -d '{"text":"We moved the event store to Mongo."}' http://localhost:8000/api/v1/ingest
+```
+
+Each key writes to its owner's graph, can be revoked at any time, and cannot
+manage accounts or mint more keys. The API listens on localhost only; set
+the port mapping in `continuum-be/local.yml` to `"8000:8000"` for agents on other machines.
 
 > The first start pulls ~6 GB of models into your Ollama if they are not there
-> already. `docker compose logs -f models` shows progress.
+> already. `docker-compose -f local.yml logs -f models` (in `continuum-be/`) shows progress.
 
 Then watch it handle a reversed decision end to end:
 
 ```bash
-cd continuum-be && uv run python scripts/seed_demo.py
+cd continuum-be && CONTINUUM_API_KEY=ck_... uv run python scripts/seed_demo.py
 ```
 
-To point the LLM at Groq or a hosted vLLM instead of your local Ollama, copy
-[`.env.example`](.env.example) to `.env` at this root — compose reads it and
-overrides its defaults.
+To point the LLM at Groq or a hosted vLLM instead of your local Ollama, put
+`LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` in
+`continuum-be/.envs/.local/.api.override` (gitignored; it overrides the tracked
+defaults in `.envs/.local/.api`).
 
 ---
 
@@ -104,7 +120,7 @@ changes.
 
 ```
 Continuum/
-├── docker-compose.yml       full stack — the only thing that spans both
+├── continuum-be/local.yml   the backend stack: qdrant + postgres + api
 ├── .env.example             every setting, with provider presets
 ├── CLAUDE.md                the engineering brief
 ├── continuum-be/            FastAPI + Qdrant + the resolution layer
@@ -171,14 +187,15 @@ land in an inbox with three verdicts, one of which is *both are true*.
 | **4 — Belief graph UI** | ✅ | `continuum-fe`: Three.js force-directed graph off `/memories/graph`, provenance panel, contradiction inbox, streaming chat |
 | **5 — Evaluation** | ✅ | 28-case labelled corpus; belief-loss, stale-belief and merge-loss measured separately; a gate sweep that replays one recorded run at every threshold for free |
 
-Backend: 207 tests. Frontend: 40. Neither needs a running service.
+Backend: 270 tests. Frontend: 76. Neither needs a running service.
 
 ---
 
 ## Stack
 
-**Backend** — FastAPI · uv · Qdrant · any OpenAI-compatible LLM (Ollama / vLLM /
-Groq) · `bge-m3` embeddings · structlog · APScheduler.
+**Backend** — FastAPI · uv · Qdrant · Postgres (SQLAlchemy 2 + Alembic, accounts
+only) · any OpenAI-compatible LLM (Ollama / vLLM / Groq) · `bge-m3` embeddings ·
+structlog · APScheduler.
 
 **Frontend** — React 19 · TypeScript · Vite · Tailwind v4 · shadcn-style
 primitives · Three.js via `react-force-graph-3d` · vitest.

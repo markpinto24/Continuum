@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from continuum.api.deps import MemoryStoreDep
+from continuum.api.deps import CurrentUser, MemoryStoreDep, limit_llm_requests
+from continuum.models.auth import Principal
 from continuum.models.memory import Memory, MemoryCategory, MemoryStatus
 from continuum.models.schemas import (
     GraphEdge,
@@ -17,13 +18,27 @@ from continuum.models.schemas import (
 router = APIRouter(prefix="/memories", tags=["memories"])
 
 
-@router.post("/search", response_model=MemorySearchResponse)
+async def _owned(memories: MemoryStoreDep, memory_id: str, principal: Principal) -> Memory:
+    """Fetch a memory the caller owns.
+
+    Someone else's memory answers 404, not 403: a different status would confirm
+    that the id exists, which is itself a leak when ids appear in shared logs.
+    """
+    memory = await memories.get(memory_id)
+    if not memory or memory.user_id != principal.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
+    return memory
+
+
+@router.post(
+    "/search", response_model=MemorySearchResponse, dependencies=[Depends(limit_llm_requests)]
+)
 async def search_memories(
-    request: MemorySearchRequest, memories: MemoryStoreDep
+    request: MemorySearchRequest, principal: CurrentUser, memories: MemoryStoreDep
 ) -> MemorySearchResponse:
-    """Semantic search over a user's memories."""
+    """Semantic search over your memories."""
     results = await memories.search(
-        user_id=request.user_id,
+        user_id=principal.user_id,
         query=request.query,
         limit=request.limit,
         statuses=request.statuses,
@@ -37,23 +52,23 @@ async def search_memories(
 
 @router.get("", response_model=MemoryListResponse)
 async def list_memories(
+    principal: CurrentUser,
     memories: MemoryStoreDep,
-    user_id: str = Query(..., min_length=1),
     limit: int = Query(200, ge=1, le=1000),
     status_filter: list[MemoryStatus] | None = Query(default=None, alias="status"),
     category: list[MemoryCategory] | None = Query(default=None),
 ) -> MemoryListResponse:
     """List memories. This is what the graph view will read from."""
     items = await memories.list_all(
-        user_id=user_id, limit=limit, statuses=status_filter, categories=category
+        user_id=principal.user_id, limit=limit, statuses=status_filter, categories=category
     )
     return MemoryListResponse(total=len(items), memories=items)
 
 
 @router.get("/graph", response_model=GraphResponse)
 async def memory_graph(
+    principal: CurrentUser,
     memories: MemoryStoreDep,
-    user_id: str = Query(..., min_length=1),
     limit: int = Query(500, ge=1, le=2000),
     include_archived: bool = Query(False),
 ) -> GraphResponse:
@@ -67,7 +82,9 @@ async def memory_graph(
         MemoryStatus.CONTRADICTED,
         MemoryStatus.SUPERSEDED,
     ]
-    items = await memories.list_all(user_id=user_id, limit=limit, statuses=statuses)
+    items = await memories.list_all(
+        user_id=principal.user_id, limit=limit, statuses=statuses
+    )
     known = {m.id for m in items}
 
     nodes = [
@@ -102,28 +119,24 @@ async def memory_graph(
 
 
 @router.post("/{memory_id}/reinforce", response_model=Memory)
-async def reinforce_memory(memory_id: str, memories: MemoryStoreDep) -> Memory:
+async def reinforce_memory(
+    memory_id: str, principal: CurrentUser, memories: MemoryStoreDep
+) -> Memory:
     """Confirm a memory is still true. Raises confidence and resets its decay clock."""
-    memory = await memories.get(memory_id)
-    if not memory:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
-    return await memories.reinforce(memory)
+    return await memories.reinforce(await _owned(memories, memory_id, principal))
 
 
 @router.post("/{memory_id}/reactivate", response_model=Memory)
-async def reactivate_memory(memory_id: str, memories: MemoryStoreDep) -> Memory:
+async def reactivate_memory(
+    memory_id: str, principal: CurrentUser, memories: MemoryStoreDep
+) -> Memory:
     """Bring an archived or superseded memory back. Nothing here is a one-way door."""
-    memory = await memories.get(memory_id)
-    if not memory:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
+    memory = await _owned(memories, memory_id, principal)
     memory.reactivate()
     memory.reinforce()
     return await memories.save(memory)
 
 
 @router.get("/{memory_id}", response_model=Memory)
-async def get_memory(memory_id: str, memories: MemoryStoreDep) -> Memory:
-    memory = await memories.get(memory_id)
-    if not memory:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
-    return memory
+async def get_memory(memory_id: str, principal: CurrentUser, memories: MemoryStoreDep) -> Memory:
+    return await _owned(memories, memory_id, principal)

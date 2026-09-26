@@ -9,11 +9,17 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from continuum.api.deps import ChatDep, RetrievalDep
-from continuum.models.schemas import ChatContext, ChatContextRequest, ChatRequest
+from continuum.api.deps import (
+    ChatDep,
+    CurrentUser,
+    RetrievalDep,
+    SettingsDep,
+    limit_llm_requests,
+)
+from continuum.models.schemas import ChatBody, ChatContext, ChatContextRequest, ChatRequest
 from continuum.services.chat import ChatService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -32,8 +38,10 @@ async def _sse(service: ChatService, request: ChatRequest) -> AsyncIterator[str]
         yield f"event: {event.event}\ndata: {json.dumps(event.data)}\n\n"
 
 
-@router.post("")
-async def chat(request: ChatRequest, service: ChatDep) -> StreamingResponse:
+@router.post("", dependencies=[Depends(limit_llm_requests)])
+async def chat(
+    body: ChatBody, principal: CurrentUser, service: ChatDep, settings: SettingsDep
+) -> StreamingResponse:
     """Answer from memory, streaming over SSE.
 
     Event sequence:
@@ -46,11 +54,17 @@ async def chat(request: ChatRequest, service: ChatDep) -> StreamingResponse:
       contributed back to the graph.
     - `error`   — the stream failed; no further events follow.
     """
-    if not request.latest_user_message():
+    if not body.latest_user_message():
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="`messages` must contain at least one non-empty user message.",
         )
+    if body.total_chars() > settings.max_input_chars:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"Messages are over the {settings.max_input_chars}-character limit.",
+        )
+    request = ChatRequest(**body.model_dump(), user_id=principal.user_id)
     return StreamingResponse(
         _sse(service, request),
         media_type="text/event-stream",
@@ -58,9 +72,11 @@ async def chat(request: ChatRequest, service: ChatDep) -> StreamingResponse:
     )
 
 
-@router.post("/context", response_model=ChatContext)
+@router.post(
+    "/context", response_model=ChatContext, dependencies=[Depends(limit_llm_requests)]
+)
 async def chat_context(
-    request: ChatContextRequest, retrieval: RetrievalDep
+    request: ChatContextRequest, principal: CurrentUser, retrieval: RetrievalDep
 ) -> ChatContext:
     """What chat *would* retrieve for a query, without generating an answer.
 
@@ -68,5 +84,5 @@ async def chat_context(
     needs to score retrieval on its own rather than through the answer.
     """
     return await retrieval.retrieve(
-        user_id=request.user_id, query=request.query, limit=request.limit
+        user_id=principal.user_id, query=request.query, limit=request.limit
     )

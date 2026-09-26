@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import uuid
 
-import structlog
-
 from continuum.clients.llm import LLMClient
 from continuum.config import Settings, get_settings
-from continuum.core import logging as clog
+from continuum.core import logger as clog
+from continuum.core.logger import get_logger
 from continuum.models.memory import Memory, MemoryStatus
 from continuum.models.schemas import IngestRequest, IngestResponse, ResolutionRecord
 from continuum.services.extraction import FactExtractor
@@ -28,7 +27,7 @@ from continuum.services.memory_store import MemoryStore
 from continuum.services.resolution import Resolution, ResolutionService, Verdict
 from continuum.services.subjects import canonical_subject
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 
 class IngestService:

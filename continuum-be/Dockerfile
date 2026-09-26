@@ -1,4 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# Builds with BuildKit AND the legacy builder: `docker-compose` v1 still uses
+# the latter, which rejects `RUN --mount`. Layer order does the caching instead
+# — the dependency layer below is reused whenever uv.lock is unchanged.
 
 # ---------------------------------------------------------------------------
 # Stage 1 — build the virtualenv
@@ -17,12 +19,10 @@ WORKDIR /app
 # Dependencies first, in their own layer. Application code changes far more
 # often than the lockfile, so this keeps rebuilds fast.
 COPY pyproject.toml uv.lock README.md ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev --no-cache
 
 COPY src/ ./src/
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-cache
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +40,10 @@ WORKDIR /app
 COPY --from=builder --chown=continuum:continuum /app/.venv /app/.venv
 COPY --chown=continuum:continuum src/ ./src/
 COPY --chown=continuum:continuum scripts/ ./scripts/
+# The speech model's cache volume mounts here. Created in the image and owned by
+# the runtime user, so Docker seeds the new volume with that ownership — else it
+# is root-owned and the first dictation cannot download the model.
+RUN mkdir -p /home/continuum/.cache/huggingface && chown -R continuum:continuum /home/continuum/.cache
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH=/app/src \

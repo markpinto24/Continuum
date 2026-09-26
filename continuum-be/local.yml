@@ -1,0 +1,157 @@
+# The backend's local-development stack: Qdrant + Postgres + the Continuum API.
+# Ollama runs on the HOST, and so does the web UI (a Vite dev server, not a
+# container). From continuum-be/:
+#
+#   docker-compose -f local.yml up -d --build    # the backend
+#   docker-compose -f local.yml down             # stop it; data is kept
+#   cd ../continuum-fe && yarn && yarn dev       # the UI at http://localhost:5173
+#
+# Named local.yml because it is the local stack; a production file would sit
+# beside it with TLS, real secrets and no loopback port mappings.
+#
+# Needs Compose v2 (`docker compose`, or `docker-compose` when it points at v2):
+# it uses `name:` and an optional env file. Compose v1 (1.29) cannot run it — and
+# crashes with KeyError 'ContainerConfig' on Docker Engine 25+ regardless.
+#
+# Settings come from .envs/.local/ (tracked local defaults, plus an optional
+# gitignored .api.override for anything personal). This file deliberately
+# interpolates NOTHING from continuum-be/.env: that one configures a local
+# `uv run uvicorn`, with localhost URLs that are wrong inside a container.
+#
+# `up` is the whole backend install, given a running Ollama. The `models` job
+# asks Ollama to pull the configured models; the API waits for it, Qdrant and
+# Postgres, then — from its own lifespan hook — upgrades the Postgres schema with
+# Alembic and creates (or re-embeds) the Qdrant collection.
+#
+# Why Ollama is not a container: a containerised Ollama keeps its own copy of
+# every model — here a 5.5 GB image plus 6.1 GB of models the host already had.
+# The containers reach the host daemon through `host.docker.internal`, so Ollama
+# must listen beyond loopback (the Linux installer's default, `*:11434`).
+
+# Fixed, not derived from the folder name. The folder is continuum-be, and a
+# derived name would silently create new, EMPTY volumes (continuum-be_*) — every
+# memory and account would appear lost. This keeps continuum_qdrant_storage and
+# continuum_postgres_data.
+name: continuum
+
+services:
+  qdrant:
+    # Pinned conservatively. qdrant-client is 1.19.x; bump this tag to match
+    # once you have confirmed the tag exists in your registry.
+    image: qdrant/qdrant:v1.12.4
+    container_name: continuum-qdrant
+    restart: unless-stopped
+    ports:
+      # Loopback only. Qdrant has no auth of its own unless given a key, and it
+      # holds every memory in plain text — published on all interfaces, anyone
+      # on the network could read the whole store and never touch the API's
+      # authentication. The api reaches it over the compose network regardless.
+      # For a shared host, also set QDRANT__SERVICE__API_KEY here and the same
+      # value as QDRANT_API_KEY for the api (an EMPTY key locks everyone out, so
+      # it cannot simply default to blank).
+      - "127.0.0.1:6333:6333"   # REST + dashboard -> http://localhost:6333/dashboard
+      - "127.0.0.1:6334:6334"   # gRPC
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__ENABLE_CORS: "true"
+    healthcheck:
+      # The Qdrant image is distroless - no curl, no shell utilities. Its own
+      # binary can run a healthcheck against the gRPC port instead.
+      test: ["CMD", "/qdrant/qdrant", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Accounts, sessions and API keys. Memories stay in Qdrant.
+  postgres:
+    image: postgres:17-alpine
+    container_name: continuum-postgres
+    restart: unless-stopped
+    env_file:
+      - .envs/.local/.postgres
+    ports:
+      # Loopback only, like Qdrant: for `uv run` development and the alembic CLI.
+      # The api reaches it over the compose network.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U continuum -d continuum"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # One-shot job: make sure the host's Ollama has the configured models, then
+  # exit. Uses Ollama's own pull API from an 8 MB alpine image instead of the
+  # 5.5 GB ollama image — it only needs to send two HTTP requests. A model that
+  # is already present returns immediately. The API waits for this to succeed.
+  models:
+    image: alpine:latest
+    container_name: continuum-models
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # The same file as the api, so the models it ensures are the models it uses.
+    env_file:
+      - .envs/.local/.api
+      - path: .envs/.local/.api.override
+        required: false
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if ! wget -qO- -T 10 "$${OLLAMA_URL}/api/version" >/dev/null; then
+          echo "Cannot reach Ollama at $${OLLAMA_URL}."
+          echo "Is it running on the host, and listening beyond 127.0.0.1?"
+          exit 1
+        fi
+        for model in "$${LLM_MODEL}" "$${EMBEDDING_MODEL}"; do
+          echo "ensuring $${model} ..."
+          result=$$(wget -qO- -T 3600 --header="Content-Type: application/json" \
+            --post-data="{\"model\":\"$${model}\",\"stream\":false}" \
+            "$${OLLAMA_URL}/api/pull")
+          case "$${result}" in
+            *success*) echo "  $${model}: ready" ;;
+            *) echo "  $${model}: pull failed: $${result}"; exit 1 ;;
+          esac
+        done
+        echo "models ready"
+    restart: "no"
+
+  api:
+    build:
+      # This directory: the Dockerfile and .dockerignore sit beside this file.
+      context: .
+      dockerfile: Dockerfile
+    container_name: continuum-api
+    restart: unless-stopped
+    ports:
+      # Loopback: the UI's Vite proxy and local agents reach it on localhost. To
+      # let agents on other machines in, change it to "8000:8000" — every
+      # endpoint but health and sign-in needs a key or session — and put TLS in
+      # front first beyond a trusted network: keys travel in a header.
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      models:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # The Whisper model for dictation (~145 MB for "base"), downloaded on first
+      # start. On a volume so a rebuild does not download it again.
+      - speech_models:/home/continuum/.cache/huggingface
+    env_file:
+      - .envs/.local/.api
+      - path: .envs/.local/.api.override
+        required: false
+
+volumes:
+  qdrant_storage:
+  postgres_data:
+  speech_models:

@@ -24,12 +24,10 @@ import type { ConflictListResponse } from '@/lib/types'
  * between a review queue people use and one they abandon.
  */
 export function ContradictionInbox({
-  userId,
   resource,
   onResolved,
   onSelect,
 }: {
-  userId: string
   resource: Resource<ConflictListResponse>
   onResolved: () => void
   onSelect: (id: string) => void
@@ -42,7 +40,7 @@ export function ContradictionInbox({
   ) => {
     setPending(pair.memory.id)
     try {
-      await api.resolveConflict({ user_id: userId, ...body })
+      await api.resolveConflict(body)
       resource.refresh()
       onResolved()
     } finally {

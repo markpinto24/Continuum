@@ -2,11 +2,36 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from continuum.models.memory import Memory, MemoryCategory, MemoryStatus
+
+
+class ClientBody(BaseModel):
+    """Base for every request body a client sends.
+
+    Unknown fields are refused rather than ignored, and `user_id` gets its own
+    message: it was part of every request before authentication, and a client
+    still sending it must learn that it no longer chooses whose graph it writes
+    to — not have it silently dropped while it assumes otherwise.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_user_id(cls, data: Any) -> Any:
+        # Bodies that create an account take a user_id for the NEW account; that
+        # is naming, not claiming to be someone, so they declare the field.
+        if isinstance(data, dict) and "user_id" in data and "user_id" not in cls.model_fields:
+            raise ValueError(
+                "user_id is not accepted: the memory owner is whoever the API key or "
+                "session belongs to."
+            )
+        return data
 
 
 class Message(BaseModel):
@@ -14,14 +39,13 @@ class Message(BaseModel):
     content: str
 
 
-class IngestRequest(BaseModel):
+class _IngestFields(BaseModel):
     """Feed the system something to remember.
 
     Supply either `text` (a note, a meeting summary, a decision record) or
     `messages` (a conversation transcript). Exactly one is required.
     """
 
-    user_id: str = Field(..., min_length=1)
     text: str | None = None
     messages: list[Message] | None = None
     source_id: str | None = Field(
@@ -34,6 +58,16 @@ class IngestRequest(BaseModel):
         if self.messages:
             return "\n".join(f"{m.role}: {m.content}" for m in self.messages).strip()
         return ""
+
+
+class IngestBody(ClientBody, _IngestFields):
+    """What a client posts to /ingest."""
+
+
+class IngestRequest(_IngestFields):
+    """What IngestService consumes: the body plus the owner, set by the server."""
+
+    user_id: str = Field(..., min_length=1)
 
 
 class ResolutionRecord(BaseModel):
@@ -72,9 +106,8 @@ class IngestResponse(BaseModel):
     resolutions: list[ResolutionRecord] = Field(default_factory=list)
 
 
-class MemorySearchRequest(BaseModel):
-    user_id: str
-    query: str
+class MemorySearchRequest(ClientBody):
+    query: str = Field(..., min_length=1)
     limit: int = Field(default=8, ge=1, le=50)
     categories: list[MemoryCategory] | None = None
     statuses: list[MemoryStatus] | None = None
@@ -101,6 +134,7 @@ class HealthResponse(BaseModel):
     environment: str
     qdrant: str
     llm: str
+    database: str
 
 
 # --- Phase 2: conflicts, decay, graph ---------------------------------------
@@ -118,14 +152,13 @@ class ConflictListResponse(BaseModel):
     conflicts: list[ConflictPair]
 
 
-class ConflictResolutionRequest(BaseModel):
+class ConflictResolutionRequest(ClientBody):
     """A human's verdict on a conflict.
 
     `keep_both` is a first-class outcome, not a cop-out: plenty of apparent
     contradictions are two things that are simply both true.
     """
 
-    user_id: str
     winner_id: str
     loser_ids: list[str] = Field(default_factory=list)
     keep_both: bool = False
@@ -137,8 +170,7 @@ class ConflictResolutionResponse(BaseModel):
     action: Literal["superseded", "kept_both"]
 
 
-class DecaySweepRequest(BaseModel):
-    user_id: str
+class DecaySweepRequest(ClientBody):
     dry_run: bool = Field(
         default=False, description="Compute the sweep without writing anything."
     )
@@ -202,8 +234,7 @@ class ChatContext(BaseModel):
     disagreements: list[Disagreement] = Field(default_factory=list)
 
 
-class ChatRequest(BaseModel):
-    user_id: str = Field(..., min_length=1)
+class _ChatFields(BaseModel):
     messages: list[Message] = Field(..., min_length=1)
     limit: int | None = Field(
         default=None, ge=1, le=25, description="Memories to inject. Defaults to config."
@@ -222,11 +253,23 @@ class ChatRequest(BaseModel):
                 return message.content.strip()
         return ""
 
+    def total_chars(self) -> int:
+        return sum(len(m.content) for m in self.messages)
 
-class ChatContextRequest(BaseModel):
-    """Retrieval preview — what chat *would* see, with no generation."""
+
+class ChatBody(ClientBody, _ChatFields):
+    """What a client posts to /chat."""
+
+
+class ChatRequest(_ChatFields):
+    """What ChatService consumes: the body plus the owner, set by the server."""
 
     user_id: str = Field(..., min_length=1)
+
+
+class ChatContextRequest(ClientBody):
+    """Retrieval preview — what chat *would* see, with no generation."""
+
     query: str = Field(..., min_length=1)
     limit: int | None = Field(default=None, ge=1, le=25)
 
@@ -255,3 +298,100 @@ class ChatEvent(BaseModel):
 
     event: Literal["context", "delta", "done", "error"]
     data: dict
+
+
+# --- Speech -------------------------------------------------------------------
+
+
+class SpeechStatus(BaseModel):
+    enabled: bool
+    ready: bool = Field(..., description="Model loaded. False during the first download.")
+    max_seconds: int
+    language: str | None = None
+
+
+# --- Authentication -----------------------------------------------------------
+
+
+class AuthStatus(BaseModel):
+    """Public: tells the web UI whether to show sign-in or first-run setup."""
+
+    needs_setup: bool
+    web_setup_allowed: bool
+
+
+class SetupRequest(ClientBody):
+    email: str
+    password: str
+    user_id: str | None = Field(
+        default=None,
+        description=(
+            "Memory owner id for this first admin. Set it to adopt memories stored "
+            "before authentication existed; otherwise a random id is assigned."
+        ),
+    )
+
+
+class LoginRequest(ClientBody):
+    email: str
+    password: str
+
+
+class Me(BaseModel):
+    user_id: str
+    email: str
+    is_admin: bool
+    via: Literal["session", "api_key"]
+
+
+class PasswordChangeRequest(ClientBody):
+    current_password: str
+    new_password: str
+
+
+class ApiKeyCreateRequest(ClientBody):
+    name: str = Field(..., description="What this key is for, e.g. 'laptop agent'.")
+
+
+class ApiKeySummary(BaseModel):
+    id: str
+    name: str
+    prefix: str = Field(..., description="The first characters of the key, to recognise it.")
+    created_at: datetime
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class ApiKeyCreated(BaseModel):
+    key: ApiKeySummary
+    secret: str = Field(
+        ..., description="The full key. Shown once; it cannot be retrieved again."
+    )
+
+
+class ApiKeyListResponse(BaseModel):
+    keys: list[ApiKeySummary]
+
+
+class UserSummary(BaseModel):
+    id: str
+    email: str
+    is_admin: bool
+    disabled: bool
+    created_at: datetime
+
+
+class UserListResponse(BaseModel):
+    users: list[UserSummary]
+
+
+class UserCreateRequest(ClientBody):
+    email: str
+    password: str
+    user_id: str | None = None
+    is_admin: bool = False
+
+
+class UserUpdateRequest(ClientBody):
+    disabled: bool | None = None
+    is_admin: bool | None = None

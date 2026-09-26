@@ -3,10 +3,11 @@
   "private": true,
   "version": "0.4.0",
   "type": "module",
-  "description": "Continuum — belief graph UI. Three.js force-directed view of a memory graph, contradiction inbox, memory-augmented chat.",
+  "description": "Continuum \u2014 belief graph UI. Three.js force-directed view of a memory graph, contradiction inbox, memory-augmented chat.",
   "engines": {
     "node": ">=20.11"
   },
+  "packageManager": "yarn@1.22.22",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -37,6 +38,7 @@
   "devDependencies": {
     "@eslint/js": "^9.20.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.2.0",
     "@testing-library/user-event": "^14.6.7",
     "@types/node": "^26.6.2",
@@ -55,5 +57,8 @@
     "typescript-eslint": "^8.24.0",
     "vite": "^6.0.0",
     "vitest": "^3.0.0"
+  },
+  "resolutions": {
+    "vite": "^6.0.0"
   }
 }

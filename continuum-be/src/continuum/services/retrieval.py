@@ -29,14 +29,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import structlog
-
 from continuum.config import Settings, get_settings
+from continuum.core.logger import get_logger
 from continuum.models.memory import Memory, MemoryStatus
 from continuum.models.schemas import ChatContext, Disagreement, RetrievedMemory
 from continuum.services.memory_store import MemoryStore
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 
 def rank_score(

@@ -6,11 +6,10 @@ Sits between the API and Qdrant, and is the only place that knows how a
 
 from __future__ import annotations
 
-import structlog
-
 from continuum.clients.llm import LLMClient
 from continuum.clients.qdrant import QdrantStore
 from continuum.config import Settings, get_settings
+from continuum.core.logger import get_logger
 from continuum.models.memory import (
     RETRIEVABLE_STATUSES,
     Memory,
@@ -18,7 +17,7 @@ from continuum.models.memory import (
     MemoryStatus,
 )
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 
 class MemoryStore:

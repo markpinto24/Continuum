@@ -21,6 +21,7 @@ from continuum.models.schemas import (
     RetrievedMemory,
 )
 from continuum.services.chat import ChatService, build_system_prompt
+from tests.auth_helpers import sign_in_as
 
 
 @pytest.fixture
@@ -360,13 +361,14 @@ async def test_the_route_frames_events_as_server_sent_events(settings):
 
     app = FastAPI()
     app.include_router(chat_route.router)
+    sign_in_as(app)
     app.state.chat = service
     app.state.retrieval = StubRetrieval(context)
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/chat", json={"user_id": "mark", "messages": [{"role": "user", "content": "db?"}]}
+            "/chat", json={"messages": [{"role": "user", "content": "db?"}]}
         )
 
     assert response.status_code == 200
@@ -390,13 +392,14 @@ async def test_the_route_rejects_a_turn_with_nothing_to_answer(settings):
 
     app = FastAPI()
     app.include_router(chat_route.router)
+    sign_in_as(app)
     app.state.chat = build(ChatContext(query=""), StubLLM(["x"]), settings)
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/chat",
-            json={"user_id": "mark", "messages": [{"role": "assistant", "content": "hi"}]},
+            json={"messages": [{"role": "assistant", "content": "hi"}]},
         )
 
     assert response.status_code == 422
@@ -413,12 +416,13 @@ async def test_the_context_endpoint_previews_retrieval_without_generating(settin
 
     app = FastAPI()
     app.include_router(chat_route.router)
+    sign_in_as(app)
     app.state.retrieval = retrieval
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/chat/context", json={"user_id": "mark", "query": "db?"}
+            "/chat/context", json={"query": "db?"}
         )
 
     assert response.status_code == 200

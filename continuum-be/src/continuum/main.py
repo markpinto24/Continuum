@@ -2,30 +2,35 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
-import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from continuum.api.router import api_router
+from continuum.clients.authdb import AuthDB
 from continuum.clients.llm import LLMClient
 from continuum.clients.qdrant import QdrantStore
 from continuum.config import get_settings
-from continuum.core.logging import configure_logging
+from continuum.core.logger import configure_logging, get_logger
 from continuum.core.middleware import RequestContextMiddleware
+from continuum.db.engine import make_engine, migrate
+from continuum.services.auth import AuthService
 from continuum.services.chat import ChatService
 from continuum.services.decay import DecayService
 from continuum.services.extraction import FactExtractor
 from continuum.services.ingest import IngestService
+from continuum.services.limits import SlidingWindow
 from continuum.services.memory_store import MemoryStore
 from continuum.services.reindex import EmbeddingMigration
 from continuum.services.resolution import ResolutionService
 from continuum.services.retrieval import RetrievalService
+from continuum.services.speech import SpeechService
 
-log = structlog.get_logger("continuum.app")
+log = get_logger("continuum.app")
 
 
 def _build_scheduler(decay: DecayService) -> AsyncIOScheduler:
@@ -56,6 +61,15 @@ async def lifespan(app: FastAPI):
     configure_logging()
     settings = get_settings()
 
+    # Accounts first: a missing or unmigratable database should stop the API
+    # before it re-embeds anything or accepts a single request. The schema is
+    # upgraded here, so there is no separate migrate step to run by hand.
+    engine = make_engine(settings)
+    await migrate(engine)
+    authdb = AuthDB(engine)
+    auth = AuthService(authdb, settings)
+    await auth.bootstrap_from_settings()
+
     llm = LLMClient(settings)
     qdrant = QdrantStore(settings)
     await qdrant.ensure_collection()
@@ -81,6 +95,19 @@ async def lifespan(app: FastAPI):
     app.state.ingest = ingest
     app.state.retrieval = retrieval
     app.state.chat = ChatService(retrieval, ingest, llm, settings)
+    app.state.authdb = authdb
+    app.state.auth = auth
+    app.state.llm_limiter = SlidingWindow(settings.llm_requests_per_minute, 60)
+
+    speech = SpeechService(settings)
+    app.state.speech = speech
+    # Background, not awaited: a first-run model download must not hold up the
+    # API's healthcheck. Dictation before it finishes just waits for the load.
+    preload = (
+        asyncio.create_task(speech.preload())
+        if settings.speech_enabled and settings.speech_preload
+        else None
+    )
 
     scheduler: AsyncIOScheduler | None = None
     if settings.decay_enabled:
@@ -102,10 +129,13 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if preload and not preload.done():
+            preload.cancel()
         if scheduler:
             scheduler.shutdown(wait=False)
         await llm.aclose()
         await qdrant.aclose()
+        await engine.dispose()
         log.info("continuum.stopped")
 
 
@@ -119,7 +149,7 @@ def create_app() -> FastAPI:
             "preferences and constraints, tracks why they changed, and escalates "
             "genuine contradictions instead of guessing."
         ),
-        version="0.3.0",
+        version="0.4.0",
         lifespan=lifespan,
     )
 

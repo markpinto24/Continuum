@@ -1,0 +1,7 @@
+# Settings for the postgres container in local.yml. Tracked: local defaults only.
+# Postgres reads these ONCE, when its volume is first created — changing the
+# password later means ALTER USER inside the database, not editing this file.
+# DATABASE_URL in .api must use the same user, password and database.
+POSTGRES_USER=continuum
+POSTGRES_PASSWORD=continuum
+POSTGRES_DB=continuum
