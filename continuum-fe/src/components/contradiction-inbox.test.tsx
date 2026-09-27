@@ -4,13 +4,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ContradictionInbox } from './contradiction-inbox'
 import type { Resource } from '@/hooks/use-resource'
-import type { ConflictListResponse, Memory } from '@/lib/types'
+import type { ConflictListResponse, GateEvidence, Memory } from '@/lib/types'
 
 const resolveConflict = vi.fn()
+const feedbackEvidence = vi.fn()
 
 vi.mock('@/lib/api', () => ({
   api: {
     resolveConflict: (...args: unknown[]) => resolveConflict(...args),
+    feedbackEvidence: () => feedbackEvidence(),
+    feedbackExportUrl: '/api/v1/feedback/export',
   },
 }))
 
@@ -28,6 +31,7 @@ function memory(id: string, content: string): Memory {
     supersedes: [],
     superseded_by: null,
     conflicts_with: [],
+    escalations: [],
     created_at: '2026-03-04T00:00:00Z',
     updated_at: '2026-03-04T00:00:00Z',
     last_reinforced_at: '2026-03-04T00:00:00Z',
@@ -48,6 +52,7 @@ const ONE_DISPUTE = resource({
 })
 
 beforeEach(() => {
+  feedbackEvidence.mockResolvedValue(evidence({}))
   resolveConflict.mockReset()
   resolveConflict.mockResolvedValue({ winner: postgres, losers: [mongo], action: 'kept_both' })
 })
@@ -135,5 +140,48 @@ describe('ContradictionInbox', () => {
     )
 
     expect(screen.getByText(/nothing to decide/i)).toBeDefined()
+  })
+})
+
+
+function evidence(over: Partial<GateEvidence>): GateEvidence {
+  return {
+    gate: 0.8, labels: 0, with_judgement: 0, bands: [], below_gate_total: 0,
+    below_gate_refuted: 0, error_upper_bound: null, role_rule_total: 0, role_rule_shared: 0,
+    conflicts_total: 0, conflicts_both_hold: 0,
+    recommendation: 'Keep 0.80. No escalated supersedes yet.', ...over,
+  }
+}
+
+describe('learning from decisions', () => {
+  it('explains why a pair is in the inbox, from what the resolver recorded', () => {
+    const newer = {
+      ...memory('m2', 'Atlas runs on Mongo'),
+      escalations: [{
+        target_id: 'm1', judge_relation: 'supersedes' as const, judge_confidence: 0.64,
+        similarity: 0.8, gate: 0.8, forced: false, reason: '', raised_at: '2026-09-27T00:00:00Z',
+      }],
+    }
+    render(
+      <ContradictionInbox
+        resource={resource({ total: 1, conflicts: [{ memory: memory('m1', 'Atlas runs on Postgres'), conflicting: [newer] }] })}
+        onResolved={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/under the 0\.80 bar for acting alone/)).toBeDefined()
+  })
+
+  it('reports what the decisions say about the gate, with an export', async () => {
+    feedbackEvidence.mockResolvedValue(
+      evidence({ labels: 4, below_gate_total: 3, recommendation: 'Keep 0.80 for now. All 3 were right.' }),
+    )
+    render(<ContradictionInbox resource={resource({ total: 0, conflicts: [] })} onResolved={vi.fn()} onSelect={vi.fn()} />)
+
+    expect(await screen.findByText('Keep 0.80 for now. All 3 were right.')).toBeDefined()
+    expect(screen.getByText(/4 decisions recorded/)).toBeDefined()
+    expect(screen.getByRole('link', { name: /export as test cases/i }).getAttribute('href')).toBe(
+      '/api/v1/feedback/export',
+    )
   })
 })

@@ -4,6 +4,7 @@ import {
   CornerDownLeft,
   Loader2,
   Mic,
+  Scale,
   Square,
   Volume2,
   X,
@@ -18,7 +19,8 @@ import { useDictation } from '@/hooks/use-dictation'
 import { useResource } from '@/hooks/use-resource'
 import { useSpeechSynthesis } from '@/hooks/use-speech-synthesis'
 import { api, streamChat } from '@/lib/api'
-import type { ChatContext, ChatDone, ChatMessage, Disagreement } from '@/lib/types'
+import { disputeKey } from '@/lib/escalation'
+import type { ChatContext, ChatDone, ChatMessage, Disagreement, Memory } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { describeWriteBack } from '@/lib/write-back'
 
@@ -53,6 +55,16 @@ export function ChatPanel({
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  // Disputes settled from the chat, by dispute key -> what was decided. The same
+  // dispute can sit above several turns; once settled, none of them offers it again.
+  const [settled, setSettled] = useState<Record<string, string>>({})
+  const settle = useCallback(
+    (key: string, outcome: string) => {
+      setSettled((current) => ({ ...current, [key]: outcome }))
+      onGraphChanged()
+    },
+    [onGraphChanged],
+  )
 
   const speechStatus = useResource(() => api.speechStatus(), [])
   const maxSeconds = speechStatus.data?.max_seconds ?? 120
@@ -164,6 +176,8 @@ export function ChatPanel({
                 <TurnView
                   turn={turn}
                   onSelectMemory={onSelectMemory}
+                  settled={settled}
+                  onSettled={settle}
                   reader={reader}
                   readId={`turn-${index}`}
                   finished={!(streaming && index === turns.length - 1)}
@@ -290,12 +304,16 @@ type Reader = ReturnType<typeof useSpeechSynthesis>
 function TurnView({
   turn,
   onSelectMemory,
+  settled,
+  onSettled,
   reader,
   readId,
   finished,
 }: {
   turn: Turn
   onSelectMemory: (id: string) => void
+  settled: Record<string, string>
+  onSettled: (key: string, outcome: string) => void
   reader: Reader
   readId: string
   finished: boolean
@@ -313,7 +331,13 @@ function TurnView({
   return (
     <div className="space-y-2">
       {turn.context?.disagreements.map((group, index) => (
-        <DisagreementBanner key={index} group={group} onSelectMemory={onSelectMemory} />
+        <DisagreementBanner
+          key={index}
+          group={group}
+          onSelectMemory={onSelectMemory}
+          outcome={settled[disputeKey(group)]}
+          onSettled={onSettled}
+        />
       ))}
 
       {turn.context && turn.context.memories.length > 0 && (
@@ -401,37 +425,104 @@ function clock(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
+/**
+ * An open disagreement, settled where it came up.
+ *
+ * The answer below already asks which side holds; these buttons let the person
+ * say so without leaving the conversation. It is the same decision the inbox
+ * records — and "both are true" is as prominent as picking a side, because it
+ * is the right answer often enough. Nothing here is decided by the model: the
+ * person presses the button.
+ */
 function DisagreementBanner({
   group,
   onSelectMemory,
+  outcome,
+  onSettled,
 }: {
   group: Disagreement
   onSelectMemory: (id: string) => void
+  outcome: string | undefined
+  onSettled: (key: string, outcome: string) => void
 }) {
+  const [pending, setPending] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const key = disputeKey(group)
+
+  const decide = async (winner: Memory, keepBoth: boolean) => {
+    setPending(keepBoth ? 'both' : winner.id)
+    setError(null)
+    try {
+      await api.resolveConflict({
+        winner_id: winner.id,
+        loser_ids: group.memories.filter((m) => m.id !== winner.id).map((m) => m.id),
+        keep_both: keepBoth,
+      })
+      onSettled(key, keepBoth ? 'Kept both — each stays true.' : `Settled: “${winner.content}” holds.`)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  if (outcome) {
+    return (
+      <p className="flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-2.5 py-1.5 text-[11px] text-accent">
+        <Check className="size-3.5" />
+        {outcome} Recorded as a decision the resolver learns from.
+      </p>
+    )
+  }
+
   return (
     <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
       <p className="flex items-center gap-1.5 text-[11px] font-medium text-amber-300">
         <AlertTriangle className="size-3.5" />
-        The record disagrees with itself
+        The record disagrees with itself — which holds?
         {group.subject && <Badge className="border-amber-500/30 bg-transparent text-amber-300/90">{group.subject}</Badge>}
       </p>
       <ul className="mt-1.5 space-y-1">
         {group.memories.map((memory) => (
-          <li key={memory.id}>
+          <li key={memory.id} className="flex items-start gap-1.5">
             <button
               type="button"
               onClick={() => onSelectMemory(memory.id)}
-              className="w-full rounded px-1 py-0.5 text-left text-[11px] leading-relaxed text-amber-100/90 transition-colors hover:bg-amber-500/10"
+              className="flex-1 rounded px-1 py-0.5 text-left text-[11px] leading-relaxed text-amber-100/90 transition-colors hover:bg-amber-500/10"
             >
               {memory.content}
               <span className="ml-1 text-amber-200/50 tabular-nums">
                 ({memory.confidence.toFixed(2)}, {new Date(memory.created_at).toLocaleDateString()})
               </span>
             </button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={pending !== null}
+              onClick={() => void decide(memory, false)}
+              className="h-6 shrink-0 px-2 text-[11px] text-amber-200 hover:text-amber-100"
+            >
+              {pending === memory.id ? <Loader2 className="animate-spin" /> : <Check />}
+              This holds
+            </Button>
           </li>
         ))}
       </ul>
-      <p className="mt-1 text-[10px] text-amber-200/60">Resolve it in the Inbox tab.</p>
+      <div className="mt-1 flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={pending !== null}
+          onClick={() => void decide(group.memories[0], true)}
+          className="h-6 px-2 text-[11px] text-amber-200 hover:text-amber-100"
+        >
+          {pending === 'both' ? <Loader2 className="animate-spin" /> : <Scale />}
+          Both are true
+        </Button>
+        {error && <span className="text-[11px] text-danger">{error}</span>}
+      </div>
     </div>
   )
 }

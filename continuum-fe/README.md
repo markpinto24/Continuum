@@ -88,7 +88,7 @@ server listens on localhost only; `yarn dev --host` exposes it on your network.
 ```bash
 yarn lint              # eslint, flat config, TypeScript
 yarn build             # tsc -b, then vite build
-yarn test              # vitest, jsdom — 76 tests, no backend needed
+yarn test              # vitest, jsdom — 87 tests, no backend needed
 ```
 
 Two yarn-specific details, both in `package.json` / `.yarnrc`:

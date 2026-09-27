@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from continuum.api.deps import CurrentUser, MemoryStoreDep
+from continuum.api.deps import CurrentUser, FeedbackDep, MemoryStoreDep
 from continuum.models.schemas import (
     ConflictListResponse,
     ConflictPair,
@@ -55,7 +55,10 @@ async def list_conflicts(
 
 @router.post("/resolve", response_model=ConflictResolutionResponse)
 async def resolve_conflict(
-    request: ConflictResolutionRequest, principal: CurrentUser, memories: MemoryStoreDep
+    request: ConflictResolutionRequest,
+    principal: CurrentUser,
+    memories: MemoryStoreDep,
+    feedback: FeedbackDep,
 ) -> ConflictResolutionResponse:
     """Apply a human verdict.
 
@@ -70,6 +73,11 @@ async def resolve_conflict(
     loser_ids = request.loser_ids or [c for c in winner.conflicts_with]
     lookup = await memories.resolve_ids(loser_ids)
     losers = [m for m in lookup.values() if m.user_id == principal.user_id]
+    # The label describes the pair as the resolver saw it, so take it from a
+    # snapshot — applying the decision below reinforces the winner — but write it
+    # only once the decision has actually been applied.
+    seen_winner = winner.model_copy(deep=True)
+    seen_losers = [loser.model_copy(deep=True) for loser in losers]
 
     if request.keep_both:
         for loser in losers:
@@ -77,6 +85,9 @@ async def resolve_conflict(
             await memories.save(loser)
             winner.clear_conflict_with(loser.id)
         await memories.save(winner)
+        await feedback.record_resolution(
+            principal.user_id, seen_winner, seen_losers, keep_both=True
+        )
         return ConflictResolutionResponse(winner=winner, losers=losers, action="kept_both")
 
     for loser in losers:
@@ -87,5 +98,6 @@ async def resolve_conflict(
 
     winner.reinforce()
     await memories.save(winner)
+    await feedback.record_resolution(principal.user_id, seen_winner, seen_losers, keep_both=False)
 
     return ConflictResolutionResponse(winner=winner, losers=losers, action="superseded")

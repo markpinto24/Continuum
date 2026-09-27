@@ -3,11 +3,13 @@ import { useState } from 'react'
 
 import { EmptyPanel } from '@/components/memory-detail'
 import { Badge } from '@/components/ui/badge'
+import { LearningPanel } from '@/components/learning-panel'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import { describeEscalation, findEscalation } from '@/lib/escalation'
 import { CATEGORY_LABEL } from '@/lib/memory-style'
 import type { ConflictPair, Memory } from '@/lib/types'
-import type { Resource } from '@/hooks/use-resource'
+import { type Resource, useResource } from '@/hooks/use-resource'
 import type { ConflictListResponse } from '@/lib/types'
 
 /**
@@ -33,6 +35,9 @@ export function ContradictionInbox({
   onSelect: (id: string) => void
 }) {
   const [pending, setPending] = useState<string | null>(null)
+  // Refetched whenever the conflict list reloads — i.e. after any decision,
+  // whether made here or in the chat.
+  const evidence = useResource(() => api.feedbackEvidence(), [resource.data])
 
   const resolve = async (
     pair: ConflictPair,
@@ -58,10 +63,13 @@ export function ContradictionInbox({
   const pairs = resource.data?.conflicts ?? []
   if (pairs.length === 0) {
     return (
-      <EmptyPanel
-        title="Nothing to decide"
-        body="No unresolved contradictions. When the resolver is not confident enough to retire a belief on its own, the pair lands here instead of being guessed at."
-      />
+      <div className="scrollbar-slim h-full overflow-y-auto px-4 py-4">
+        <EmptyPanel
+          title="Nothing to decide"
+          body="No unresolved contradictions. When the resolver is not confident enough to retire a belief on its own, the pair lands here instead of being guessed at."
+        />
+        <LearningPanel evidence={evidence} />
+      </div>
     )
   }
 
@@ -76,9 +84,15 @@ export function ContradictionInbox({
         {pairs.map((pair) => {
           const busy = pending === pair.memory.id
           const sides = [pair.memory, ...pair.conflicting]
+          const why = describeEscalation(findEscalation(sides))
 
           return (
             <li key={pair.memory.id} className="panel overflow-hidden">
+              {why && (
+                <p className="border-b border-border bg-surface-raised/40 px-3 py-1.5 text-[11px] leading-relaxed text-muted">
+                  {why}
+                </p>
+              )}
               <div className="divide-y divide-border">
                 {sides.map((side) => (
                   <Side
@@ -121,6 +135,7 @@ export function ContradictionInbox({
           )
         })}
       </ul>
+      <LearningPanel evidence={evidence} />
     </div>
   )
 }

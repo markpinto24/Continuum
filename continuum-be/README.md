@@ -181,7 +181,7 @@ gitignored.
 
 ```bash
 # from continuum-be/
-uv run pytest                      # 270 tests, no services needed
+uv run pytest                      # 286 tests, no services needed
 uv run ruff check .
 CONTINUUM_API_KEY=ck_... uv run python scripts/seed_demo.py  # full pipeline, live
 ```
@@ -247,6 +247,9 @@ runs with `TEST_DATABASE_URL` set to a database the tests may wipe.
 | `GET` `POST` `PATCH` | `/api/v1/admin/users[/{id}]` | Manage accounts (admins, session only) |
 | `GET` | `/api/v1/speech/status` | Is dictation on, is the model loaded, max length |
 | `POST` | `/api/v1/speech/transcribe` | Multipart `audio` → text, by local Whisper; nothing stored |
+| `GET` | `/api/v1/feedback/labels` | Your settled conflicts, each with what the resolver had thought |
+| `GET` | `/api/v1/feedback/evidence` | Would a lower auto-supersede gate have been safe? Counted from your decisions |
+| `GET` | `/api/v1/feedback/export` | Your decisions as corpus YAML, for `run_eval.py --add-cases` |
 | `POST` | `/api/v1/ingest` | Feed a note or transcript; extract, resolve, store |
 | `POST` | `/api/v1/memories/search` | Semantic search over your memories |
 | `GET` | `/api/v1/memories` | List memories |

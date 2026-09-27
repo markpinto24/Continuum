@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from continuum.api.router import api_router
 from continuum.clients.authdb import AuthDB
+from continuum.clients.labels import LabelStore
 from continuum.clients.llm import LLMClient
 from continuum.clients.qdrant import QdrantStore
 from continuum.config import get_settings
@@ -22,6 +23,7 @@ from continuum.services.auth import AuthService
 from continuum.services.chat import ChatService
 from continuum.services.decay import DecayService
 from continuum.services.extraction import FactExtractor
+from continuum.services.feedback import FeedbackService
 from continuum.services.ingest import IngestService
 from continuum.services.limits import SlidingWindow
 from continuum.services.memory_store import MemoryStore
@@ -98,6 +100,7 @@ async def lifespan(app: FastAPI):
     app.state.authdb = authdb
     app.state.auth = auth
     app.state.llm_limiter = SlidingWindow(settings.llm_requests_per_minute, 60)
+    app.state.feedback = FeedbackService(LabelStore(engine), settings)
 
     speech = SpeechService(settings)
     app.state.speech = speech

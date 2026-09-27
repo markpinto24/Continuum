@@ -16,6 +16,7 @@ import type {
   ConflictListResponse,
   ConflictResolutionRequest,
   ConflictResolutionResponse,
+  GateEvidence,
   GraphResponse,
   HealthResponse,
   IngestResponse,
@@ -166,6 +167,12 @@ export const api = {
     request<UserSummary>('/admin/users', post({ ...body, user_id: body.user_id || null })),
   updateUser: (id: string, body: { disabled?: boolean; is_admin?: boolean }) =>
     request<UserSummary>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  // --- Learning from decisions ---------------------------------------------
+
+  feedbackEvidence: () => request<GateEvidence>('/feedback/evidence'),
+  /** A plain link: the browser downloads it with the session cookie. */
+  feedbackExportUrl: `${PREFIX}/feedback/export`,
 
   // --- Dictation ------------------------------------------------------------
 

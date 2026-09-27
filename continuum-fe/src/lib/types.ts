@@ -17,6 +17,17 @@ export type MemoryCategory =
 
 export type MemoryStatus = 'active' | 'superseded' | 'contradicted' | 'archived'
 
+export interface Escalation {
+  target_id: string
+  judge_relation: 'supersedes' | 'conflict' | null
+  judge_confidence: number | null
+  similarity: number | null
+  gate: number
+  forced: boolean
+  reason: string
+  raised_at: string
+}
+
 export interface Memory {
   id: string
   user_id: string
@@ -31,6 +42,8 @@ export interface Memory {
   supersedes: string[]
   superseded_by: string | null
   conflicts_with: string[]
+  /** What the resolver thought each time it escalated this memory to a person. */
+  escalations: Escalation[]
   created_at: string
   updated_at: string
   last_reinforced_at: string
@@ -214,4 +227,30 @@ export interface Transcription {
   text: string
   language: string
   duration_seconds: number
+}
+
+// --- Learning from decisions -------------------------------------------------
+
+export interface GateBand {
+  low: number
+  high: number
+  total: number
+  confirmed: number
+  refuted: number
+}
+
+/** Would a lower auto-supersede gate have been safe? Counted from real decisions. */
+export interface GateEvidence {
+  gate: number
+  labels: number
+  with_judgement: number
+  bands: GateBand[]
+  below_gate_total: number
+  below_gate_refuted: number
+  error_upper_bound: number | null
+  role_rule_total: number
+  role_rule_shared: number
+  conflicts_total: number
+  conflicts_both_hold: number
+  recommendation: string
 }

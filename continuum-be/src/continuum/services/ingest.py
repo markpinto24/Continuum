@@ -20,7 +20,7 @@ from continuum.clients.llm import LLMClient
 from continuum.config import Settings, get_settings
 from continuum.core import logger as clog
 from continuum.core.logger import get_logger
-from continuum.models.memory import Memory, MemoryStatus
+from continuum.models.memory import Escalation, Memory, MemoryStatus
 from continuum.models.schemas import IngestRequest, IngestResponse, ResolutionRecord
 from continuum.services.extraction import FactExtractor
 from continuum.services.memory_store import MemoryStore
@@ -120,6 +120,10 @@ class IngestService:
                 reinforced.append(resolution.target.id)
                 continue
 
+            if resolution.verdict is Verdict.CONFLICT and resolution.target:
+                memory.escalations.append(
+                    _escalation(resolution, neighbours, self.settings.auto_supersede_confidence)
+                )
             await self._apply(memory, vector, resolution)
             created.append(memory)
 
@@ -176,6 +180,28 @@ class IngestService:
             return
 
         await self.memories.write_with_vector(memory, vector)
+
+
+def _escalation(
+    resolution: Resolution, neighbours: list[tuple[Memory, float]], gate: float
+) -> Escalation:
+    """What the resolver thought, kept so a person's later answer can grade it."""
+    assert resolution.target is not None
+    similarity = next((score for m, score in neighbours if m.id == resolution.target.id), None)
+    relation = (
+        resolution.escalated_from.value
+        if resolution.escalated_from is not None
+        else (Verdict.CONFLICT.value if resolution.judge_confidence is not None else None)
+    )
+    return Escalation(
+        target_id=resolution.target.id,
+        judge_relation=relation,
+        judge_confidence=resolution.judge_confidence,
+        similarity=round(similarity, 4) if similarity is not None else None,
+        gate=gate,
+        forced=resolution.forced_escalation,
+        reason=resolution.reason[:500],
+    )
 
 
 def _record(memory: Memory, resolution: Resolution) -> ResolutionRecord:

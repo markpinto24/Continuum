@@ -74,6 +74,33 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
+class Escalation(BaseModel):
+    """Why the resolver asked a human about this memory, recorded when it did.
+
+    Kept on the incoming memory so that when a person later settles the
+    conflict, their answer can be set against what the system thought — the
+    judge's relation and probability, the similarity, the gate in force. That
+    pairing is the labelled data the resolver is checked and tuned against
+    (services/feedback.py). Without it a human decision fixes one conflict and
+    teaches nothing.
+    """
+
+    target_id: str = Field(..., description="The existing memory this one was judged against.")
+    judge_relation: str | None = Field(
+        default=None,
+        description="What the judge said: 'supersedes' (downgraded by the gate or a "
+        "policy) or 'conflict'. None when no judge call was made.",
+    )
+    judge_confidence: float | None = None
+    similarity: float | None = None
+    gate: float = Field(..., description="auto_supersede_confidence at the time.")
+    forced: bool = Field(
+        default=False, description="Escalated by policy (the role rule) whatever the confidence."
+    )
+    reason: str = ""
+    raised_at: datetime = Field(default_factory=_utcnow)
+
+
 class Memory(BaseModel):
     """A single durable belief held by the system."""
 
@@ -112,6 +139,10 @@ class Memory(BaseModel):
     conflicts_with: list[str] = Field(
         default_factory=list, description="IDs of memories in unresolved conflict with this one."
     )
+    escalations: list[Escalation] = Field(
+        default_factory=list,
+        description="What the resolver thought each time it escalated this memory to a human.",
+    )
 
     # --- Lifecycle ---------------------------------------------------------
     created_at: datetime = Field(default_factory=_utcnow)
@@ -146,6 +177,11 @@ class Memory(BaseModel):
         if other_id not in self.supersedes:
             self.supersedes.append(other_id)
         self.touch()
+
+    def escalation_against(self, other_id: str) -> Escalation | None:
+        """The most recent escalation of this memory against `other_id`, if any."""
+        matches = [e for e in self.escalations if e.target_id == other_id]
+        return matches[-1] if matches else None
 
     def clear_conflict_with(self, other_id: str) -> None:
         """Drop one conflict edge; return to ACTIVE once none remain."""

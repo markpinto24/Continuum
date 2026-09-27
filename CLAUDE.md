@@ -119,6 +119,7 @@ Continuum/                            ← git root
 │   │   │   └── middleware.py         request id, timing, context binding
 │   │   ├── clients/                  ← thin, owned I/O adapters
 │   │   │   ├── authdb.py             ★ users, sessions, API keys (SQLAlchemy)
+│   │   │   ├── labels.py             resolution labels (SQLAlchemy)
 │   │   │   ├── llm.py                OpenAI-compatible chat + embeddings
 │   │   │   └── qdrant.py             collection bootstrap, filters, scroll
 │   │   ├── db/                       ← relational storage (accounts only)
@@ -129,6 +130,7 @@ Continuum/                            ← git root
 │   │   │   ├── memory.py             ★ domain model: Memory, categories,
 │   │   │   │                           statuses, half-lives, decay maths
 │   │   │   ├── auth.py               User, ApiKey, Principal
+│   │   │   ├── feedback.py           Decision → ExpectedAction, labels, evidence
 │   │   │   └── schemas.py            HTTP request/response models
 │   │   ├── services/                 ← all business logic lives here
 │   │   │   ├── auth.py               ★ sign-in, sessions, keys, lockout
@@ -140,6 +142,7 @@ Continuum/                            ← git root
 │   │   │   ├── decay.py              confidence decay + archival sweep
 │   │   │   ├── retrieval.py          ★ similarity × confidence × recency rank
 │   │   │   ├── speech.py             dictation: local Whisper, audio never kept
+│   │   │   ├── feedback.py           ★ decisions → labels, gate evidence, export
 │   │   │   ├── chat.py               ★ prompt assembly; surfaces disputes
 │   │   │   ├── subjects.py           one entity, one slug (atlas = atlas-project)
 │   │   │   └── reindex.py            ★ re-embed on model change; crash-safe
@@ -160,7 +163,7 @@ Continuum/                            ← git root
 │   │       ├── deps.py               ★ DI wiring; get_principal = identity
 │   │       ├── router.py             router aggregation
 │   │       └── routes/               health, auth, admin, ingest, memories,
-│   │                                 conflicts, decay, chat
+│   │                                 conflicts, decay, chat, speech, feedback
 │   └── tests/
 │       ├── test_core_logic.py        parsing, coercion, lifecycle (pure)
 │       ├── test_resolution.py        ★ confidence gate, category policy
@@ -169,6 +172,7 @@ Continuum/                            ← git root
 │       ├── test_chat.py              ★ stream shape, disputed prompt, write-back
 │       ├── test_evaluation.py        ★ the instrument, before it is trusted
 │       ├── test_auth.py              ★ every route guarded; isolation; refusals
+│       ├── test_feedback.py          ★ decision→label mapping; gate evidence
 │       └── test_ingest_pipeline.py   end-to-end vs in-memory Qdrant
 └── continuum-fe/                     ← the belief graph UI
     ├── package.json · yarn.lock      yarn 1; `resolutions` pins one vite
@@ -186,7 +190,8 @@ Continuum/                            ← git root
         │   ├── account-dialog.tsx    API keys, password, users (admins)
         │   ├── belief-graph.tsx      ★ the Three.js scene
         │   ├── memory-detail.tsx     provenance, edges, reinforce/restore
-        │   ├── contradiction-inbox.tsx
+        │   ├── contradiction-inbox.tsx   + why it escalated, learning panel
+        │   ├── learning-panel.tsx    what your decisions say about the gate
         │   ├── chat-panel.tsx        ★ streaming, citations, dispute banner
         │   └── ui/                   shadcn-style primitives, owned in-repo
         └── App.tsx                   ★ the auth gate, then the workspace
@@ -298,6 +303,7 @@ that touches memories takes `principal: CurrentUser` and passes
 | `status` | `active` / `superseded` / `contradicted` / `archived`. Never deleted |
 | `supersedes` / `superseded_by` | The belief graph edges. The differentiator |
 | `conflicts_with` | Unresolved conflicts awaiting a human |
+| `escalations` | What the resolver thought when it escalated: judge relation, probability, similarity, gate. Graded against the person's decision later |
 | `source_id` / `source_excerpt` | Traceability from any assertion back to its origin text |
 
 `RETRIEVABLE_STATUSES = {active, contradicted}` — **contradicted memories are
@@ -516,6 +522,28 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   stripped first, and text is queued in sentence-sized chunks — Chromium stops a
   single long utterance after ~15 s without an error
 
+### ✅ Phase 8 — Learning from decisions (done, this release)
+- **Every decision is a labelled example.** Ingest records on the incoming memory
+  what the resolver thought (`Memory.escalations`); settling the conflict — in
+  the inbox or the chat — stores a `resolution_labels` row (Postgres, migration
+  0002) pairing that with what the person said. Older→newer, like the corpus:
+  newer holds → `retire`, both hold → `store`, older holds → `escalate` (asking
+  was right; auto-retiring would have destroyed a true belief)
+- **Gate evidence** (`GET /feedback/evidence`): only escalated `supersedes`
+  verdicts below the gate count — exactly what a lower gate would have
+  auto-applied. One refutation rules out lowering it; zero in n bounds the error
+  below 3/n; below `FEEDBACK_MIN_GATE_EVIDENCE` (15) it says keep the gate.
+  Role-rule escalations and over-escalated conflicts are counted separately
+- **Export** (`GET /feedback/export`) as Phase 5 corpus YAML, each case validated
+  against the schema; `run_eval.py --add-cases FILE` scores the resolver on
+  real decisions. Live: a kept-both second owner came back as
+  `want store, got escalate` — over-escalation that used to leave no trace
+- **Disputes are settled where they come up.** The chat's dispute card has
+  "This holds" per side and "Both are true"; the inbox explains why each pair is
+  there, from the recorded escalation, and shows the learning panel
+- Nothing retunes itself. The report recommends; the gate stays a product
+  decision
+
 **The last lost belief was a class, and it is closed (§10).** Held-out cases,
 written before any fix ran, showed a second owner / maintainer / reviewer /
 rotation member superseded at ≈1.0 every time. Asking the model a narrower
@@ -647,7 +675,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 270 tests, no services needed
+uv run pytest                          # 286 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -660,6 +688,8 @@ uv run python scripts/run_eval.py --preflight
 uv run python scripts/run_eval.py --crowded     # right memory judged in a crowded graph?
 uv run python scripts/run_eval.py --record eval-run.json
 uv run python scripts/run_eval.py --replay eval-run.json
+# decisions from real use, exported from the Inbox → learning panel:
+uv run python scripts/run_eval.py --record run.json --add-cases continuum-cases.yaml
 ```
 
 ---
@@ -681,6 +711,15 @@ uv run python scripts/run_eval.py --replay eval-run.json
   — sign-out, password change, disabling a user all take effect on the next
   request. A JWT stays valid until it expires, and revocation then needs the
   very table JWTs were meant to avoid.
+- **Letting the evidence report move the gate by itself.** It counts; a person
+  decides. The gate is the most consequential setting in the project, and a
+  run of confirmations can end with the one refutation that matters.
+- **Resolving a dispute from a free-text chat reply** ("yes, Mongo now") with
+  an LLM reading intent. That is a second LLM call arbitrating a contradiction
+  (commitment 2). The person presses "This holds".
+- **Labelling a pair that was never in dispute.** The resolve endpoint accepts
+  any loser ids; `build_labels` skips pairs without a `conflicts_with` edge, or
+  arbitrary pairings would enter the test data as contradictions.
 - **Switching dictation to the browser's `SpeechRecognition` "to drop the
   model".** It sends every word to Google, and in Brave it does not work at all.
 - **Logging or storing a transcript.** It is user content that the user has not

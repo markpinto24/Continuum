@@ -96,3 +96,47 @@ class ApiKeyRow(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
     __table_args__ = (Index("ix_api_keys_user_created", "user_id", "created_at"),)
+
+
+class ResolutionLabelRow(Base):
+    """A conflict a person settled, with what the resolver thought beforehand.
+
+    Each row is one labelled example for the resolver — the thing the Phase 5
+    corpus is made of — except written by real use instead of by hand. It copies
+    the two statements rather than pointing at the memories: those decay, get
+    reinforced and change status, and the label must describe the pair as the
+    resolver saw it.
+    """
+
+    __tablename__ = "resolution_labels"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    # The pair, older first — the corpus's "existing" and "incoming".
+    existing_memory_id: Mapped[str] = mapped_column(String(64))
+    existing_content: Mapped[str] = mapped_column(Text)
+    existing_category: Mapped[str] = mapped_column(String(32))
+    existing_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    existing_confidence: Mapped[float] = mapped_column()
+    # How much older the existing memory was when the new one arrived.
+    existing_age_days: Mapped[float] = mapped_column()
+    incoming_memory_id: Mapped[str] = mapped_column(String(64))
+    incoming_content: Mapped[str] = mapped_column(Text)
+    incoming_category: Mapped[str] = mapped_column(String(32))
+    incoming_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # What the resolver thought. All null for conflicts escalated before this
+    # was recorded — still a valid label, just not evidence about the gate.
+    judge_relation: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    judge_confidence: Mapped[float | None] = mapped_column(nullable=True)
+    similarity: Mapped[float | None] = mapped_column(nullable=True)
+    gate: Mapped[float | None] = mapped_column(nullable=True)
+    forced: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # What the person decided, and the action that makes it right for the resolver.
+    decision: Mapped[str] = mapped_column(String(16))  # newer_holds | older_holds | both_hold
+    expected_action: Mapped[str] = mapped_column(String(16))  # retire | escalate | store
+
+    __table_args__ = (Index("ix_resolution_labels_user_created", "user_id", "created_at"),)

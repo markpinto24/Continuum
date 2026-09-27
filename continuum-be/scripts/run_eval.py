@@ -5,6 +5,7 @@
 
     # then sweep the gate as often as you like, for free
     uv run python scripts/run_eval.py --replay eval-run.json
+    uv run python scripts/run_eval.py --record run.json --add-cases continuum-cases.yaml
 
     # extraction: ours vs the Mem0 baseline
     uv run python scripts/run_eval.py --extraction --baseline
@@ -66,9 +67,13 @@ async def check_embedding(llm: LLMClient) -> bool:
     return report.usable
 
 
-async def run_resolution(record: Path | None, only: str | None, force: bool) -> list[CaseOutcome]:
+async def run_resolution(
+    record: Path | None, only: str | None, force: bool, extra: list[Path]
+) -> list[CaseOutcome]:
     settings = get_settings()
-    cases = corpus.load_resolution_cases()
+    cases = corpus.load_resolution_cases_with(extra)
+    if extra:
+        print(f"Corpus: {len(cases)} cases, including those from {', '.join(map(str, extra))}")
     if only:
         cases = [c for c in cases if only in c.id or only in c.tags]
         if not cases:
@@ -183,6 +188,15 @@ async def main() -> None:
     parser.add_argument(
         "--force", action="store_true", help="Run even if the embedding preflight fails."
     )
+    parser.add_argument(
+        "--add-cases",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="FILE",
+        help="Extra resolution cases, e.g. decisions exported from GET /feedback/export. "
+        "Repeatable. Tag 'from-use' selects them with --only.",
+    )
     args = parser.parse_args()
 
     configure_logging()
@@ -207,7 +221,8 @@ async def main() -> None:
         llm = LLMClient(get_settings())
         try:
             _rule("CALIBRATION — thresholds this embedding model needs")
-            print(render_calibration(await calibrate(llm, corpus.load_resolution_cases())))
+            cases = corpus.load_resolution_cases_with(args.add_cases)
+            print(render_calibration(await calibrate(llm, cases)))
         finally:
             await llm.aclose()
         return
@@ -219,7 +234,7 @@ async def main() -> None:
     outcomes = (
         load_recorded(args.replay)
         if args.replay
-        else await run_resolution(args.record, args.only, args.force)
+        else await run_resolution(args.record, args.only, args.force, args.add_cases)
     )
     present(outcomes, show_cases=args.cases)
 

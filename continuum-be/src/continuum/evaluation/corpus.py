@@ -33,6 +33,17 @@ def load_resolution_cases(path: Path | None = None) -> list[ResolutionCase]:
     return cases
 
 
+def load_resolution_cases_with(extra: list[Path]) -> list[ResolutionCase]:
+    """The hand-written corpus plus cases from other files — typically the
+    decisions exported from real use (`GET /feedback/export`). Ids must be unique
+    across all of them: a shadowed case silently leaves the denominator."""
+    cases = load_resolution_cases()
+    for path in extra:
+        cases.extend(load_resolution_cases(path))
+    _check_unique(case.id for case in cases)
+    return cases
+
+
 def load_extraction_cases(path: Path | None = None) -> list[ExtractionCase]:
     cases = [ExtractionCase.model_validate(row) for row in _read(path or EXTRACTION_CORPUS)]
     _check_unique(case.id for case in cases)

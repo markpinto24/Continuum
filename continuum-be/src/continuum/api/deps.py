@@ -20,6 +20,7 @@ from continuum.services.auth import AuthService
 from continuum.services.chat import ChatService
 from continuum.services.decay import DecayService
 from continuum.services.extraction import FactExtractor
+from continuum.services.feedback import FeedbackService
 from continuum.services.ingest import IngestService
 from continuum.services.limits import SlidingWindow
 from continuum.services.memory_store import MemoryStore
@@ -76,6 +77,10 @@ def get_speech_service(request: Request) -> SpeechService:
     return request.app.state.speech
 
 
+def get_feedback_service(request: Request) -> FeedbackService:
+    return request.app.state.feedback
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 LLMDep = Annotated[LLMClient, Depends(get_llm)]
 QdrantDep = Annotated[QdrantStore, Depends(get_qdrant)]
@@ -89,6 +94,7 @@ ChatDep = Annotated[ChatService, Depends(get_chat_service)]
 AuthDep = Annotated[AuthService, Depends(get_auth_service)]
 AuthDBDep = Annotated[AuthDB, Depends(get_authdb)]
 SpeechDep = Annotated[SpeechService, Depends(get_speech_service)]
+FeedbackDep = Annotated[FeedbackService, Depends(get_feedback_service)]
 
 
 # --- Authentication ------------------------------------------------------------

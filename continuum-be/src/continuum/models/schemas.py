@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from continuum.models.feedback import ResolutionLabel
 from continuum.models.memory import Memory, MemoryCategory, MemoryStatus
 
 
@@ -298,6 +299,14 @@ class ChatEvent(BaseModel):
 
     event: Literal["context", "delta", "done", "error"]
     data: dict
+
+
+# --- Learning from decisions ---------------------------------------------------
+
+
+class LabelListResponse(BaseModel):
+    total: int
+    labels: list[ResolutionLabel]
 
 
 # --- Speech -------------------------------------------------------------------

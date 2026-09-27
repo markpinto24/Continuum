@@ -94,6 +94,13 @@ class Settings(BaseSettings):
     # Largest note or transcript accepted by ingest and chat, in characters.
     max_input_chars: int = 50_000
 
+    # --- Learning from decisions -------------------------------------------
+    # Escalated `supersedes` verdicts below the gate, all confirmed by people,
+    # needed before the evidence report says a lower gate is worth considering.
+    # 15 with none wrong bounds the error rate below 20% (rule of three: 3/n).
+    # The report only recommends; changing the gate stays a product decision.
+    feedback_min_gate_evidence: int = 15
+
     # --- Speech to text ----------------------------------------------------
     # Dictation in the chat box. Transcribed HERE, by a local Whisper model —
     # never by the browser, whose built-in recognition streams audio to Google

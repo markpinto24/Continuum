@@ -6,6 +6,7 @@ from continuum.api.routes import (
     chat,
     conflicts,
     decay,
+    feedback,
     health,
     ingest,
     memories,
@@ -25,3 +26,4 @@ api_router.include_router(conflicts.router)
 api_router.include_router(decay.router)
 api_router.include_router(chat.router)
 api_router.include_router(speech.router)
+api_router.include_router(feedback.router)

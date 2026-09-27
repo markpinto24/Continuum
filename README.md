@@ -187,7 +187,7 @@ land in an inbox with three verdicts, one of which is *both are true*.
 | **4 — Belief graph UI** | ✅ | `continuum-fe`: Three.js force-directed graph off `/memories/graph`, provenance panel, contradiction inbox, streaming chat |
 | **5 — Evaluation** | ✅ | 28-case labelled corpus; belief-loss, stale-belief and merge-loss measured separately; a gate sweep that replays one recorded run at every threshold for free |
 
-Backend: 270 tests. Frontend: 76. Neither needs a running service.
+Backend: 286 tests. Frontend: 87. Neither needs a running service.
 
 ---
 
