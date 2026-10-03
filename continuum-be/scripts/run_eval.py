@@ -10,6 +10,13 @@
     # extraction: ours vs the Mem0 baseline
     uv run python scripts/run_eval.py --extraction --baseline
 
+    # extraction cases from memories rejected in use (Inbox -> learning panel)
+    uv run python scripts/run_eval.py --extraction --add-extraction continuum-extraction.yaml
+
+    # retrieval: did the memories you said should have come up make the top k?
+    # Runs against the live graph (Qdrant from .env); sweeps the weights for free.
+    uv run python scripts/run_eval.py --retrieval continuum-retrieval.yaml
+
     # just check the embedding model can tell your entities apart
     uv run python scripts/run_eval.py --preflight
 
@@ -36,9 +43,11 @@ import tempfile
 from pathlib import Path
 
 from continuum.clients.llm import LLMClient
+from continuum.clients.qdrant import QdrantStore
 from continuum.config import get_settings
 from continuum.core.logger import configure_logging
 from continuum.evaluation import corpus, metrics, report
+from continuum.evaluation import retrieval as retrieval_eval
 from continuum.evaluation.calibrate import calibrate, render_calibration
 from continuum.evaluation.crowded import load_crowded, render_crowded, run_crowded
 from continuum.evaluation.extraction import score_extraction
@@ -46,6 +55,7 @@ from continuum.evaluation.preflight import render_preflight, run_preflight
 from continuum.evaluation.runner import ResolutionRunner
 from continuum.evaluation.types import CaseOutcome
 from continuum.services.extraction import FactExtractor, Mem0Extractor
+from continuum.services.memory_store import MemoryStore
 
 
 def _rule(title: str) -> None:
@@ -126,9 +136,9 @@ def present(outcomes: list[CaseOutcome], *, show_cases: bool) -> None:
     print(report.render_by_tag(metrics.by_tag(outcomes)))
 
 
-async def run_extraction(with_baseline: bool) -> None:
+async def run_extraction(with_baseline: bool, extra: list[Path]) -> None:
     settings = get_settings()
-    cases = corpus.load_extraction_cases()
+    cases = corpus.load_extraction_cases_with(extra)
     llm = LLMClient(settings)
 
     try:
@@ -161,6 +171,27 @@ async def run_extraction(with_baseline: bool) -> None:
                 "  cannot be filtered before the judge."
             )
     finally:
+        await llm.aclose()
+
+
+async def run_retrieval(path: Path, k: int) -> None:
+    settings = get_settings()
+    cases = corpus.load_retrieval_cases(path)
+    llm = LLMClient(settings)
+    qdrant = QdrantStore(settings)
+    try:
+        gathered = await retrieval_eval.gather(cases, MemoryStore(qdrant, llm, settings), settings)
+        current = retrieval_eval.recall_at_k(
+            gathered,
+            k=k,
+            confidence_weight=settings.retrieval_confidence_weight,
+            recency_weight=settings.retrieval_recency_weight,
+            keyword_weight=settings.retrieval_keyword_weight,
+        )
+        _rule(f"RETRIEVAL — {len(cases)} questions, memories you said should have come up")
+        print(retrieval_eval.render(retrieval_eval.sweep(gathered, k=k), current, k=k))
+    finally:
+        await qdrant.aclose()
         await llm.aclose()
 
 
@@ -197,6 +228,23 @@ async def main() -> None:
         help="Extra resolution cases, e.g. decisions exported from GET /feedback/export. "
         "Repeatable. Tag 'from-use' selects them with --only.",
     )
+    parser.add_argument(
+        "--add-extraction",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="FILE",
+        help="Extra extraction cases, e.g. rejected memories from "
+        "GET /feedback/export?kind=extraction. Repeatable.",
+    )
+    parser.add_argument(
+        "--retrieval",
+        type=Path,
+        metavar="FILE",
+        help="Retrieval cases from GET /feedback/export?kind=retrieval, checked against "
+        "the live graph.",
+    )
+    parser.add_argument("--k", type=int, default=None, help="Top k for --retrieval.")
     args = parser.parse_args()
 
     configure_logging()
@@ -228,7 +276,11 @@ async def main() -> None:
         return
 
     if args.extraction:
-        await run_extraction(args.baseline)
+        await run_extraction(args.baseline, args.add_extraction)
+        return
+
+    if args.retrieval:
+        await run_retrieval(args.retrieval, args.k or get_settings().chat_memory_limit)
         return
 
     outcomes = (

@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from continuum.models.feedback import ResolutionLabel
+from continuum.models.feedback import RejectReason, ResolutionLabel
 from continuum.models.memory import Memory, MemoryCategory, MemoryStatus
 
 
@@ -52,6 +52,11 @@ class _IngestFields(BaseModel):
     source_id: str | None = Field(
         default=None, description="Caller-supplied id to trace memories back to their origin."
     )
+    share: bool = Field(
+        default=False,
+        description="Store what this extracts in the shared team space instead of your "
+        "own graph. Everyone on the instance can then read it.",
+    )
 
     def as_transcript(self) -> str:
         if self.text:
@@ -69,6 +74,10 @@ class IngestRequest(_IngestFields):
     """What IngestService consumes: the body plus the owner, set by the server."""
 
     user_id: str = Field(..., min_length=1)
+    # Who is writing, when the owner is the shared space: recorded on every
+    # memory it creates there, so teammates can see who said it.
+    author: str | None = None
+    author_email: str | None = None
 
 
 class ResolutionRecord(BaseModel):
@@ -103,6 +112,10 @@ class IngestResponse(BaseModel):
     )
     conflicts_raised: list[str] = Field(
         default_factory=list, description="IDs now awaiting human resolution."
+    )
+    team_conflicts: list[str] = Field(
+        default_factory=list,
+        description="Team memories a new private one disagrees with (flagged on yours).",
     )
     resolutions: list[ResolutionRecord] = Field(default_factory=list)
 
@@ -146,6 +159,11 @@ class ConflictPair(BaseModel):
 
     memory: Memory
     conflicting: list[Memory]
+    team: bool = Field(
+        False,
+        description="Your private belief against the team's. Settled with "
+        "/conflicts/resolve-team, since a decision never crosses graphs on its own.",
+    )
 
 
 class ConflictListResponse(BaseModel):
@@ -185,6 +203,9 @@ class GraphNode(BaseModel):
     confidence: float
     subject: str | None = None
     created_at: str
+    shared: bool = False
+    shared_by_email: str | None = None
+    kind: Literal["fact", "summary"] = "fact"
 
 
 class GraphEdge(BaseModel):
@@ -214,7 +235,12 @@ class RetrievedMemory(BaseModel):
     memory: Memory
     similarity: float = Field(..., description="Raw cosine score from the vector search.")
     recency: float = Field(..., description="Topicality weight, 1.0 = reinforced just now.")
-    score: float = Field(..., description="similarity x confidence^w x recency^w.")
+    keyword: float = Field(
+        0.0, description="Share of the question's content words this memory contains."
+    )
+    score: float = Field(
+        ..., description="max(similarity, keyword x w_kw) x confidence^w x recency^w."
+    )
 
 
 class Disagreement(BaseModel):
@@ -233,6 +259,9 @@ class ChatContext(BaseModel):
     query: str
     memories: list[RetrievedMemory] = Field(default_factory=list)
     disagreements: list[Disagreement] = Field(default_factory=list)
+    as_of: datetime | None = Field(
+        default=None, description="Set when these are the beliefs held at a past moment."
+    )
 
 
 class _ChatFields(BaseModel):
@@ -240,12 +269,21 @@ class _ChatFields(BaseModel):
     limit: int | None = Field(
         default=None, ge=1, le=25, description="Memories to inject. Defaults to config."
     )
+    share: bool = Field(
+        default=False,
+        description="Remember this turn in the shared team space instead of your own graph.",
+    )
     remember: bool | None = Field(
         default=None,
         description=(
             "Run this turn back through ingest, confirming memories it repeats and "
             "recording anything new. Defaults to config."
         ),
+    )
+    as_of: datetime | None = Field(
+        default=None,
+        description="Answer from what was believed at this moment. Such a turn is never "
+        "remembered: a question about the past is not news about the present.",
     )
 
     def latest_user_message(self) -> str:
@@ -266,6 +304,7 @@ class ChatRequest(_ChatFields):
     """What ChatService consumes: the body plus the owner, set by the server."""
 
     user_id: str = Field(..., min_length=1)
+    author_email: str | None = None
 
 
 class ChatContextRequest(ClientBody):
@@ -273,6 +312,7 @@ class ChatContextRequest(ClientBody):
 
     query: str = Field(..., min_length=1)
     limit: int | None = Field(default=None, ge=1, le=25)
+    as_of: datetime | None = None
 
 
 class ChatDone(BaseModel):
@@ -301,6 +341,50 @@ class ChatEvent(BaseModel):
     data: dict
 
 
+# --- Shared team space ----------------------------------------------------------
+
+
+class RejectBody(ClientBody):
+    reason: RejectReason
+    note: str | None = Field(default=None, max_length=500)
+
+
+class RejectResponse(BaseModel):
+    memory: Memory
+    restored: list[str] = Field(
+        default_factory=list,
+        description="Beliefs this misreading had retired, now active again.",
+    )
+
+
+class SummaryRefreshResponse(BaseModel):
+    written: list[Memory]
+
+
+class MemoryExport(BaseModel):
+    """Everything in your own graph, every status, with its edges."""
+
+    exported_at: datetime
+    user_id: str
+    total: int
+    memories: list[Memory]
+
+
+class ShareResponse(BaseModel):
+    """What sharing a memory did, as the shared graph's resolver saw it."""
+
+    outcome: Literal["created", "merged", "superseded", "conflict"] = Field(
+        ...,
+        description="created: new to the team. merged: the team already knew it. "
+        "superseded: it replaced an older shared belief. conflict: it contradicts "
+        "one, and is waiting in the shared inbox.",
+    )
+    original: Memory = Field(
+        ..., description="Your private memory, now retired into the shared one."
+    )
+    shared: Memory
+
+
 # --- Learning from decisions ---------------------------------------------------
 
 
@@ -317,6 +401,40 @@ class SpeechStatus(BaseModel):
     ready: bool = Field(..., description="Model loaded. False during the first download.")
     max_seconds: int
     language: str | None = None
+    # Server-side voice for read-aloud and autopilot. When off, the UI falls back
+    # to the browser's own speech synthesis.
+    synthesis: bool = False
+    synthesis_ready: bool = False
+    synthesis_max_chars: int = 800
+
+
+class SynthesisRequest(ClientBody):
+    text: str = Field(..., min_length=1)
+    # Normally the person's saved preference, sent by the UI; Settings also uses
+    # these to let someone hear a voice before choosing it.
+    voice: str | None = None
+    speed: float | None = Field(default=None, ge=0.6, le=1.8)
+
+
+class VoiceOption(BaseModel):
+    id: str
+    label: str
+    accent: str
+    gender: str
+
+
+class VoiceSettings(BaseModel):
+    """Your spoken-answer settings, and what you can choose from."""
+
+    voice: str = Field(..., description="Your voice, or the server default if you never chose.")
+    speed: float = 1.0
+    default_voice: str
+    voices: list[VoiceOption]
+
+
+class VoiceSettingsUpdate(ClientBody):
+    voice: str | None = Field(default=None, description="A voice id from `voices`; null = default.")
+    speed: float | None = Field(default=None, ge=0.6, le=1.8)
 
 
 # --- Authentication -----------------------------------------------------------
@@ -404,3 +522,21 @@ class UserCreateRequest(ClientBody):
 class UserUpdateRequest(ClientBody):
     disabled: bool | None = None
     is_admin: bool | None = None
+
+
+class TeamResolutionRequest(ClientBody):
+    """Your private belief disagrees with the team's. Which holds?
+
+    team_holds: retire yours into the team's. mine_holds: share yours, so the team
+    graph's resolver (and, if it is unsure, the team) decides. both_hold: keep both.
+    """
+
+    memory_id: str
+    shared_id: str
+    decision: Literal["team_holds", "mine_holds", "both_hold"]
+
+
+class TeamResolutionResponse(BaseModel):
+    memory: Memory
+    action: Literal["team_holds", "mine_holds", "both_hold"]
+    shared: ShareResponse | None = None

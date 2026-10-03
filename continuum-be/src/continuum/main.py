@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from continuum.api.router import api_router
 from continuum.clients.authdb import AuthDB
 from continuum.clients.labels import LabelStore
+from continuum.clients.learning import LearningStore
 from continuum.clients.llm import LLMClient
 from continuum.clients.qdrant import QdrantStore
 from continuum.config import get_settings
@@ -21,21 +22,25 @@ from continuum.core.middleware import RequestContextMiddleware
 from continuum.db.engine import make_engine, migrate
 from continuum.services.auth import AuthService
 from continuum.services.chat import ChatService
+from continuum.services.corrections import CorrectionService
 from continuum.services.decay import DecayService
 from continuum.services.extraction import FactExtractor
-from continuum.services.feedback import FeedbackService
+from continuum.services.feedback import Calibration, FeedbackService
 from continuum.services.ingest import IngestService
 from continuum.services.limits import SlidingWindow
 from continuum.services.memory_store import MemoryStore
 from continuum.services.reindex import EmbeddingMigration
 from continuum.services.resolution import ResolutionService
 from continuum.services.retrieval import RetrievalService
+from continuum.services.sharing import SharingService
 from continuum.services.speech import SpeechService
+from continuum.services.summaries import SummaryService
+from continuum.services.voice import SynthesisService
 
 log = get_logger("continuum.app")
 
 
-def _build_scheduler(decay: DecayService) -> AsyncIOScheduler:
+def _build_scheduler(decay: DecayService, summaries: SummaryService) -> AsyncIOScheduler:
     settings = get_settings()
     scheduler = AsyncIOScheduler(timezone="UTC")
 
@@ -55,6 +60,22 @@ def _build_scheduler(decay: DecayService) -> AsyncIOScheduler:
         max_instances=1,
         coalesce=True,  # a missed window runs once, not N times
     )
+
+    async def run_summaries() -> None:
+        try:
+            log.info("summary.scheduled_run", written=await summaries.refresh_all())
+        except Exception:
+            log.exception("summary.scheduled_run_failed")
+
+    if settings.summaries_enabled:
+        scheduler.add_job(
+            run_summaries,
+            trigger=IntervalTrigger(hours=settings.summary_interval_hours),
+            id="summaries",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
     return scheduler
 
 
@@ -72,6 +93,14 @@ async def lifespan(app: FastAPI):
     auth = AuthService(authdb, settings)
     await auth.bootstrap_from_settings()
 
+    # What people have taught it: decisions, rules, the judge's calibration.
+    calibration = Calibration()
+    learning = LearningStore(engine)
+    feedback = FeedbackService(
+        LabelStore(engine), settings, learning=learning, calibration=calibration
+    )
+    await feedback.refresh_calibration()
+
     llm = LLMClient(settings)
     qdrant = QdrantStore(settings)
     await qdrant.ensure_collection()
@@ -82,10 +111,13 @@ async def lifespan(app: FastAPI):
 
     memories = MemoryStore(qdrant, llm, settings)
     extractor = FactExtractor(llm)
-    resolver = ResolutionService(memories, llm, settings)
+    resolver = ResolutionService(memories, llm, settings, calibrate=calibration.map)
     decay = DecayService(memories, settings)
+    summaries = SummaryService(memories, llm, settings)
     retrieval = RetrievalService(memories, settings)
-    ingest = IngestService(extractor, memories, resolver, llm, settings)
+    ingest = IngestService(
+        extractor, memories, resolver, llm, settings, rules=feedback.compatible_subjects
+    )
 
     app.state.settings = settings
     app.state.llm = llm
@@ -100,21 +132,35 @@ async def lifespan(app: FastAPI):
     app.state.authdb = authdb
     app.state.auth = auth
     app.state.llm_limiter = SlidingWindow(settings.llm_requests_per_minute, 60)
-    app.state.feedback = FeedbackService(LabelStore(engine), settings)
+    app.state.feedback = feedback
+    app.state.learning = learning
+    app.state.summaries = summaries
+    app.state.corrections = CorrectionService(
+        memories, labels=feedback.store, learning=learning
+    )
+    app.state.sharing = SharingService(ingest, memories, settings)
 
     speech = SpeechService(settings)
     app.state.speech = speech
+    voice = SynthesisService(settings)
+    app.state.voice = voice
+    app.state.tts_limiter = SlidingWindow(settings.tts_requests_per_minute, 60)
     # Background, not awaited: a first-run model download must not hold up the
     # API's healthcheck. Dictation before it finishes just waits for the load.
-    preload = (
-        asyncio.create_task(speech.preload())
-        if settings.speech_enabled and settings.speech_preload
-        else None
-    )
+    # Pass the methods, not coroutines: a coroutine created for a preload that
+    # is switched off would never be awaited.
+    preloads = [
+        asyncio.create_task(load())
+        for load, wanted in (
+            (speech.preload, settings.speech_enabled and settings.speech_preload),
+            (voice.preload, settings.tts_enabled and settings.tts_preload),
+        )
+        if wanted
+    ]
 
     scheduler: AsyncIOScheduler | None = None
     if settings.decay_enabled:
-        scheduler = _build_scheduler(decay)
+        scheduler = _build_scheduler(decay, summaries)
         scheduler.start()
     app.state.scheduler = scheduler
 
@@ -132,8 +178,9 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        if preload and not preload.done():
-            preload.cancel()
+        for task in preloads:
+            if not task.done():
+                task.cancel()
         if scheduler:
             scheduler.shutdown(wait=False)
         await llm.aclose()

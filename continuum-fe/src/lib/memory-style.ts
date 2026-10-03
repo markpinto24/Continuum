@@ -81,3 +81,6 @@ export const CATEGORY_HALF_LIFE_DAYS: Record<MemoryCategory, number | null> = {
   person: 365,
   event: null, // history is not a belief that can weaken
 }
+
+/** The ring around a summary node, and its badge in the DOM. */
+export const SUMMARY_COLOR = '#c4b5fd'

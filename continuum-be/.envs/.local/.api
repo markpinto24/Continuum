@@ -45,8 +45,22 @@ SPEECH_ENABLED=true
 SPEECH_MODEL=base
 SPEECH_LANGUAGE=en
 SPEECH_MAX_SECONDS=120
-# The model download is the only Hugging Face call; send no usage telemetry.
+# Spoken answers (read-aloud, autopilot): a local Piper voice, ~63 MB, cached
+# beside the Whisper model. Any voice from huggingface.co/rhasspy/piper-voices.
+TTS_ENABLED=true
+TTS_VOICE=en_US-lessac-medium
+TTS_LENGTH_SCALE=1.0
+# The model downloads are the only Hugging Face calls; send no usage telemetry.
 HF_HUB_DISABLE_TELEMETRY=1
+
+# --- Shared team space -----------------------------------------------------
+SHARED_SPACE_ENABLED=true
+TEAM_CROSS_CHECK=true
+
+# --- Learning and memory -----------------------------------------------------
+CALIBRATED_GATE=false
+SUMMARIES_ENABLED=true
+RETRIEVAL_KEYWORD_WEIGHT=0.7
 
 # --- Authentication --------------------------------------------------------
 # Empty = create the first admin from the web UI on first visit.

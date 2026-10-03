@@ -23,9 +23,21 @@ import type {
   Me,
   Memory,
   MemoryListResponse,
+  AnswerRating,
+  CalibrationReport,
+  FeedbackSummary,
+  RejectReason,
+  RejectResponse,
+  ResolutionRule,
+  RuleList,
+  TeamDecision,
+  TeamResolutionResponse,
+  ShareResponse,
   SpeechStatus,
   Transcription,
   UserSummary,
+  VoiceChoice,
+  VoiceSettings,
 } from './types'
 import { createSSEParser } from './sse'
 
@@ -113,11 +125,12 @@ async function describeFailure(response: Response): Promise<string> {
 export const api = {
   health: () => request<HealthResponse>('/health'),
 
-  graph: (opts: { limit?: number; includeArchived?: boolean } = {}) =>
+  graph: (opts: { limit?: number; includeArchived?: boolean; asOf?: string | null } = {}) =>
     request<GraphResponse>(
       `/memories/graph?${new URLSearchParams({
         limit: String(opts.limit ?? 500),
         include_archived: String(opts.includeArchived ?? false),
+        ...(opts.asOf ? { as_of: opts.asOf } : {}),
       })}`,
     ),
 
@@ -129,8 +142,29 @@ export const api = {
   /** Confirm a memory is still true. Raises confidence, resets the decay clock. */
   reinforce: (id: string) => request<Memory>(`/memories/${id}/reinforce`, post()),
 
+  /** Put one of your memories in the shared team space. */
+  shareMemory: (id: string) => request<ShareResponse>(`/memories/${id}/share`, post()),
+
   /** Bring an archived or superseded memory back. Nothing here is a one-way door. */
   reactivate: (id: string) => request<Memory>(`/memories/${id}/reactivate`, post()),
+
+  /** "This isn't a real fact": archived with the reason, and anything it retired comes back. */
+  rejectMemory: (id: string, reason: RejectReason, note?: string) =>
+    request<RejectResponse>(`/memories/${id}/reject`, post({ reason, note: note || null })),
+
+  /** Erase what a memory says, everywhere it was copied. The one thing that cannot be undone. */
+  forgetMemory: (id: string) => request<Memory>(`/memories/${id}/forget`, post()),
+
+  /** A plain link: your whole graph as JSON, downloaded with the session cookie. */
+  memoryExportUrl: `${PREFIX}/memories/export`,
+
+  refreshSummaries: () => request<{ written: Memory[] }>('/memories/summaries/refresh', post()),
+
+  searchMemories: (query: string, limit = 8) =>
+    request<{ query: string; results: { memory: Memory; score: number }[] }>(
+      '/memories/search',
+      post({ query, limit }),
+    ),
 
   conflicts: (limit = 100) =>
     request<ConflictListResponse>(`/conflicts?${new URLSearchParams({ limit: String(limit) })}`),
@@ -138,9 +172,16 @@ export const api = {
   resolveConflict: (body: ConflictResolutionRequest) =>
     request<ConflictResolutionResponse>('/conflicts/resolve', post(body)),
 
+  resolveTeamConflict: (memoryId: string, sharedId: string, decision: TeamDecision) =>
+    request<TeamResolutionResponse>(
+      '/conflicts/resolve-team',
+      post({ memory_id: memoryId, shared_id: sharedId, decision }),
+    ),
+
   ingest: (text: string) => request<IngestResponse>('/ingest', post({ text })),
 
-  chatContext: (query: string) => request<ChatContext>('/chat/context', post({ query })),
+  chatContext: (query: string, asOf?: string | null) =>
+    request<ChatContext>('/chat/context', post({ query, as_of: asOf || null })),
 
   // --- Authentication -------------------------------------------------------
 
@@ -152,6 +193,12 @@ export const api = {
   setup: (email: string, password: string, userId?: string) =>
     request<Me>('/auth/setup', post({ email, password, user_id: userId || null })),
   logout: () => request<void>('/auth/logout', post()),
+  voiceSettings: () => request<VoiceSettings>('/auth/preferences'),
+  saveVoiceSettings: (choice: { voice?: string | null; speed?: number | null }) =>
+    request<VoiceSettings>('/auth/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(choice),
+    }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>(
       '/auth/password',
@@ -170,13 +217,35 @@ export const api = {
 
   // --- Learning from decisions ---------------------------------------------
 
-  feedbackEvidence: () => request<GateEvidence>('/feedback/evidence'),
+  feedbackEvidence: (scope: 'mine' | 'team' = 'mine') =>
+    request<GateEvidence>(`/feedback/evidence?scope=${scope}`),
   /** A plain link: the browser downloads it with the session cookie. */
   feedbackExportUrl: `${PREFIX}/feedback/export`,
+  feedbackExportUrlFor: (kind: 'resolution' | 'extraction' | 'retrieval') =>
+    `${PREFIX}/feedback/export?kind=${kind}`,
+  calibration: () => request<CalibrationReport>('/feedback/calibration'),
+  rules: () => request<RuleList>('/feedback/rules'),
+  approveRule: (subject: string, scope: 'mine' | 'team' = 'mine') =>
+    request<ResolutionRule>('/feedback/rules', post({ subject, scope })),
+  revokeRule: (id: string) => request<void>(`/feedback/rules/${id}`, { method: 'DELETE' }),
+  rateAnswer: (body: AnswerRating) => request<{ missing: number }>('/feedback/answer', post(body)),
+  feedbackSummary: () => request<FeedbackSummary>('/feedback/summary'),
 
   // --- Dictation ------------------------------------------------------------
 
   speechStatus: () => request<SpeechStatus>('/speech/status'),
+
+  /** One chunk of an answer, spoken by the server's local voice, as WAV. */
+  synthesize: async (text: string, choice: VoiceChoice = {}): Promise<Blob> => {
+    const response = await fetch(`${PREFIX}/speech/synthesize`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: headers(),
+      body: JSON.stringify({ text, ...choice }),
+    })
+    if (!response.ok) return fail('/speech/synthesize', response)
+    return response.blob()
+  },
 
   /** Upload one recording; the text comes back. Nothing is stored server-side. */
   transcribe: async (clip: Blob): Promise<Transcription> => {
@@ -213,7 +282,13 @@ export interface ChatHandlers {
  * flag a dispute — while the answer is still arriving.
  */
 export async function streamChat(
-  body: { messages: ChatMessage[]; remember?: boolean; limit?: number },
+  body: {
+    messages: ChatMessage[]
+    remember?: boolean
+    limit?: number
+    share?: boolean
+    as_of?: string | null
+  },
   handlers: ChatHandlers,
   signal?: AbortSignal,
 ): Promise<void> {

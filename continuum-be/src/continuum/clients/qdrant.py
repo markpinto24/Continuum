@@ -22,7 +22,10 @@ from continuum.core.logger import get_logger
 log = get_logger(__name__)
 
 # Payload fields we filter on often enough to warrant an index.
-_INDEXED_KEYWORD_FIELDS = ("user_id", "status", "category", "subject", "source_id")
+_INDEXED_KEYWORD_FIELDS = (
+    "user_id", "status", "category", "subject", "source_id", "kind",
+    "conflicts_with", "team_conflicts_with", "derived_from",
+)
 
 
 # The marker naming which physical collection holds the live memories.
@@ -89,6 +92,19 @@ class QdrantStore:
                 field_schema=models.PayloadSchemaType.FLOAT,
             )
 
+        # Full-text index for keyword retrieval (services/keywords.py).
+        with contextlib.suppress(Exception):
+            await self.client.create_payload_index(
+                collection_name=self.collection,
+                field_name="content",
+                field_schema=models.TextIndexParams(
+                    type=models.TextIndexType.TEXT,
+                    tokenizer=models.TokenizerType.WORD,
+                    lowercase=True,
+                    min_token_len=2,
+                ),
+            )
+
     # --- Writes ------------------------------------------------------------
 
     async def upsert(self, *, memory_id: str, vector: list[float], payload: dict) -> None:
@@ -128,11 +144,12 @@ class QdrantStore:
         self,
         *,
         vector: list[float],
-        user_id: str,
+        user_id: str | list[str],
         limit: int = 8,
         statuses: list[str] | None = None,
         categories: list[str] | None = None,
         score_threshold: float | None = None,
+        exclude_kind: str | None = None,
     ) -> list[tuple[dict, float]]:
         response = await self.client.query_points(
             collection_name=self.collection,
@@ -140,11 +157,40 @@ class QdrantStore:
             limit=limit,
             score_threshold=score_threshold,
             query_filter=build_filter(
-                user_id=user_id, statuses=statuses, categories=categories
+                user_id=user_id, statuses=statuses, categories=categories,
+                exclude_kind=exclude_kind,
             ),
             with_payload=True,
         )
         return [(p.payload or {}, p.score) for p in response.points]
+
+    async def text_match(
+        self,
+        *,
+        words: list[str],
+        user_id: str | list[str],
+        statuses: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Memories whose content contains any of `words` (full-text index)."""
+        if not words:
+            return []
+        base = build_filter(user_id=user_id, statuses=statuses)
+        condition = models.Filter(
+            must=base.must if base else None,
+            should=[
+                models.FieldCondition(key="content", match=models.MatchText(text=word))
+                for word in words
+            ],
+        )
+        points, _ = await self.client.scroll(
+            collection_name=self.collection,
+            scroll_filter=condition,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return [p.payload or {} for p in points]
 
     async def get(self, memory_id: str) -> dict | None:
         points = await self.client.retrieve(
@@ -163,7 +209,7 @@ class QdrantStore:
     async def list_memories(
         self,
         *,
-        user_id: str,
+        user_id: str | list[str],
         limit: int = 200,
         statuses: list[str] | None = None,
         categories: list[str] | None = None,
@@ -185,6 +231,55 @@ class QdrantStore:
             if offset is None:
                 break
         return payloads
+
+    async def referencing(
+        self, memory_ids: list[str], *, user_id: str | None = None, limit: int = 1000
+    ) -> list[dict]:
+        """Memories with a conflict edge to any of `memory_ids` (in one graph, or all).
+
+        A private memory can dispute a shared one without the shared side
+        pointing back, so anything acting on the shared one must look.
+        """
+        if not memory_ids:
+            return []
+        found: list[dict] = []
+        offset = None
+        base = build_filter(user_id=user_id)
+        condition = models.Filter(
+            must=base.must if base else None,
+            should=[
+                models.FieldCondition(key=key, match=models.MatchAny(any=list(memory_ids)))
+                for key in ("conflicts_with", "team_conflicts_with")
+            ],
+        )
+        while len(found) < limit:
+            batch, offset = await self.client.scroll(
+                collection_name=self.collection,
+                scroll_filter=condition,
+                limit=min(256, limit - len(found)),
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            found.extend(p.payload or {} for p in batch)
+            if offset is None:
+                break
+        return found
+
+    async def derived_from_any(self, memory_ids: list[str], limit: int = 1000) -> list[dict]:
+        """Summaries written from any of `memory_ids`."""
+        if not memory_ids:
+            return []
+        points, _ = await self.client.scroll(
+            collection_name=self.collection,
+            scroll_filter=models.Filter(must=[
+                models.FieldCondition(key="derived_from", match=models.MatchAny(any=memory_ids))
+            ]),
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return [p.payload or {} for p in points]
 
     async def count(self, *, user_id: str) -> int:
         result = await self.client.count(
@@ -327,13 +422,25 @@ class QdrantStore:
 
 def build_filter(
     *,
-    user_id: str | None = None,
+    user_id: str | list[str] | None = None,
     statuses: list[str] | None = None,
     categories: list[str] | None = None,
+    exclude_kind: str | None = None,
 ) -> models.Filter | None:
     conditions: list[models.Condition] = []
+    excluded: list[models.Condition] = []
+    if exclude_kind:
+        # must_not, so memories stored before `kind` existed still match.
+        excluded.append(
+            models.FieldCondition(key="kind", match=models.MatchValue(value=exclude_kind))
+        )
 
-    if user_id:
+    if isinstance(user_id, list):
+        # Several owners: a user's own graph plus the shared space.
+        conditions.append(
+            models.FieldCondition(key="user_id", match=models.MatchAny(any=user_id))
+        )
+    elif user_id:
         conditions.append(
             models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
         )
@@ -346,4 +453,6 @@ def build_filter(
             models.FieldCondition(key="category", match=models.MatchAny(any=list(categories)))
         )
 
-    return models.Filter(must=conditions) if conditions else None
+    if not conditions and not excluded:
+        return None
+    return models.Filter(must=conditions or None, must_not=excluded or None)

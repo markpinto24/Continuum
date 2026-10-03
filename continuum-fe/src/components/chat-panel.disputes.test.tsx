@@ -5,8 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatPanel } from '@/components/chat-panel'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { ChatContext, Memory } from '@/lib/types'
+import { makeMemory } from '@/test/fixtures'
 
 const api = vi.hoisted(() => ({ resolveConflict: vi.fn(), streamChat: vi.fn() }))
+
+const ME = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const }
 
 vi.mock('@/lib/api', () => ({
   api: {
@@ -17,12 +20,7 @@ vi.mock('@/lib/api', () => ({
 }))
 
 function memory(id: string, content: string, created: string): Memory {
-  return {
-    id, user_id: 'mark', content, category: 'decision', subject: 'atlas', confidence: 0.7,
-    status: 'contradicted', source_id: null, source_excerpt: null, supersedes: [],
-    superseded_by: null, conflicts_with: [], escalations: [], created_at: created,
-    updated_at: created, last_reinforced_at: created, reinforcement_count: 0,
-  }
+  return makeMemory({ id, content, status: 'contradicted', created_at: created })
 }
 
 const postgres = memory('m1', 'Atlas runs on Postgres', '2026-03-01T00:00:00Z')
@@ -32,6 +30,7 @@ const disputed: ChatContext = {
   query: 'db?',
   memories: [],
   disagreements: [{ subject: 'atlas', memories: [postgres, mongo] }],
+  as_of: null,
 }
 
 beforeEach(() => {
@@ -46,7 +45,7 @@ beforeEach(() => {
 async function askAndRender(onGraphChanged = vi.fn()) {
   render(
     <TooltipProvider>
-      <ChatPanel onGraphChanged={onGraphChanged} onSelectMemory={() => {}} />
+      <ChatPanel me={ME} openDisputes={0} onGraphChanged={onGraphChanged} onSelectMemory={() => {}} />
     </TooltipProvider>,
   )
   await userEvent.type(screen.getByRole('textbox'), 'what database?{Enter}')

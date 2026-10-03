@@ -181,7 +181,7 @@ gitignored.
 
 ```bash
 # from continuum-be/
-uv run pytest                      # 286 tests, no services needed
+uv run pytest                      # 322 tests, no services needed
 uv run ruff check .
 CONTINUUM_API_KEY=ck_... uv run python scripts/seed_demo.py  # full pipeline, live
 ```
@@ -245,23 +245,35 @@ runs with `TEST_DATABASE_URL` set to a database the tests may wipe.
 | `POST` | `/api/v1/auth/password` | Change password; signs out other browsers |
 | `GET` `POST` `DELETE` | `/api/v1/auth/keys[/{id}]` | List, create, revoke API keys (session only) |
 | `GET` `POST` `PATCH` | `/api/v1/admin/users[/{id}]` | Manage accounts (admins, session only) |
-| `GET` | `/api/v1/speech/status` | Is dictation on, is the model loaded, max length |
+| `GET` | `/api/v1/speech/status` | Dictation and spoken-answer availability, limits |
+| `POST` | `/api/v1/speech/synthesize` | `{text, voice?, speed?}` → WAV, local Piper voice; nothing stored |
+| `GET` `PATCH` | `/api/v1/auth/preferences` | Your voice and speed for Lumen and read-aloud (change: session only) |
+| `POST` | `/api/v1/memories/{id}/share` | Put your memory in the shared team space, via its resolver |
 | `POST` | `/api/v1/speech/transcribe` | Multipart `audio` → text, by local Whisper; nothing stored |
 | `GET` | `/api/v1/feedback/labels` | Your settled conflicts, each with what the resolver had thought |
-| `GET` | `/api/v1/feedback/evidence` | Would a lower auto-supersede gate have been safe? Counted from your decisions |
-| `GET` | `/api/v1/feedback/export` | Your decisions as corpus YAML, for `run_eval.py --add-cases` |
-| `POST` | `/api/v1/ingest` | Feed a note or transcript; extract, resolve, store |
+| `GET` | `/api/v1/feedback/evidence` | Would a lower auto-supersede gate have been safe? Yours, or `?scope=team` for everyone's |
+| `GET` | `/api/v1/feedback/export` | What you taught it as eval cases: `?kind=resolution` (default) · `extraction` · `retrieval` |
+| `GET` | `/api/v1/feedback/calibration` | Judge confidence vs how often people agreed, per band (pooled) |
+| `GET` `POST` `DELETE` | `/api/v1/feedback/rules[/{id}]` | Approved "both can hold" rules + suggestions; approve (session; team = admin), revoke |
+| `POST` | `/api/v1/feedback/answer` | Rate an answer; name memories that should have come up |
+| `GET` | `/api/v1/feedback/summary` | Counts of everything you have taught it |
+| `POST` | `/api/v1/ingest` | Feed a note or transcript; extract, resolve, store (`share: true` → team space) |
 | `POST` | `/api/v1/memories/search` | Semantic search over your memories |
 | `GET` | `/api/v1/memories` | List memories |
-| `GET` | `/api/v1/memories/graph` | Belief graph — nodes + edges for the 3D view |
+| `GET` | `/api/v1/memories/graph` | Belief graph — nodes + edges for the 3D view; `?as_of=` for a past date |
 | `GET` | `/api/v1/memories/{id}` | Fetch one memory |
 | `POST` | `/api/v1/memories/{id}/reinforce` | Confirm still true; resets decay clock |
 | `POST` | `/api/v1/memories/{id}/reactivate` | Restore an archived or superseded memory |
-| `GET` | `/api/v1/conflicts` | The contradiction inbox |
+| `POST` | `/api/v1/memories/{id}/reject` | "Not a real fact": archive with a reason; restores anything it retired |
+| `POST` | `/api/v1/memories/{id}/forget` | Redact its words everywhere they were copied; the record stays. Irreversible |
+| `GET` | `/api/v1/memories/export` | Your whole graph as JSON, every status |
+| `POST` | `/api/v1/memories/summaries/refresh` | Summarise your busy subjects now |
+| `GET` | `/api/v1/conflicts` | The contradiction inbox (incl. your beliefs vs the team's, `team: true`) |
 | `POST` | `/api/v1/conflicts/resolve` | Human verdict (`keep_both` is first-class) |
+| `POST` | `/api/v1/conflicts/resolve-team` | Your belief vs the team's: `team_holds` · `mine_holds` (shares it) · `both_hold` |
 | `POST` | `/api/v1/decay/sweep` | Run decay now; `dry_run` to preview |
 | `POST` | `/api/v1/chat` | Answer from memory, streamed over SSE |
-| `POST` | `/api/v1/chat/context` | What chat *would* retrieve — no generation |
+| `POST` | `/api/v1/chat/context` | What chat *would* retrieve — no generation (`as_of` too) |
 
 Quick check:
 
@@ -411,7 +423,9 @@ how to read the sweep.
 | **3 — Memory-augmented chat** | ✅ done — SSE streaming, retrieval ranked by similarity × confidence × recency, disagreement surfaced rather than resolved |
 | **4 — Belief graph UI** | ✅ done — `continuum-fe`: React + shadcn + Three.js force-directed graph off `/memories/graph`, the contradiction inbox, and a chat panel alongside |
 | **5 — Evaluation** | ✅ done — 46-case labelled corpus incl. held-out sets, belief-loss / stale-belief / merge-loss measured separately, and a gate sweep that replays one recorded run at every threshold for free |
-| **6 — Authentication** | ✅ done *(this release)* — accounts, sessions and per-agent API keys; identity from the credential only; per-user isolation, CSRF, lockout and rate limits |
+| **6 — Authentication** | ✅ done — accounts, sessions and per-agent API keys; identity from the credential only; per-user isolation, CSRF, lockout and rate limits |
+| **7–11 — Voice, learning, sharing, Lumen** | ✅ done — dictation, spoken answers, decisions as labels, a shared team space, hands-free voice |
+| **12 — Learning more, remembering better** | ✅ done *(this release)* — team evidence, opt-in calibrated gate, rejects and approved rules; private-vs-team checks, keyword + semantic retrieval, as-of queries, summaries, forget, export and backups |
 
 See [`../CLAUDE.md`](../CLAUDE.md) for the full engineering brief, layering rules
 and conventions, and [`../README.md`](../README.md) for the project overview.

@@ -30,6 +30,7 @@ from continuum.models.auth import (
     ApiKey,
     Principal,
     User,
+    VoicePreferences,
     is_valid_email,
     normalise_email,
 )
@@ -305,6 +306,15 @@ class AuthService:
         keep = hash_token(current_session) if current_session else None
         await self.db.delete_sessions_for_user(user_id, keep=keep)
         log.info("auth.password_changed", user_id=user_id)
+
+    # --- Preferences -------------------------------------------------------
+
+    async def voice_preferences(self, user_id: str) -> VoicePreferences:
+        return await self.db.get_voice_preferences(user_id)
+
+    async def set_voice_preferences(self, user_id: str, prefs: VoicePreferences) -> None:
+        await self.db.set_voice_preferences(user_id, prefs)
+        log.info("auth.voice_preferences_set", user_id=user_id, voice=prefs.voice)
 
     # --- API keys ----------------------------------------------------------
 

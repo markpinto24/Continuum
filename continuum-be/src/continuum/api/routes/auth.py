@@ -16,10 +16,11 @@ from continuum.api.deps import (
     CurrentUser,
     SessionUser,
     SettingsDep,
+    VoiceDep,
     require_browser_header,
 )
 from continuum.config import Settings
-from continuum.models.auth import ApiKey, Principal, User
+from continuum.models.auth import ApiKey, Principal, User, VoicePreferences
 from continuum.models.schemas import (
     ApiKeyCreated,
     ApiKeyCreateRequest,
@@ -30,6 +31,9 @@ from continuum.models.schemas import (
     Me,
     PasswordChangeRequest,
     SetupRequest,
+    VoiceOption,
+    VoiceSettings,
+    VoiceSettingsUpdate,
 )
 from continuum.services.auth import AuthError, LockedOut
 
@@ -207,3 +211,41 @@ async def revoke_key(key_id: str, principal: SessionUser, auth: AuthDep) -> Resp
     except AuthError as exc:
         raise http_error(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+
+async def _voice_settings(user_id: str, auth: AuthDep, voice: VoiceDep) -> VoiceSettings:
+    prefs = await auth.voice_preferences(user_id)
+    # A saved voice the server no longer offers falls back to the default.
+    chosen = prefs.voice if prefs.voice and voice.is_allowed(prefs.voice) else None
+    return VoiceSettings(
+        voice=chosen or voice.default_voice,
+        speed=prefs.speed or 1.0,
+        default_voice=voice.default_voice,
+        voices=[VoiceOption.model_validate(v.model_dump()) for v in voice.catalogue()],
+    )
+
+
+@router.get("/preferences", response_model=VoiceSettings)
+async def get_preferences(principal: CurrentUser, auth: AuthDep, voice: VoiceDep) -> VoiceSettings:
+    """Your voice for read-aloud and Lumen, and the voices available."""
+    return await _voice_settings(principal.user_id, auth, voice)
+
+
+@router.patch("/preferences", response_model=VoiceSettings)
+async def update_preferences(
+    body: VoiceSettingsUpdate, principal: SessionUser, auth: AuthDep, voice: VoiceDep
+) -> VoiceSettings:
+    """Choose your voice and speaking speed. Saved to your account, so it follows
+    you to any browser."""
+    if body.voice is not None and not voice.is_allowed(body.voice):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unknown voice {body.voice!r}.",
+        )
+    current = await auth.voice_preferences(principal.user_id)
+    updates = body.model_dump(exclude_unset=True)
+    await auth.set_voice_preferences(
+        principal.user_id, VoicePreferences.model_validate({**current.model_dump(), **updates})
+    )
+    return await _voice_settings(principal.user_id, auth, voice)

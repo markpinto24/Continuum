@@ -24,15 +24,24 @@ from datetime import UTC, datetime
 import yaml
 
 from continuum.clients.labels import LabelStore
+from continuum.clients.learning import LearningStore
 from continuum.config import Settings
 from continuum.core.logger import get_logger
 from continuum.evaluation.types import ResolutionCase
 from continuum.models.feedback import (
     EXPECTED_ACTION,
+    AnswerFeedback,
+    CalibrationPoint,
+    CalibrationReport,
     Decision,
+    ExtractionFeedback,
+    FeedbackSummary,
     GateBand,
     GateEvidence,
     ResolutionLabel,
+    ResolutionRule,
+    RuleList,
+    RuleSuggestion,
 )
 from continuum.models.memory import Memory
 
@@ -71,7 +80,11 @@ def build_labels(
     for loser in losers:
         # Only pairs that were actually in dispute. The endpoint accepts any
         # loser ids; a pairing the resolver never escalated is not a label.
-        if loser.id not in winner.conflicts_with and winner.id not in loser.conflicts_with:
+        disputed = (
+            loser.id in winner.conflicts_with + winner.team_conflicts_with
+            or winner.id in loser.conflicts_with + loser.team_conflicts_with
+        )
+        if not disputed:
             continue
         older, newer = sorted((winner, loser), key=lambda m: m.created_at)
         if keep_both:
@@ -107,6 +120,7 @@ def build_labels(
                 forced=escalation.forced if escalation else False,
                 decision=decision,
                 expected_action=EXPECTED_ACTION[decision],
+                graph_owner=older.user_id if older.user_id == newer.user_id else "cross",
             )
         )
     return labels
@@ -190,6 +204,159 @@ def _recommend(
     )
 
 
+def _supersede_labels(labels: list[ResolutionLabel]) -> list[ResolutionLabel]:
+    """Escalated `supersedes` verdicts with a probability: the only ones a gate decides."""
+    return [
+        label
+        for label in labels
+        if label.judge_relation == "supersedes"
+        and not label.forced
+        and label.judge_confidence is not None
+    ]
+
+
+def calibration_points(labels: list[ResolutionLabel]) -> list[CalibrationPoint]:
+    """How often the judge was right per confidence band, made monotone.
+
+    Each band gets a smoothed rate ((confirmed + 1) / (total + 2): one decision
+    is not certainty), then pool-adjacent-violators forces the curve to rise with
+    confidence — a judge that is "more sure" must never map to "less likely".
+    Empty bands borrow the nearest band below (or above, at the bottom).
+    """
+    supersedes = _supersede_labels(labels)
+    raw = []
+    for low, high in BANDS:
+        inside = [s for s in supersedes if low <= (s.judge_confidence or 0.0) < high]
+        confirmed = sum(s.decision is Decision.NEWER_HOLDS for s in inside)
+        raw.append((low, high, len(inside), confirmed))
+
+    # Pool adjacent violators over the non-empty bands, weighted by size.
+    blocks: list[list[float]] = []  # [value, weight, first_index, last_index]
+    for index, (_, _, total, confirmed) in enumerate(raw):
+        if total == 0:
+            continue
+        blocks.append([(confirmed + 1) / (total + 2), float(total), index, index])
+        while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
+            value_b, weight_b, _, last = blocks.pop()
+            value_a, weight_a, first, _ = blocks.pop()
+            weight = weight_a + weight_b
+            blocks.append([(value_a * weight_a + value_b * weight_b) / weight, weight, first, last])
+    fitted: dict[int, float] = {}
+    for value, _, first, last in blocks:
+        for index in range(int(first), int(last) + 1):
+            fitted[index] = value
+
+    points = []
+    last_value = None
+    for index, (low, high, total, confirmed) in enumerate(raw):
+        if index in fitted:
+            last_value = fitted[index]
+        value = last_value if last_value is not None else (fitted[min(fitted)] if fitted else 0.5)
+        points.append(
+            CalibrationPoint(
+                low=low,
+                high=min(high, 1.0),
+                total=total,
+                confirmed=confirmed,
+                observed=round(confirmed / total, 3) if total else None,
+                calibrated=round(value, 3),
+            )
+        )
+    return points
+
+
+class Calibration:
+    """The curve the resolver's gate can use, refreshed as decisions arrive."""
+
+    def __init__(self) -> None:
+        self.points: list[CalibrationPoint] = []
+        self.labels = 0
+        self.min_labels = 0
+
+    def update(self, labels: list[ResolutionLabel], *, min_labels: int) -> None:
+        self.points = calibration_points(labels)
+        self.labels = len(_supersede_labels(labels))
+        self.min_labels = min_labels
+
+    @property
+    def usable(self) -> bool:
+        return self.labels >= self.min_labels > 0
+
+    def map(self, confidence: float) -> float | None:
+        """The calibrated probability for a raw judge confidence, or None if unusable."""
+        if not self.usable:
+            return None
+        for point in self.points:
+            if point.low <= confidence < point.high or (point.high >= 1.0 and confidence >= 1.0):
+                return point.calibrated
+        return None
+
+
+def rule_suggestions(
+    labels: list[ResolutionLabel],
+    *,
+    owners: list[str],
+    existing: set[tuple[str, str]],
+    min_decisions: int,
+) -> list[RuleSuggestion]:
+    """Subjects where people keep saying both statements hold, and never the opposite."""
+    counts: dict[tuple[str, str], list[Decision]] = {}
+    for label in labels:
+        subject = label.existing_subject or label.incoming_subject
+        if not subject or label.graph_owner not in owners:
+            continue
+        counts.setdefault((label.graph_owner, subject), []).append(label.decision)
+    suggestions = []
+    for (owner, subject), decisions in sorted(counts.items()):
+        both = sum(d is Decision.BOTH_HOLD for d in decisions)
+        if both >= min_decisions and both == len(decisions) and (owner, subject) not in existing:
+            suggestions.append(RuleSuggestion(owner=owner, subject=subject, both_hold=both))
+    return suggestions
+
+
+def to_extraction_cases(rejected: list[ExtractionFeedback]) -> list[dict]:
+    """Only rejections with an excerpt: without the text it came from there is
+    nothing to re-run the extractor on."""
+    cases = []
+    for item in rejected:
+        if not item.source_excerpt or item.content == "[forgotten]":
+            continue
+        cases.append({
+            "id": f"from-use-reject-{item.id[:8]}",
+            "why": f"Rejected in use ({item.reason.value})"
+            + (f": {item.note}" if item.note else "."),
+            "text": item.source_excerpt,
+            "expect": [],
+            "forbid": [item.content],
+            "tags": ["from-use", f"rejected-{item.reason.value}"],
+        })
+    return cases
+
+
+def to_retrieval_cases(
+    user_id: str, answers: list[AnswerFeedback], lookup: dict[str, Memory]
+) -> list[dict]:
+    cases = []
+    for answer in answers:
+        expect = [
+            {"id": mid, "content": lookup[mid].content}
+            for mid in answer.missing_ids
+            if mid in lookup and not lookup[mid].redacted_at
+        ]
+        if not expect or answer.query == "[forgotten]":
+            continue
+        cases.append({
+            "id": f"from-use-answer-{answer.id[:8]}",
+            "why": "You said these should have come up"
+            + (f": {answer.note}" if answer.note else "."),
+            "owner": user_id,
+            "query": answer.query,
+            "expect": expect,
+            "tags": ["from-use"],
+        })
+    return cases
+
+
 def to_corpus_cases(labels: list[ResolutionLabel]) -> list[dict]:
     """The labels as Phase 5 resolution cases, each validated against the corpus schema."""
     cases = []
@@ -232,9 +399,83 @@ def to_corpus_cases(labels: list[ResolutionLabel]) -> list[dict]:
 
 
 class FeedbackService:
-    def __init__(self, store: LabelStore, settings: Settings) -> None:
+    def __init__(
+        self,
+        store: LabelStore,
+        settings: Settings,
+        *,
+        learning: LearningStore | None = None,
+        calibration: Calibration | None = None,
+    ) -> None:
         self.store = store
         self.settings = settings
+        self.learning = learning
+        self.calibration = calibration or Calibration()
+
+    async def refresh_calibration(self) -> None:
+        """Rebuild the gate's calibration curve from every decision on the instance."""
+        try:
+            labels = await self.store.list_all()
+        except Exception:  # noqa: BLE001 - the gate falls back to the raw judge
+            log.exception("feedback.calibration_refresh_failed")
+            return
+        self.calibration.update(labels, min_labels=self.settings.calibration_min_labels)
+
+    async def calibration_report(self) -> CalibrationReport:
+        await self.refresh_calibration()
+        return CalibrationReport(
+            labels=self.calibration.labels,
+            points=self.calibration.points,
+            usable=self.calibration.usable,
+            in_use=self.settings.calibrated_gate and self.calibration.usable,
+            min_labels=self.settings.calibration_min_labels,
+        )
+
+    # --- Rules ---------------------------------------------------------------
+
+    async def rules(self, owners: list[str]) -> RuleList:
+        assert self.learning is not None
+        rules = await self.learning.rules(owners)
+        labels = [
+            label for label in await self.store.list_all() if label.graph_owner in owners
+        ]
+        suggestions = rule_suggestions(
+            labels,
+            owners=owners,
+            existing={(r.owner, r.subject) for r in rules},
+            min_decisions=self.settings.rule_suggestion_min_decisions,
+        )
+        return RuleList(rules=rules, suggestions=suggestions)
+
+    async def approve_rule(self, *, owner: str, subject: str, approved_by: str) -> ResolutionRule:
+        assert self.learning is not None
+        existing = [r for r in await self.learning.rules([owner]) if r.subject == subject]
+        if existing:
+            return existing[0]
+        rule = ResolutionRule(
+            id=uuid.uuid4().hex,
+            owner=owner,
+            subject=subject,
+            created_by=approved_by,
+            created_at=datetime.now(UTC),
+        )
+        await self.learning.add_rule(rule)
+        log.info("feedback.rule_approved", rule_id=rule.id, owner=owner)
+        return rule
+
+    async def revoke_rule(self, rule_id: str, *, owners: list[str]) -> None:
+        assert self.learning is not None
+        rule = await self.learning.get_rule(rule_id)
+        if rule is None or rule.owner not in owners or rule.revoked_at is not None:
+            raise LookupError("No such active rule.")
+        await self.learning.revoke_rule(rule_id, datetime.now(UTC))
+        log.info("feedback.rule_revoked", rule_id=rule_id)
+
+    async def compatible_subjects(self, owner: str) -> set[str]:
+        """Subjects whose statements this graph's approved rules say can all hold."""
+        if self.learning is None:
+            return set()
+        return {r.subject for r in await self.learning.rules([owner]) if r.kind == "compatible"}
 
     async def record_resolution(
         self, user_id: str, winner: Memory, losers: list[Memory], *, keep_both: bool
@@ -246,6 +487,7 @@ class FeedbackService:
         except Exception:  # noqa: BLE001 - the graph change is already applied
             log.exception("feedback.record_failed", labels=len(labels))
             return []
+        await self.refresh_calibration()
         log.info(
             "feedback.recorded",
             labels=len(labels),
@@ -257,12 +499,60 @@ class FeedbackService:
     async def labels(self, user_id: str, *, limit: int = 1000) -> list[ResolutionLabel]:
         return await self.store.list_for_user(user_id, limit=limit)
 
-    async def evidence(self, user_id: str) -> GateEvidence:
+    async def evidence(self, user_id: str, *, team: bool = False) -> GateEvidence:
+        """Yours, or pooled across everyone on the instance (counts only — no
+        one's content leaves their own labels)."""
+        labels = await (self.store.list_all() if team else self.store.list_for_user(user_id))
         return gate_evidence(
-            await self.store.list_for_user(user_id),
+            labels,
             gate=self.settings.auto_supersede_confidence,
             min_evidence=self.settings.feedback_min_gate_evidence,
         )
+
+    # --- Extraction and answer feedback ------------------------------------------
+
+    async def record_answer(self, item: AnswerFeedback) -> None:
+        assert self.learning is not None
+        await self.learning.add_answer(item)
+        log.info("feedback.answer_rated", rating=item.rating, missing=len(item.missing_ids),
+                 used=len(item.used_ids))
+
+    async def summary(self, user_id: str) -> FeedbackSummary:
+        decisions = await self.store.list_for_user(user_id)
+        rejected = await self.learning.rejections(user_id) if self.learning else []
+        answers = await self.learning.answers(user_id) if self.learning else []
+        return FeedbackSummary(
+            decisions=len(decisions),
+            rejected_facts=len(rejected),
+            answers_up=sum(a.rating > 0 for a in answers),
+            answers_down=sum(a.rating < 0 for a in answers),
+            missing_memories=sum(len(a.missing_ids) for a in answers),
+        )
+
+    async def extraction_yaml(self, user_id: str) -> str:
+        """Rejected extractions as extraction-corpus cases: the excerpt is the
+        input, and what was wrongly extracted from it must not come back."""
+        rejected = await self.learning.rejections(user_id) if self.learning else []
+        cases = to_extraction_cases(list(reversed(rejected)))
+        header = (
+            "# Extraction cases from real use: memories you rejected in Continuum.\n"
+            "# Score the extractor against them with:\n"
+            "#   uv run python scripts/run_eval.py --extraction --add-extraction THIS_FILE\n"
+            "# Each case copies memory content: treat this file as private.\n"
+        )
+        return header + yaml.safe_dump(cases, sort_keys=False, allow_unicode=True)
+
+    async def retrieval_yaml(self, user_id: str, lookup: dict[str, Memory]) -> str:
+        """Answers where a memory should have come up, as retrieval cases."""
+        answers = await self.learning.answers(user_id) if self.learning else []
+        cases = to_retrieval_cases(user_id, list(reversed(answers)), lookup)
+        header = (
+            "# Retrieval cases from real use: memories you said should have come up.\n"
+            "# Check recall, and sweep the ranking weights, against the live graph:\n"
+            "#   uv run python scripts/run_eval.py --retrieval THIS_FILE\n"
+            "# Each case copies your questions: treat this file as private.\n"
+        )
+        return header + yaml.safe_dump(cases, sort_keys=False, allow_unicode=True)
 
     async def export_yaml(self, user_id: str) -> str:
         labels = await self.store.list_for_user(user_id)

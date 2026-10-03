@@ -64,7 +64,16 @@ async def chat(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"Messages are over the {settings.max_input_chars}-character limit.",
         )
-    request = ChatRequest(**body.model_dump(), user_id=principal.user_id)
+    request = ChatRequest(
+        **body.model_dump(),
+        user_id=principal.user_id,
+        author_email=principal.email,
+    )
+    if request.share and not settings.shared_space_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The shared team space is turned off on this server.",
+        )
     return StreamingResponse(
         _sse(service, request),
         media_type="text/event-stream",
@@ -84,5 +93,6 @@ async def chat_context(
     needs to score retrieval on its own rather than through the answer.
     """
     return await retrieval.retrieve(
-        user_id=principal.user_id, query=request.query, limit=request.limit
+        user_id=principal.user_id, query=request.query, limit=request.limit,
+        as_of=request.as_of,
     )

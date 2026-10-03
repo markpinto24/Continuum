@@ -12,6 +12,7 @@ function response(overrides: Partial<IngestResponse>): IngestResponse {
     reinforced: [],
     superseded: [],
     conflicts_raised: [],
+    team_conflicts: [],
     resolutions: [],
     ...overrides,
   }
@@ -45,5 +46,13 @@ describe('describeWriteBack', () => {
 
   it('says nothing when there was no write-back at all', () => {
     expect(describeWriteBack(null)).toBeNull()
+  })
+})
+
+describe('team disagreements', () => {
+  it('says when a turn disagrees with team knowledge', () => {
+    expect(
+      describeWriteBack(response({ extracted: 1, created: [memory], team_conflicts: ['t1'] })),
+    ).toBe('Stored 1 new memory · disagrees with the team on 1')
   })
 })

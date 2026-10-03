@@ -1,14 +1,14 @@
-import { Check, Loader2, Scale } from 'lucide-react'
+import { Check, Loader2, Scale, Share2, Users } from 'lucide-react'
 import { useState } from 'react'
 
 import { EmptyPanel } from '@/components/memory-detail'
 import { Badge } from '@/components/ui/badge'
-import { LearningPanel } from '@/components/learning-panel'
+import { type EvidenceScope, LearningPanel } from '@/components/learning-panel'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { describeEscalation, findEscalation } from '@/lib/escalation'
 import { CATEGORY_LABEL } from '@/lib/memory-style'
-import type { ConflictPair, Memory } from '@/lib/types'
+import { SHARED_SPACE, type ConflictPair, type Memory, type TeamDecision } from '@/lib/types'
 import { type Resource, useResource } from '@/hooks/use-resource'
 import type { ConflictListResponse } from '@/lib/types'
 
@@ -29,15 +29,44 @@ export function ContradictionInbox({
   resource,
   onResolved,
   onSelect,
+  isAdmin = false,
 }: {
   resource: Resource<ConflictListResponse>
   onResolved: () => void
   onSelect: (id: string) => void
+  isAdmin?: boolean
 }) {
   const [pending, setPending] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [scope, setScope] = useState<EvidenceScope>('mine')
   // Refetched whenever the conflict list reloads — i.e. after any decision,
   // whether made here or in the chat.
-  const evidence = useResource(() => api.feedbackEvidence(), [resource.data])
+  const evidence = useResource(() => api.feedbackEvidence(scope), [resource.data, scope])
+  const learning = (
+    <LearningPanel
+      evidence={evidence}
+      scope={scope}
+      onScope={setScope}
+      isAdmin={isAdmin}
+      version={resource.data}
+    />
+  )
+
+  const settleTeam = async (pair: ConflictPair, decision: TeamDecision) => {
+    const team = pair.conflicting[0]
+    if (!team) return
+    setPending(pair.memory.id)
+    setError(null)
+    try {
+      await api.resolveTeamConflict(pair.memory.id, team.id, decision)
+      resource.refresh()
+      onResolved()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setPending(null)
+    }
+  }
 
   const resolve = async (
     pair: ConflictPair,
@@ -68,7 +97,7 @@ export function ContradictionInbox({
           title="Nothing to decide"
           body="No unresolved contradictions. When the resolver is not confident enough to retire a belief on its own, the pair lands here instead of being guessed at."
         />
-        <LearningPanel evidence={evidence} />
+        {learning}
       </div>
     )
   }
@@ -80,14 +109,31 @@ export function ContradictionInbox({
         system stopped rather than pick a side.
       </p>
 
+      {error && <p className="mb-2 text-[11px] text-danger">{error}</p>}
       <ul className="space-y-3">
         {pairs.map((pair) => {
           const busy = pending === pair.memory.id
+          if (pair.team) {
+            return (
+              <TeamDispute
+                key={`team-${pair.memory.id}`}
+                pair={pair}
+                busy={busy}
+                onSelect={onSelect}
+                onSettle={(decision) => void settleTeam(pair, decision)}
+              />
+            )
+          }
           const sides = [pair.memory, ...pair.conflicting]
           const why = describeEscalation(findEscalation(sides))
 
           return (
             <li key={pair.memory.id} className="panel overflow-hidden">
+              {pair.memory.user_id === SHARED_SPACE && (
+                <p className="border-b border-border bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-300">
+                  Team knowledge — anyone on this Continuum can settle it.
+                </p>
+              )}
               {why && (
                 <p className="border-b border-border bg-surface-raised/40 px-3 py-1.5 text-[11px] leading-relaxed text-muted">
                   {why}
@@ -135,7 +181,89 @@ export function ContradictionInbox({
           )
         })}
       </ul>
-      <LearningPanel evidence={evidence} />
+      {learning}
+    </div>
+  )
+}
+
+/**
+ * Your private belief against the team's. Only yours can change from here:
+ * if you think the team is out of date, sharing yours lets the team graph's own
+ * resolver — or the team — decide.
+ */
+function TeamDispute({
+  pair,
+  busy,
+  onSelect,
+  onSettle,
+}: {
+  pair: ConflictPair
+  busy: boolean
+  onSelect: (id: string) => void
+  onSettle: (decision: TeamDecision) => void
+}) {
+  const team = pair.conflicting[0]
+  if (!team) return null
+  const why = describeEscalation(findEscalation([pair.memory, team]))
+  return (
+    <li className="panel overflow-hidden">
+      <p className="flex items-center gap-1.5 border-b border-border bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-300">
+        <Users className="size-3" />
+        Your note disagrees with what the team holds. Only you see this.
+      </p>
+      {why && (
+        <p className="border-b border-border bg-surface-raised/40 px-3 py-1.5 text-[11px] leading-relaxed text-muted">
+          {why}
+        </p>
+      )}
+      <div className="divide-y divide-border">
+        <TeamSide label="Yours" memory={pair.memory} onInspect={() => onSelect(pair.memory.id)} />
+        <TeamSide
+          label={team.shared_by_email ? `Team · shared by ${team.shared_by_email}` : 'Team'}
+          memory={team}
+          onInspect={() => onSelect(team.id)}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-surface-raised/40 px-3 py-2">
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => onSettle('team_holds')}>
+          {busy ? <Loader2 className="animate-spin" /> : <Check />}
+          The team is right
+        </Button>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => onSettle('mine_holds')}>
+          <Share2 />
+          Mine holds — share it
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => onSettle('both_hold')}>
+          <Scale />
+          Both are true
+        </Button>
+      </div>
+    </li>
+  )
+}
+
+function TeamSide({
+  label,
+  memory,
+  onInspect,
+}: {
+  label: string
+  memory: Memory
+  onInspect: () => void
+}) {
+  return (
+    <div className="px-3 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Badge>{label}</Badge>
+        <Badge>{CATEGORY_LABEL[memory.category]}</Badge>
+        <span className="ml-auto text-[10px] text-muted/70">
+          {new Date(memory.created_at).toLocaleDateString()}
+        </span>
+      </div>
+      <p className="text-xs leading-relaxed text-foreground">{memory.content}</p>
+      <Button size="sm" variant="ghost" className="mt-1.5" onClick={onInspect}>
+        Inspect
+      </Button>
     </div>
   )
 }

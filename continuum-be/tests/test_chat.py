@@ -57,9 +57,10 @@ class StubRetrieval:
         self.context = context
         self.calls: list[str] = []
 
-    async def retrieve(self, *, user_id, query, limit=None):  # noqa: ANN001, ARG002
+    async def retrieve(self, *, user_id, query, limit=None, as_of=None):  # noqa: ANN001, ARG002
         self.calls.append(query)
-        return self.context
+        self.as_of = as_of
+        return self.context.model_copy(update={"as_of": as_of})
 
 
 class StubIngest:
@@ -428,3 +429,20 @@ async def test_the_context_endpoint_previews_retrieval_without_generating(settin
     assert response.status_code == 200
     assert response.json()["memories"][0]["memory"]["id"] == used.id
     assert retrieval.calls == ["db?"]
+
+
+# --- As of a date -------------------------------------------------------------
+
+
+async def test_a_question_about_the_past_says_so_and_is_never_remembered(settings):
+    from datetime import UTC, datetime
+
+    march = datetime(2026, 3, 15, tzinfo=UTC)
+    ingest = StubIngest()
+    llm = StubLLM(["Postgres, then."])
+    events = await collect(
+        build(ChatContext(query="q"), llm, settings, ingest=ingest), request(as_of=march)
+    )
+    assert "AS OF 2026-03-15" in llm.system_prompt
+    assert events[0].data["as_of"].startswith("2026-03-15")
+    assert ingest.requests == [] and events[-1].data["remembered"] is None

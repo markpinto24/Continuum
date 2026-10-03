@@ -68,7 +68,8 @@ simplify an implementation.**
 | Logging | `core/logger.py`: line/JSON formatters over structlog | redaction + request context underneath |
 | Relational DB | Postgres 17, SQLAlchemy 2 (async, asyncpg), Alembic | accounts only — memories stay in Qdrant |
 | Auth | sessions + API keys | argon2id passwords; SHA-256-hashed tokens; no JWT |
-| Dictation | faster-whisper (local Whisper, CPU, int8) | speech to text on the server; read-aloud is the browser's |
+| Dictation | faster-whisper (local Whisper, CPU, int8) | speech to text on the server |
+| Spoken answers | Piper (local neural voice, ONNX, CPU) | read-aloud and autopilot; browser voice only as fallback |
 | Frontend (planned) | React, shadcn/ui, react-bits, Three.js | |
 
 ### Why we do not use Mem0's `Memory.add()`
@@ -110,7 +111,8 @@ Continuum/                            ← git root
 │   ├── README.md                     backend setup + architecture
 │   ├── scripts/
 │   │   ├── seed_demo.py              end-to-end demo incl. a reversed decision
-│   │   └── run_eval.py               Phase 5 harness: record once, sweep free
+│   │   ├── run_eval.py               Phase 5 harness: record once, sweep free
+│   │   └── backup.py · restore.py    Qdrant snapshots + pg_dump, and back
 │   ├── src/continuum/
 │   │   ├── main.py                   app factory, lifespan, scheduler wiring
 │   │   ├── config.py                 all settings (pydantic-settings)
@@ -120,6 +122,7 @@ Continuum/                            ← git root
 │   │   ├── clients/                  ← thin, owned I/O adapters
 │   │   │   ├── authdb.py             ★ users, sessions, API keys (SQLAlchemy)
 │   │   │   ├── labels.py             resolution labels (SQLAlchemy)
+│   │   │   ├── learning.py           rejections, answer ratings, approved rules
 │   │   │   ├── llm.py                OpenAI-compatible chat + embeddings
 │   │   │   └── qdrant.py             collection bootstrap, filters, scroll
 │   │   ├── db/                       ← relational storage (accounts only)
@@ -142,7 +145,13 @@ Continuum/                            ← git root
 │   │   │   ├── decay.py              confidence decay + archival sweep
 │   │   │   ├── retrieval.py          ★ similarity × confidence × recency rank
 │   │   │   ├── speech.py             dictation: local Whisper, audio never kept
-│   │   │   ├── feedback.py           ★ decisions → labels, gate evidence, export
+│   │   │   ├── voice.py              spoken answers: local Piper voice
+│   │   │   ├── sharing.py            ★ private memory → shared space, via resolver
+│   │   │   ├── feedback.py           ★ decisions → labels, gate evidence, export,
+│   │   │   │                           calibration curve, rule suggestions
+│   │   │   ├── corrections.py        ★ reject a misreading; forget (redaction)
+│   │   │   ├── summaries.py          per-subject summaries: derived, never evidence
+│   │   │   ├── keywords.py           keyword terms + score for retrieval
 │   │   │   ├── chat.py               ★ prompt assembly; surfaces disputes
 │   │   │   ├── subjects.py           one entity, one slug (atlas = atlas-project)
 │   │   │   └── reindex.py            ★ re-embed on model change; crash-safe
@@ -158,12 +167,16 @@ Continuum/                            ← git root
 │   │   │   ├── runner.py             executes cases against the REAL resolver
 │   │   │   ├── metrics.py            ★ pure scoring, replay, sweep, recommend
 │   │   │   ├── extraction.py         token matching + the Mem0 baseline
+│   │   │   ├── retrieval.py          recall@k from "should have come up"; weight sweep
 │   │   │   └── report.py             plain-text rendering
 │   │   └── api/
 │   │       ├── deps.py               ★ DI wiring; get_principal = identity
 │   │       ├── router.py             router aggregation
 │   │       └── routes/               health, auth, admin, ingest, memories,
 │   │                                 conflicts, decay, chat, speech, feedback
+│   │                                 (memories: + /share /reject /forget /export
+│   │                                 /summaries/refresh; conflicts: + /resolve-team;
+│   │                                 feedback: + /rules /calibration /answer)
 │   └── tests/
 │       ├── test_core_logic.py        parsing, coercion, lifecycle (pure)
 │       ├── test_resolution.py        ★ confidence gate, category policy
@@ -173,6 +186,12 @@ Continuum/                            ← git root
 │       ├── test_evaluation.py        ★ the instrument, before it is trusted
 │       ├── test_auth.py              ★ every route guarded; isolation; refusals
 │       ├── test_feedback.py          ★ decision→label mapping; gate evidence
+│       ├── test_sharing.py           ★ sharing via the resolver; visibility
+│       ├── test_voice.py             synthesis refusals, its own rate limit
+│       ├── test_learning.py          ★ calibration curve + gate; rules; team evidence
+│       ├── test_corrections.py       ★ reject restores; forget leaves no copy
+│       ├── test_team_check.py        ★ private vs team, never touching the team
+│       ├── test_summaries.py         derived, never a neighbour, forgotten with sources
 │       └── test_ingest_pipeline.py   end-to-end vs in-memory Qdrant
 └── continuum-fe/                     ← the belief graph UI
     ├── package.json · yarn.lock      yarn 1; `resolutions` pins one vite
@@ -182,9 +201,13 @@ Continuum/                            ← git root
         │   ├── types.ts              ★ the backend contract, mirrored by hand
         │   ├── api.ts                thin typed client + SSE chat stream
         │   ├── sse.ts                ★ incremental SSE framing
+        │   ├── vad.ts                ★ speech start/end; the 2-second silence rule
+        │   ├── voice-player.ts       ★ ordered, prefetched spoken chunks
+        │   ├── speakable.ts          markdown → speech; finished sentences
+        │   ├── greeting.ts           the session's opening line
         │   └── memory-style.ts       ★ colour/size vocabulary, shared canvas+DOM
         ├── hooks/                    use-resource, use-recorder, use-dictation,
-        │                             use-speech-synthesis, use-element-size
+        │                             use-voice, use-autopilot ★, use-element-size
         ├── components/
         │   ├── auth-screen.tsx       sign-in + first-run admin setup
         │   ├── account-dialog.tsx    API keys, password, users (admins)
@@ -192,7 +215,9 @@ Continuum/                            ← git root
         │   ├── memory-detail.tsx     provenance, edges, reinforce/restore
         │   ├── contradiction-inbox.tsx   + why it escalated, learning panel
         │   ├── learning-panel.tsx    what your decisions say about the gate
-        │   ├── chat-panel.tsx        ★ streaming, citations, dispute banner
+        │   ├── chat-panel.tsx        ★ streaming, citations, disputes, autopilot
+        │   ├── autopilot-overlay.tsx Lumen's hands-free screen over the chat
+        │   ├── voice-settings.tsx    Settings → Voice: pick, hear, speed
         │   └── ui/                   shadcn-style primitives, owned in-repo
         └── App.tsx                   ★ the auth gate, then the workspace
 ```
@@ -304,6 +329,15 @@ that touches memories takes `principal: CurrentUser` and passes
 | `supersedes` / `superseded_by` | The belief graph edges. The differentiator |
 | `conflicts_with` | Unresolved conflicts awaiting a human |
 | `escalations` | What the resolver thought when it escalated: judge relation, probability, similarity, gate. Graded against the person's decision later |
+| `shared_by` / `shared_by_email` | On a memory in the shared space (`user_id == "_shared"`): who put it there |
+| `shared_as` | On a private memory that was shared: the shared memory that now carries it. Retired by that edge, never deleted |
+
+**The shared team space is just another graph**, owned by `SHARED_SPACE =
+"_shared"` — an id no account can take (account ids start with a letter or
+digit). Resolution, disputes, decay and labels therefore work on it unchanged.
+Reading is across graphs (`visible_owners()` = your id + `_shared`); writing and
+resolution stay inside one graph, so a decision never reaches from the shared
+space into anyone's private memories.
 | `source_id` / `source_excerpt` | Traceability from any assertion back to its origin text |
 
 `RETRIEVABLE_STATUSES = {active, contradicted}` — **contradicted memories are
@@ -544,6 +578,125 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
 - Nothing retunes itself. The report recommends; the gate stays a product
   decision
 
+### ✅ Phase 9 — Spoken answers, autopilot, greeting (done, this release)
+- **Read-aloud now speaks with the server's local Piper voice** (`services/voice.py`,
+  `POST /speech/synthesize` → WAV). The browser's speechSynthesis failed silently
+  for this user: on Linux it needs speech-dispatcher (not running), and Brave
+  limits voices to resist fingerprinting. Piper: ~20x real time on a CPU, 63 MB
+  voice, preloaded at startup, verified by round-tripping its audio through
+  Whisper. The browser voice is kept only as a fallback
+- `VoicePlayer` synthesises each chunk as it is queued and plays strictly in
+  order, so the next sentence is ready while the current one plays
+- **Autopilot:** hands-free conversation. `vad.ts` learns the room's noise floor,
+  starts an utterance after 120 ms of voice and **ends it after 2 s of continuous
+  silence** (a shorter pause mid-sentence does not end it); coughs under 300 ms
+  are dropped. The clip goes to local Whisper, the text through the normal chat
+  path, and the answer is spoken **sentence by sentence as it streams**. The
+  microphone is ignored while the answer plays, so it never hears itself. "Stop
+  speaking" interrupts; saying "stop autopilot" ends it. Turns are written into
+  the chat underneath the overlay, so ending autopilot reveals the transcript
+- **Greeting:** every session opens with a local, instant greeting — time of
+  day, name when the user id reads as one, open disputes. Written in chat; spoken
+  when autopilot starts. A remembered autopilot asks for one tap first: browsers
+  allow neither the microphone loop nor audio without a gesture
+- Synthesis has its own rate limit (240/min): autopilot asks once per sentence
+
+### ✅ Phase 11 — Lumen, commands mid-answer, voices (done, this release)
+- **Autopilot is Lumen** — a unisex name, since any of the 12 voices may speak
+  it. "Talk to Lumen" starts it; it greets as itself
+- **Commands while it speaks (barge-in).** During thinking and speaking a second
+  listener runs: thresholds 2.5x the learned room level (its own voice comes back
+  through the speakers), and 0.7 s of quiet ends a command. Only commands are
+  acted on, and only with its name attached — "stop, Lumen" interrupts (answer
+  aborted, it listens again), "thank you, Lumen" ends with a spoken goodbye.
+  Ordinary speech over its answer is ignored, and a command phrase that is in
+  its own current answer is never taken as one. The name was chosen for the
+  microphone: across four voices Whisper wrote "Lumen" 11 times in 12 (once
+  "Lumin", accepted). "Avery" was rejected because it collides with "every"
+- **Voices in Settings.** 12 single-speaker Piper voices (US/British, female/male),
+  each verified to exist; "Hear it" previews before choosing; speed 0.8–1.5x.
+  Saved to the account (`users.tts_voice` / `tts_speed`, migration 0003), so it
+  follows the person to any browser. The UI sends the choice with each
+  synthesis; the server accepts only catalogued voices — it never downloads a
+  name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
+- API keys panel now says what a key is for, in plain words
+
+### ✅ Phase 12 — Learning more, remembering better (done, this release)
+
+Self-learning:
+- **Team evidence.** `GET /feedback/evidence?scope=team` pools everyone's
+  decisions — the gate is one setting for the instance, so pooled evidence
+  reaches a verdict sooner. Only counts leave the labels
+- **Calibrated gate (opt-in).** A curve from decisions: per confidence band,
+  how often people agreed the newer belief held — Laplace-smoothed (one decision
+  is not certainty), then made monotone (pool-adjacent-violators). With
+  `CALIBRATED_GATE=true` and 30+ decisions the gate compares that number, not the
+  raw one; the raw value is still what is recorded, since the curve is built from
+  it. Off by default: switching it on is the same kind of decision as moving the
+  gate. A judge people keep overruling escalates even when it is sure
+- **"This isn't a real fact."** Reject a misreading with a reason: archived, any
+  belief it had wrongly superseded comes back, and it becomes an extraction case
+  with a `forbid` statement (`--add-extraction`; scored as `forbidden_rate`)
+- **Answer feedback.** 👍/👎 on each answer, and "Something missing?" — search,
+  mark the memory that should have come up. Exported as retrieval cases;
+  `run_eval.py --retrieval FILE` measures recall@k on the live graph and sweeps
+  confidence, recency and keyword weights for free from one fetch
+- **Rules from "both are true".** Repeated both-hold decisions about one subject,
+  and never otherwise, produce a suggestion; a person approves it (an admin for
+  the team graph; never an API key). From then on a CONFLICT about that subject
+  is stored side by side. A rule never stops a confident supersede — it only
+  answers what would have been asked. Revoked rules are kept, with the time
+
+Long-term memory:
+- **Private vs team.** Each new private fact is also judged against the team's
+  beliefs. A disagreement is flagged on the private memory only
+  (`team_conflicts_with`) — even a confident supersede never touches team
+  knowledge — and settled by its owner: the team is right, mine holds (shares
+  it, so the team graph's own resolver decides), or both. Recorded as a
+  `forced` escalation: no gate decided it, so it is no gate evidence. Chat shows
+  the dispute even when only the team side was retrieved
+- **Keyword + semantic retrieval.** Qdrant full-text index on content; rank uses
+  `max(similarity, keyword × 0.7)` so a memory found both ways is not counted
+  twice, and a memory naming the entity joins the pool below the similarity floor.
+  Live: "Kestrel-9" found its memory at similarity 0.56, keyword 1.0
+- **As of a date.** The header's date picker takes the graph and the chat back:
+  only what was believed then (`Memory.believed_at`, from `superseded_at` /
+  `archived_at`), recency measured from then, and such turns are never
+  remembered
+- **Summaries.** Subjects with 5+ memories get one, rewritten daily when its
+  sources change (fingerprint of ids and disputes — a reinforcement is not a
+  change). Never a resolution neighbour, never decays, never an as-of belief,
+  marked `[SUMMARY]` in the prompt, superseded by its successor
+- **Forget** — the one deliberate exception to "nothing is lost", and only a
+  person's act: content, excerpt, subject, escalation reasons and vector are
+  replaced; copies in labels, rejections, answer ratings and summaries are
+  blanked; the record and its edges stay. Cannot be reactivated
+- **Export and backups.** `GET /memories/export` (your graph, every status);
+  `scripts/backup.py` snapshots each Qdrant collection and `pg_dump`s Postgres,
+  `restore.py --yes` puts them back. Backups are gitignored
+- Qdrant `nofile` raised to 65535 in `local.yml`: at Docker's 1024 a fourth
+  collection failed with "Too many open files"
+- Verified live on an isolated instance (throwaway DB and collection, real
+  Ollama): the judge called a private "moved to MongoDB" a confident supersede of
+  the team's Postgres — flagged on the private side only, team untouched, other
+  member's inbox empty
+- 381 backend tests, 148 frontend tests
+
+### ✅ Phase 10 — Shared team space (done, this release)
+- One shared graph per instance; **private by default, shared explicitly** —
+  a memory's "Share with team" button, `share: true` on ingest, or the chat's
+  "share what I say" toggle (off at the start of every session)
+- **Sharing goes through the shared graph's resolver**, as if a teammate had
+  said it: new → created; already known → merged (reinforced, not duplicated);
+  a stated change → supersedes the old shared belief; a contradiction → a shared
+  conflict in every member's inbox. Only an active memory can be shared — a
+  dispute must not leak into team knowledge unresolved
+- Every account's chat, search, graph and inbox read their own graph plus the
+  shared one. Shared nodes wear a wireframe halo; memories show "Shared by …"
+- Verified live: private stays private both ways; a shared fact reached the
+  other account's graph and chat; a contradicting share raised a conflict in
+  the other person's inbox
+
 **The last lost belief was a class, and it is closed (§10).** Held-out cases,
 written before any fix ran, showed a second owner / maintainer / reviewer /
 rotation member superseded at ≈1.0 every time. Asking the model a narrower
@@ -675,7 +828,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 286 tests, no services needed
+uv run pytest                          # 381 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -690,6 +843,11 @@ uv run python scripts/run_eval.py --record eval-run.json
 uv run python scripts/run_eval.py --replay eval-run.json
 # decisions from real use, exported from the Inbox → learning panel:
 uv run python scripts/run_eval.py --record run.json --add-cases continuum-cases.yaml
+uv run python scripts/run_eval.py --extraction --add-extraction continuum-extraction.yaml
+uv run python scripts/run_eval.py --retrieval continuum-retrieval.yaml   # live graph
+
+uv run python scripts/backup.py                       # -> backups/<UTC stamp>/
+uv run python scripts/restore.py backups/<stamp> --yes   # replaces current data
 ```
 
 ---
@@ -711,6 +869,30 @@ uv run python scripts/run_eval.py --record run.json --add-cases continuum-cases.
   — sign-out, password change, disabling a user all take effect on the next
   request. A JWT stays valid until it expires, and revocation then needs the
   very table JWTs were meant to avoid.
+- **Reading the speech out with the browser's speechSynthesis again.** It is
+  silent on Linux without speech-dispatcher and restricted in Brave, and it
+  never reports failure. Piper is the voice; the browser is the fallback.
+- **Treating speech heard while Lumen talks as a new question.** The microphone
+  hears its answer too, so what comes back is often its words mixed with yours.
+  While it is busy, only commands with its name count; everything else waits
+  until it has finished.
+- **Accepting a bare "stop" while it is speaking.** Its own answer can contain
+  the word. Mid-answer, a command needs its name ("stop, Lumen"); a lone "stop"
+  works only when it is idle.
+- **Letting /speech/synthesize load any voice a request names.** It would download
+  arbitrary models on demand. Only `VOICE_CATALOGUE` (plus the server default).
+- **Auto-starting autopilot audio on page load.** Browsers block both audio and
+  a microphone loop without a gesture; it would fail silently. The overlay asks
+  for one tap.
+- **Resolving across graphs** — letting a shared decision retire a private
+  memory, or a private fact supersede team knowledge. Sharing runs the fact
+  through the shared graph's resolver instead; losers come from the winner's
+  graph only.
+- **Copying or moving a memory into the shared space directly.** It would skip
+  the resolver: duplicates instead of reinforcement, and contradictions of team
+  knowledge that nobody is asked about.
+- **Remembering the chat's share toggle across sessions.** Sharing is always a
+  choice made now, never a leftover from last week.
 - **Letting the evidence report move the gate by itself.** It counts; a person
   decides. The gate is the most consequential setting in the project, and a
   run of confirmations can end with the one refutation that matters.
@@ -734,7 +916,21 @@ uv run python scripts/run_eval.py --record run.json --add-cases continuum-cases.
   auth of its own by default; anyone reaching it reads every memory and never
   meets the API's checks.
 - **Hard-deleting superseded memories to keep the collection small.** Breaks
-  commitment 1. Archive instead.
+  commitment 1. Archive instead. The only way content leaves is a person pressing
+  Forget, which redacts — the record and its edges stay.
+- **Letting a private fact retire, or flag, a team belief.** The team check
+  writes only to the private memory. If the team is out of date, the person
+  shares theirs and the team graph's resolver decides.
+- **Turning on `CALIBRATED_GATE` because the curve looks good.** It changes what
+  is silently retired, exactly like moving the gate. A person decides.
+- **Applying a suggested rule automatically.** Suggestions come from counts; the
+  last both-hold might be the exception. A person approves each rule.
+- **Judging new facts against summaries, or decaying them.** A summary is made
+  from the graph; letting it confirm a fact is the graph agreeing with itself.
+- **Re-embedding a forgotten memory's old text, or keeping its vector.** A vector
+  of the words is a trace of the words.
+- **Counting cross-graph escalations as gate evidence.** Nothing across graphs
+  is ever auto-applied, so no gate decided them; they are recorded `forced`.
 - **Auto-resolving every conflict with a second LLM call to raise throughput.**
   Breaks commitment 2. That is precisely the failure mode the project exists to
   fix.

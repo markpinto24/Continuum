@@ -88,8 +88,13 @@ vi.mock('@/lib/api', () => ({
     login: auth.login,
     setup: auth.setup,
     logout: () => Promise.resolve(),
+    voiceSettings: () =>
+      Promise.resolve({ voice: 'en_US-lessac-medium', speed: 1, default_voice: 'en_US-lessac-medium', voices: [] }),
     speechStatus: () =>
-      Promise.resolve({ enabled: true, ready: true, max_seconds: 120, language: 'en' }),
+      Promise.resolve({
+        enabled: true, ready: true, max_seconds: 120, language: 'en',
+        synthesis: true, synthesis_ready: true, synthesis_max_chars: 800,
+      }),
   },
   streamChat: () => Promise.resolve(),
 }))
@@ -178,9 +183,13 @@ describe('App', () => {
     expect(screen.getByText('Active')).toBeDefined()
   })
 
-  it('opens on chat, so the graph has something to talk to', async () => {
+  it('opens on chat with a written greeting that mentions open disputes', async () => {
     render(<App />)
 
-    await waitFor(() => expect(screen.getByText(/Ask about their work/i)).toBeDefined())
+    // The mocked inbox holds 2 conflicts; the user id 'mark' reads as a name.
+    await waitFor(() =>
+      expect(screen.getByText(/, Mark\. 2 disagreements are waiting for your decision/)).toBeDefined(),
+    )
+    expect(screen.getByText(/What are you working on\?/)).toBeDefined()
   })
 })

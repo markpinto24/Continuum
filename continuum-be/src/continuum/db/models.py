@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, MetaData, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, MetaData, String, Text
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
@@ -70,6 +70,9 @@ class UserRow(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # Spoken-answer preferences. Null = the server default (TTS_VOICE, natural pace).
+    tts_voice: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tts_speed: Mapped[float | None] = mapped_column(nullable=True)
 
 
 class SessionRow(Base):
@@ -138,5 +141,75 @@ class ResolutionLabelRow(Base):
     # What the person decided, and the action that makes it right for the resolver.
     decision: Mapped[str] = mapped_column(String(16))  # newer_holds | older_holds | both_hold
     expected_action: Mapped[str] = mapped_column(String(16))  # retire | escalate | store
+    # Whose graph the pair lived in: the decider's own, or the shared space. A
+    # rule learned from these decisions applies to that graph only.
+    graph_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     __table_args__ = (Index("ix_resolution_labels_user_created", "user_id", "created_at"),)
+
+
+
+class ExtractionFeedbackRow(Base):
+    """A memory someone said was never a real fact — a lesson for the extractor.
+
+    Copies the text, like resolution labels: the memory itself is archived and
+    may later be forgotten, but the extractor's mistake should stay learnable.
+    """
+
+    __tablename__ = "extraction_feedback"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    memory_id: Mapped[str] = mapped_column(String(64))
+    content: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(32))
+    source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # not_a_fact | merged | misread | other
+    reason: Mapped[str] = mapped_column(String(32))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (Index("ix_extraction_feedback_user_created", "user_id", "created_at"),)
+
+
+class AnswerFeedbackRow(Base):
+    """A thumbs up or down on a chat answer, with what retrieval had put in play.
+
+    The labelled data retrieval has never had: which memories a question
+    should have surfaced (`missing_ids`), against which ones it did.
+    """
+
+    __tablename__ = "answer_feedback"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    query: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    rating: Mapped[int] = mapped_column()  # +1 | -1
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    used_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    cited_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    missing_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    __table_args__ = (Index("ix_answer_feedback_user_created", "user_id", "created_at"),)
+
+
+class ResolutionRuleRow(Base):
+    """A rule a person approved: "statements about <subject> are compatible".
+
+    Suggested from repeated "both are true" decisions, never created by the
+    system alone. While active, the resolver stores such pairs side by side
+    instead of asking again.
+    """
+
+    __tablename__ = "resolution_rules"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    # The graph it governs: a user id, or the shared space.
+    owner: Mapped[str] = mapped_column(String(64), index=True)
+    subject: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(32))  # compatible
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

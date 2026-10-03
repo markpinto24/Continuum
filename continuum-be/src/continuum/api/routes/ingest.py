@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from continuum.api.deps import CurrentUser, IngestDep, SettingsDep, limit_llm_requests
+from continuum.models.memory import SHARED_SPACE
 from continuum.models.schemas import IngestBody, IngestRequest, IngestResponse
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -35,5 +36,20 @@ async def ingest(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"Input is over the {settings.max_input_chars}-character limit. Split it.",
         )
-    request = IngestRequest(**body.model_dump(), user_id=principal.user_id)
+    if body.share and not settings.shared_space_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The shared team space is turned off on this server.",
+        )
+    fields = body.model_dump(exclude={"share"})
+    if body.share:
+        # Team knowledge: owned by the shared space, with the author recorded.
+        request = IngestRequest(
+            **fields,
+            user_id=SHARED_SPACE,
+            author=principal.user_id,
+            author_email=principal.email,
+        )
+    else:
+        request = IngestRequest(**fields, user_id=principal.user_id)
     return await service.ingest(request)

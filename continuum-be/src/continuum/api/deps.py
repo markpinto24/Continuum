@@ -18,6 +18,7 @@ from continuum.core import logger as clog
 from continuum.models.auth import Principal
 from continuum.services.auth import AuthService
 from continuum.services.chat import ChatService
+from continuum.services.corrections import CorrectionService
 from continuum.services.decay import DecayService
 from continuum.services.extraction import FactExtractor
 from continuum.services.feedback import FeedbackService
@@ -26,7 +27,10 @@ from continuum.services.limits import SlidingWindow
 from continuum.services.memory_store import MemoryStore
 from continuum.services.resolution import ResolutionService
 from continuum.services.retrieval import RetrievalService
+from continuum.services.sharing import SharingService
 from continuum.services.speech import SpeechService
+from continuum.services.summaries import SummaryService
+from continuum.services.voice import SynthesisService
 
 
 def get_llm(request: Request) -> LLMClient:
@@ -77,8 +81,24 @@ def get_speech_service(request: Request) -> SpeechService:
     return request.app.state.speech
 
 
+def get_synthesis_service(request: Request) -> SynthesisService:
+    return request.app.state.voice
+
+
+def get_sharing_service(request: Request) -> SharingService:
+    return request.app.state.sharing
+
+
 def get_feedback_service(request: Request) -> FeedbackService:
     return request.app.state.feedback
+
+
+def get_correction_service(request: Request) -> CorrectionService:
+    return request.app.state.corrections
+
+
+def get_summary_service(request: Request) -> SummaryService:
+    return request.app.state.summaries
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -95,6 +115,10 @@ AuthDep = Annotated[AuthService, Depends(get_auth_service)]
 AuthDBDep = Annotated[AuthDB, Depends(get_authdb)]
 SpeechDep = Annotated[SpeechService, Depends(get_speech_service)]
 FeedbackDep = Annotated[FeedbackService, Depends(get_feedback_service)]
+VoiceDep = Annotated[SynthesisService, Depends(get_synthesis_service)]
+SharingDep = Annotated[SharingService, Depends(get_sharing_service)]
+CorrectionDep = Annotated[CorrectionService, Depends(get_correction_service)]
+SummaryDep = Annotated[SummaryService, Depends(get_summary_service)]
 
 
 # --- Authentication ------------------------------------------------------------
@@ -198,5 +222,18 @@ async def limit_llm_requests(request: Request, principal: CurrentUser) -> None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Rate limit reached. Try again in {wait}s.",
+            headers={"Retry-After": str(wait)},
+        )
+
+
+async def limit_tts_requests(request: Request, principal: CurrentUser) -> None:
+    """Per-user cap on speech synthesis. Separate from the LLM limit: autopilot
+    asks for one sentence at a time, and each is cheap."""
+    limiter: SlidingWindow = request.app.state.tts_limiter
+    wait = limiter.hit(principal.user_id)
+    if wait is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Speech rate limit reached. Try again in {wait}s.",
             headers={"Retry-After": str(wait)},
         )

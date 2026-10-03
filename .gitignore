@@ -43,3 +43,6 @@ build/
 .DS_Store
 .idea/
 .vscode/
+
+# Backups hold every memory in plain text (scripts/backup.py)
+continuum-be/backups/

@@ -113,14 +113,21 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [includeArchived, setIncludeArchived] = useState(false)
+  /** A past day, or null: the graph and the chat both look back to it. */
+  const [asOfDay, setAsOfDay] = useState<string | null>(null)
+  // The end of that day, so everything recorded on it counts.
+  const asOf = asOfDay ? new Date(`${asOfDay}T23:59:59`).toISOString() : null
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [tab, setTab] = useState('chat')
   const panel = useResizablePanel()
 
   const [accountOpen, setAccountOpen] = useState(false)
+  // Loaded once; Settings → Voice refreshes it, and Lumen uses the new voice
+  // from her next sentence.
+  const voiceSettings = useResource(() => api.voiceSettings(), [])
 
   const health = useResource(() => api.health(), [])
-  const graph = useResource(() => api.graph({ includeArchived }), [includeArchived])
+  const graph = useResource(() => api.graph({ includeArchived, asOf }), [includeArchived, asOf])
   const conflicts = useResource(() => api.conflicts(), [])
 
   /** Any write to the graph refreshes both views — a resolve changes both. */
@@ -152,6 +159,8 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           onIncludeArchived={setIncludeArchived}
           onRefresh={refreshAll}
           refreshing={graph.loading}
+          asOf={asOfDay}
+          onAsOf={setAsOfDay}
         />
 
         <div className="flex min-h-0 flex-1">
@@ -171,6 +180,12 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               <>
                 <BeliefGraph data={data} selectedId={selectedId} onSelect={setSelectedId} />
                 {data.nodes.length > 0 && <GraphLegend counts={counts} />}
+                {asOfDay && (
+                  <p className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 rounded-full border border-amber-400/30 bg-background/80 px-3 py-1 text-[11px] text-amber-300">
+                    Beliefs as of {new Date(`${asOfDay}T12:00:00`).toLocaleDateString()} — confidence
+                    is today’s
+                  </p>
+                )}
               </>
             )}
           </main>
@@ -207,6 +222,10 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
 
               <TabsContent value="chat" forceMount className="min-h-0">
                 <ChatPanel
+                  me={me}
+                  asOf={asOf}
+                  voiceSettings={voiceSettings.data}
+                  openDisputes={conflicts.data?.total ?? null}
                   onGraphChanged={refreshAll}
                   onSelectMemory={inspect}
                 />
@@ -217,6 +236,7 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                   resource={conflicts}
                   onResolved={graph.refresh}
                   onSelect={inspect}
+                  isAdmin={me.is_admin}
                 />
               </TabsContent>
 
@@ -225,13 +245,20 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                   memoryId={selectedId}
                   onSelect={setSelectedId}
                   onMutated={refreshAll}
+                  userId={me.user_id}
+                  isAdmin={me.is_admin}
                 />
               </TabsContent>
             </Tabs>
           </aside>
         </div>
 
-        <AccountDialog me={me} open={accountOpen} onOpenChange={setAccountOpen} />
+        <AccountDialog
+          me={me}
+          open={accountOpen}
+          onOpenChange={setAccountOpen}
+          voiceSettings={voiceSettings}
+        />
       </div>
     </TooltipProvider>
   )

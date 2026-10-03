@@ -16,6 +16,8 @@ const api = vi.hoisted(() => ({
   streamChat: vi.fn(),
 }))
 
+const ME = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const }
+
 vi.mock('@/lib/api', () => ({
   api: {
     speechStatus: () =>
@@ -69,7 +71,7 @@ afterEach(() => {
 function renderPanel() {
   return render(
     <TooltipProvider>
-      <ChatPanel onGraphChanged={() => {}} onSelectMemory={() => {}} />
+      <ChatPanel me={ME} openDisputes={0} onGraphChanged={() => {}} onSelectMemory={() => {}} />
     </TooltipProvider>,
   )
 }

@@ -22,6 +22,7 @@ from continuum.services.speech import (
     SpeechDisabled,
     SpeechService,
 )
+from continuum.services.voice import SynthesisService
 from tests.auth_helpers import sign_in_as
 
 RATE = 16_000
@@ -119,6 +120,7 @@ def app_with(speech: SpeechService, **overrides: object) -> FastAPI:
     app = FastAPI()
     app.include_router(speech_route.router)
     app.state.speech = speech
+    app.state.voice = SynthesisService(settings(tts_enabled=False))
     app.dependency_overrides[get_settings] = lambda: settings(**overrides)
     sign_in_as(app)
     return app
@@ -172,4 +174,12 @@ async def test_status_tells_the_ui_whether_to_offer_the_microphone():
     transport = httpx.ASGITransport(app=app_with(speech))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         body = (await client.get("/speech/status")).json()
-    assert body == {"enabled": True, "ready": False, "max_seconds": 120, "language": "en"}
+    assert body == {
+        "enabled": True,
+        "ready": False,
+        "max_seconds": 120,
+        "language": "en",
+        "synthesis": False,
+        "synthesis_ready": False,
+        "synthesis_max_chars": 800,
+    }

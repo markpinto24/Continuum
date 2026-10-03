@@ -25,6 +25,7 @@ from continuum.models.memory import Memory, MemoryCategory, MemoryStatus
 from continuum.models.schemas import IngestResponse
 from continuum.services.auth import AlreadyExists, AuthService
 from continuum.services.limits import LoginThrottle, SlidingWindow
+from continuum.services.voice import SynthesisService
 
 PASSWORD = "correct horse battery"
 BROWSER = {"x-continuum-client": "web"}
@@ -125,6 +126,7 @@ async def build(**overrides: object) -> App:
     app.state.auth = auth
     app.state.llm_limiter = SlidingWindow(settings.llm_requests_per_minute, 60)
     app.state.memories = FakeMemories()
+    app.state.voice = SynthesisService(settings, voice_loader=lambda _voice: None)
     app.state.ingest = FakeIngest()
     return App(app, auth, settings)
 
@@ -666,3 +668,54 @@ async def test_the_whole_auth_flow_on_postgres():
 
     await auth.change_password(user.id, PASSWORD, "a new long passphrase", current_session=token)
     assert await auth.principal_from_session(token) is not None
+
+
+
+# --- Voice preferences ----------------------------------------------------------
+
+
+async def test_voice_preferences_default_then_follow_the_account(env):
+    await env.user("mark@example.com")
+    client = await env.signed_in("mark@example.com")
+    async with client:
+        first = (await client.get("/auth/preferences")).json()
+        assert first["voice"] == first["default_voice"] == "en_US-lessac-medium"
+        assert first["speed"] == 1.0 and len(first["voices"]) >= 10
+
+        choice = {"voice": "en_GB-alan-medium", "speed": 1.2}
+        saved = await client.patch("/auth/preferences", json=choice)
+        assert saved.status_code == 200
+        again = (await client.get("/auth/preferences")).json()
+        assert again["voice"] == "en_GB-alan-medium" and again["speed"] == 1.2
+
+        # Speed alone keeps the voice.
+        await client.patch("/auth/preferences", json={"speed": 0.9})
+        assert (await client.get("/auth/preferences")).json()["voice"] == "en_GB-alan-medium"
+
+
+async def test_an_unknown_voice_or_wild_speed_is_refused(env):
+    await env.user("mark@example.com")
+    client = await env.signed_in("mark@example.com")
+    async with client:
+        assert (await client.patch("/auth/preferences", json={"voice": "nope"})).status_code == 422
+        assert (await client.patch("/auth/preferences", json={"speed": 5})).status_code == 422
+
+
+async def test_an_api_key_can_read_but_not_change_voice_preferences(env):
+    user = await env.user("mark@example.com")
+    _, secret = await env.auth.create_api_key(user.id, "agent")
+    auth = {"Authorization": f"Bearer {secret}"}
+    async with env.client() as agent:
+        assert (await agent.get("/auth/preferences", headers=auth)).status_code == 200
+        changed = await agent.patch("/auth/preferences", json={"speed": 1.5}, headers=auth)
+        assert changed.status_code == 403
+
+
+async def test_a_voice_the_server_no_longer_offers_falls_back_to_the_default(env):
+    from continuum.models.auth import VoicePreferences
+
+    user = await env.user("mark@example.com")
+    await env.auth.set_voice_preferences(user.id, VoicePreferences(voice="retired-voice"))
+    client = await env.signed_in("mark@example.com")
+    async with client:
+        assert (await client.get("/auth/preferences")).json()["voice"] == "en_US-lessac-medium"

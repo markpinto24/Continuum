@@ -37,6 +37,13 @@ class User(BaseModel):
     created_at: datetime
 
 
+class VoicePreferences(BaseModel):
+    """How Lumen and read-aloud sound for one person. None = the server default."""
+
+    voice: str | None = None
+    speed: float | None = None
+
+
 class ApiKey(BaseModel):
     """A stored key. The secret itself is never kept — only its hash and a prefix
     long enough to recognise it in a list."""

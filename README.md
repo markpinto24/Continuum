@@ -187,7 +187,11 @@ land in an inbox with three verdicts, one of which is *both are true*.
 | **4 — Belief graph UI** | ✅ | `continuum-fe`: Three.js force-directed graph off `/memories/graph`, provenance panel, contradiction inbox, streaming chat |
 | **5 — Evaluation** | ✅ | 28-case labelled corpus; belief-loss, stale-belief and merge-loss measured separately; a gate sweep that replays one recorded run at every threshold for free |
 
-Backend: 286 tests. Frontend: 87. Neither needs a running service.
+Phases 6–12 (authentication, voice, learning from decisions, a shared team space,
+the Lumen voice mode, keyword + semantic retrieval, as-of queries, summaries,
+forget and backups) are described in [`CLAUDE.md`](CLAUDE.md).
+
+Backend: 381 tests. Frontend: 148. Neither needs a running service.
 
 ---
 

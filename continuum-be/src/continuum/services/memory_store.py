@@ -16,6 +16,7 @@ from continuum.models.memory import (
     MemoryCategory,
     MemoryStatus,
 )
+from continuum.services import keywords
 
 log = get_logger(__name__)
 
@@ -110,7 +111,7 @@ class MemoryStore:
     async def search(
         self,
         *,
-        user_id: str,
+        user_id: str | list[str],
         query: str,
         limit: int | None = None,
         statuses: list[MemoryStatus] | None = None,
@@ -132,16 +133,51 @@ class MemoryStore:
         )
         return [(Memory.from_payload(p), score) for p, score in rows]
 
+    async def keyword_search(
+        self, *, user_id: str | list[str], query: str, limit: int = 50
+    ) -> list[tuple[str, float]]:
+        """(memory id, keyword score), best first. No embedding call."""
+        found = await self.keyword_memories(user_id=user_id, query=query, limit=limit)
+        return [(m.id, score) for m, score in found]
+
+    async def keyword_memories(
+        self,
+        *,
+        user_id: str | list[str],
+        query: str,
+        limit: int = 50,
+        statuses: list[MemoryStatus] | None = None,
+    ) -> list[tuple[Memory, float]]:
+        """Memories sharing content words with `query`, with their keyword score."""
+        words = keywords.terms(query)[:12]
+        payloads = await self.store.text_match(
+            words=words,
+            user_id=user_id,
+            statuses=[s.value for s in (statuses or RETRIEVABLE_STATUSES)],
+            limit=limit * 4,
+        )
+        scored = [
+            (Memory.from_payload(p), keywords.keyword_score(words, p.get("content", "")))
+            for p in payloads
+        ]
+        scored = [item for item in scored if item[1] > 0]
+        scored.sort(key=lambda item: item[1], reverse=True)
+        return scored[:limit]
+
     async def search_by_vector(
         self,
         *,
-        user_id: str,
+        user_id: str | list[str],
         vector: list[float],
         limit: int = 10,
         statuses: list[MemoryStatus] | None = None,
         score_threshold: float | None = None,
     ) -> list[tuple[Memory, float]]:
-        """Used by ingest, which already has the vector and must not re-embed."""
+        """Used by ingest, which already has the vector and must not re-embed.
+
+        Never returns summaries: they are derived from the graph, and judging a new
+        fact against one would let a summary confirm its own sources.
+        """
         rows = await self.store.search(
             vector=vector,
             user_id=user_id,
@@ -152,13 +188,14 @@ class MemoryStore:
                 else [s.value for s in RETRIEVABLE_STATUSES]
             ),
             score_threshold=score_threshold,
+            exclude_kind="summary",
         )
         return [(Memory.from_payload(p), score) for p, score in rows]
 
     async def list_all(
         self,
         *,
-        user_id: str,
+        user_id: str | list[str],
         limit: int = 200,
         statuses: list[MemoryStatus] | None = None,
         categories: list[MemoryCategory] | None = None,
@@ -176,7 +213,9 @@ class MemoryStore:
 
     # --- Graph / conflict queries -----------------------------------------
 
-    async def list_conflicts(self, *, user_id: str, limit: int = 200) -> list[Memory]:
+    async def list_conflicts(
+        self, *, user_id: str | list[str], limit: int = 200
+    ) -> list[Memory]:
         """Memories awaiting human resolution — the contradiction inbox."""
         return await self.list_all(
             user_id=user_id, limit=limit, statuses=[MemoryStatus.CONTRADICTED]
@@ -186,6 +225,19 @@ class MemoryStore:
         payloads = await self.store.get_many(memory_ids)
         memories = [Memory.from_payload(p) for p in payloads]
         return {m.id: m for m in memories}
+
+    async def summaries_of(self, memory_ids: list[str]) -> list[Memory]:
+        """Summaries written from any of `memory_ids`."""
+        return [Memory.from_payload(p) for p in await self.store.derived_from_any(memory_ids)]
+
+    async def referencing(
+        self, memory_ids: str | list[str], *, user_id: str | None = None
+    ) -> list[Memory]:
+        """Memories holding a conflict edge to any of `memory_ids`."""
+        ids = [memory_ids] if isinstance(memory_ids, str) else memory_ids
+        return [
+            Memory.from_payload(p) for p in await self.store.referencing(ids, user_id=user_id)
+        ]
 
     async def distinct_subjects(self, *, user_id: str) -> set[str]:
         """Subject slugs already in this user's graph — what canonicalisation snaps to."""

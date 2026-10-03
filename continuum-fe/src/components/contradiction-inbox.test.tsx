@@ -5,38 +5,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ContradictionInbox } from './contradiction-inbox'
 import type { Resource } from '@/hooks/use-resource'
 import type { ConflictListResponse, GateEvidence, Memory } from '@/lib/types'
+import { makeMemory } from '@/test/fixtures'
 
 const resolveConflict = vi.fn()
+const resolveTeamConflict = vi.fn()
 const feedbackEvidence = vi.fn()
+const rules = vi.fn()
+const approveRule = vi.fn()
 
 vi.mock('@/lib/api', () => ({
   api: {
     resolveConflict: (...args: unknown[]) => resolveConflict(...args),
-    feedbackEvidence: () => feedbackEvidence(),
+    resolveTeamConflict: (...args: unknown[]) => resolveTeamConflict(...args),
+    feedbackEvidence: (...args: unknown[]) => feedbackEvidence(...args),
     feedbackExportUrl: '/api/v1/feedback/export',
+    feedbackExportUrlFor: (kind: string) => `/api/v1/feedback/export?kind=${kind}`,
+    rules: () => rules(),
+    approveRule: (...args: unknown[]) => approveRule(...args),
+    revokeRule: vi.fn(),
+    calibration: () =>
+      Promise.resolve({ labels: 0, points: [], usable: false, in_use: false, min_labels: 30 }),
+    feedbackSummary: () =>
+      Promise.resolve({ decisions: 0, rejected_facts: 0, answers_up: 0, answers_down: 0, missing_memories: 0 }),
   },
 }))
 
 function memory(id: string, content: string): Memory {
-  return {
-    id,
-    user_id: 'mark',
-    content,
-    category: 'decision',
-    subject: 'atlas',
-    confidence: 0.7,
-    status: 'contradicted',
-    source_id: null,
-    source_excerpt: null,
-    supersedes: [],
-    superseded_by: null,
-    conflicts_with: [],
-    escalations: [],
-    created_at: '2026-03-04T00:00:00Z',
-    updated_at: '2026-03-04T00:00:00Z',
-    last_reinforced_at: '2026-03-04T00:00:00Z',
-    reinforcement_count: 0,
-  }
+  return makeMemory({ id, content, status: 'contradicted' })
 }
 
 const postgres = memory('m-postgres', 'Atlas runs on Postgres')
@@ -48,10 +43,13 @@ function resource(data: ConflictListResponse | null): Resource<ConflictListRespo
 
 const ONE_DISPUTE = resource({
   total: 1,
-  conflicts: [{ memory: postgres, conflicting: [mongo] }],
+  conflicts: [{ memory: postgres, conflicting: [mongo], team: false }],
 })
 
 beforeEach(() => {
+  rules.mockReset().mockResolvedValue({ rules: [], suggestions: [] })
+  approveRule.mockReset().mockResolvedValue({})
+  resolveTeamConflict.mockReset().mockResolvedValue({})
   feedbackEvidence.mockResolvedValue(evidence({}))
   resolveConflict.mockReset()
   resolveConflict.mockResolvedValue({ winner: postgres, losers: [mongo], action: 'kept_both' })
@@ -164,7 +162,7 @@ describe('learning from decisions', () => {
     }
     render(
       <ContradictionInbox
-        resource={resource({ total: 1, conflicts: [{ memory: memory('m1', 'Atlas runs on Postgres'), conflicting: [newer] }] })}
+        resource={resource({ total: 1, conflicts: [{ memory: memory('m1', 'Atlas runs on Postgres'), conflicting: [newer], team: false }] })}
         onResolved={vi.fn()}
         onSelect={vi.fn()}
       />,
@@ -183,5 +181,52 @@ describe('learning from decisions', () => {
     expect(screen.getByRole('link', { name: /export as test cases/i }).getAttribute('href')).toBe(
       '/api/v1/feedback/export',
     )
+  })
+})
+
+describe('team disputes', () => {
+  const mine = makeMemory({ id: 'mine', content: 'Atlas uses Mongo', status: 'contradicted', team_conflicts_with: ['team'] })
+  const team = makeMemory({ id: 'team', user_id: '_shared', content: 'Atlas uses Postgres', shared_by_email: 'sara@x.io' })
+
+  it('offers the team, mine and both — and settles only my side', async () => {
+    const onResolved = vi.fn()
+    render(
+      <ContradictionInbox
+        resource={resource({ total: 1, conflicts: [{ memory: mine, conflicting: [team], team: true }] })}
+        onResolved={onResolved}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/disagrees with what the team holds/)).toBeDefined()
+    expect(screen.getByText('Team · shared by sara@x.io')).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: /mine holds/i }))
+    await waitFor(() => expect(resolveTeamConflict).toHaveBeenCalledWith('mine', 'team', 'mine_holds'))
+    expect(onResolved).toHaveBeenCalled()
+  })
+})
+
+describe('the learning panel', () => {
+  it('pools everyone’s decisions on request', async () => {
+    feedbackEvidence.mockResolvedValue(evidence({ labels: 2 }))
+    render(<ContradictionInbox resource={resource({ total: 0, conflicts: [] })} onResolved={vi.fn()} onSelect={vi.fn()} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Everyone' }))
+    await waitFor(() => expect(feedbackEvidence).toHaveBeenLastCalledWith('team'))
+  })
+
+  it('suggests a rule, applies it only when asked, and an admin-only team rule says so', async () => {
+    feedbackEvidence.mockResolvedValue(evidence({ labels: 3 }))
+    rules.mockResolvedValue({
+      rules: [],
+      suggestions: [
+        { owner: 'mark', subject: 'rotation', both_hold: 3 },
+        { owner: '_shared', subject: 'on-call', both_hold: 2 },
+      ],
+    })
+    render(<ContradictionInbox resource={resource({ total: 0, conflicts: [] })} onResolved={vi.fn()} onSelect={vi.fn()} />)
+    expect(await screen.findByText('“rotation”')).toBeDefined()
+    expect(approveRule).not.toHaveBeenCalled()
+    expect(screen.getByText('An admin can apply team rules.')).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: /apply rule/i }))
+    expect(approveRule).toHaveBeenCalledWith('rotation', 'mine')
   })
 })

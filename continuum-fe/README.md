@@ -63,7 +63,28 @@ be the UI deciding the very thing the backend escalated to you.
   own server transcribes it with a local Whisper model (never a cloud service)
   and the text lands in the box for you to check before sending. Esc cancels.
   Needs `localhost` or HTTPS — browsers only offer the microphone to secure pages.
-- **Read an answer aloud** with the button under it, using your system's voices.
+- **Read an answer aloud** with the button under it, in your server's local
+  neural voice (the browser's own voice is only a fallback).
+- **Lumen** (the waveform button): talk hands-free. Speak, pause for two
+  seconds, and hear the answer as it is written. Say “stop, Lumen” to interrupt
+  its mid-answer, and “thank you, Lumen” to finish — the whole conversation is
+  then in the chat. Headphones make interrupting its instant.
+- **Choose its voice** in Settings → Voice: 12 voices, a “Hear it” preview, and
+  speed. Saved to your account.
+- **Share with the team:** a memory's “Share with team” button, or the people
+  button in chat to share what you say. Team knowledge has a halo in the graph.
+- **Teach it.** On a memory: *This isn’t a real fact* (pick why; anything it
+  wrongly replaced comes back) or *Forget…* (asks twice; erases its words
+  everywhere). Under each answer: 👍/👎 and *Something missing?* to mark the
+  memory that should have come up.
+- **Your note vs the team's** shows in the inbox and the chat: *the team is
+  right*, *mine holds — share it*, or *both are true*. Only your side changes.
+- **Learning panel** (Inbox): your decisions or everyone's, the judge's
+  calibration, and rules to approve when you keep saying both are true.
+- **Look back**: the date picker in the header shows the graph, and answers,
+  as they stood on that day.
+- **Summaries** wear a violet ring in the graph. Settings → Data: download your
+  memories, or summarise now.
 - **Drag the sidebar's left edge to resize it** (arrow keys work when it is
   focused; double-click resets). The width is remembered per browser.
 
@@ -88,7 +109,7 @@ server listens on localhost only; `yarn dev --host` exposes it on your network.
 ```bash
 yarn lint              # eslint, flat config, TypeScript
 yarn build             # tsc -b, then vite build
-yarn test              # vitest, jsdom — 87 tests, no backend needed
+yarn test              # vitest, jsdom — 148 tests, no backend needed
 ```
 
 Two yarn-specific details, both in `package.json` / `.yarnrc`:

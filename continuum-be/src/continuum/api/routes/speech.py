@@ -8,10 +8,17 @@ message, or remembered, on its own.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 
-from continuum.api.deps import CurrentUser, SettingsDep, SpeechDep, limit_llm_requests
-from continuum.models.schemas import SpeechStatus
+from continuum.api.deps import (
+    CurrentUser,
+    SettingsDep,
+    SpeechDep,
+    VoiceDep,
+    limit_llm_requests,
+    limit_tts_requests,
+)
+from continuum.models.schemas import SpeechStatus, SynthesisRequest
 from continuum.services.speech import SpeechError, Transcription
 
 router = APIRouter(prefix="/speech", tags=["speech"])
@@ -19,7 +26,7 @@ router = APIRouter(prefix="/speech", tags=["speech"])
 
 @router.get("/status", response_model=SpeechStatus)
 async def speech_status(
-    principal: CurrentUser, speech: SpeechDep, settings: SettingsDep
+    principal: CurrentUser, speech: SpeechDep, voice: VoiceDep, settings: SettingsDep
 ) -> SpeechStatus:
     """Whether to offer dictation, and its limits. `ready` is false while the
     model is still loading — dictation works then too, the first one is slower."""
@@ -28,6 +35,9 @@ async def speech_status(
         ready=speech.ready,
         max_seconds=settings.speech_max_seconds,
         language=settings.speech_language,
+        synthesis=voice.enabled,
+        synthesis_ready=voice.ready,
+        synthesis_max_chars=settings.tts_max_chars,
     )
 
 
@@ -52,3 +62,19 @@ async def transcribe(
         return await speech.transcribe(data)
     except SpeechError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.post(
+    "/synthesize",
+    response_class=Response,
+    responses={200: {"content": {"audio/wav": {}}}},
+    dependencies=[Depends(limit_tts_requests)],
+)
+async def synthesize(body: SynthesisRequest, principal: CurrentUser, voice: VoiceDep) -> Response:
+    """Speak `text` with the server's local voice. Returns WAV; nothing is stored."""
+    try:
+        audio = await voice.synthesize(body.text, voice=body.voice, speed=body.speed)
+    except SpeechError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    # Answers are personal: never let a proxy or the browser cache keep them.
+    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})

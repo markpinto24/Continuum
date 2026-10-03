@@ -34,7 +34,7 @@ from continuum.clients.llm import LLMClient
 from continuum.config import Settings, get_settings
 from continuum.core import logger as clog
 from continuum.core.logger import get_logger
-from continuum.models.memory import Memory
+from continuum.models.memory import SHARED_SPACE, Memory
 from continuum.models.schemas import (
     ChatContext,
     ChatDone,
@@ -67,6 +67,9 @@ How to use it:
   you are working from something that may be out of date.
 - If memory does not cover the question, say so and answer from general knowledge
   — clearly marked as such. Never present an invention as something you remember.
+
+SUMMARY entries condense several memories about one subject. Prefer the
+individual memories when they are listed; a summary is not separate evidence.
 
 DISPUTED memories are the important case. Two recorded beliefs contradict each
 other and nobody has decided which one holds. When a disputed memory is relevant:
@@ -108,7 +111,7 @@ class ChatService:
             return
 
         context = await self.retrieval.retrieve(
-            user_id=request.user_id, query=query, limit=request.limit
+            user_id=request.user_id, query=query, limit=request.limit, as_of=request.as_of
         )
         # The client gets the context before the first token, so the UI can show
         # which memories are in play — and flag a dispute — while the answer is
@@ -136,8 +139,8 @@ class ChatService:
             self.settings.chat_remember_turns
             if request.remember is None
             else request.remember
-        )
-        remembered = await self._remember(request.user_id, query) if should_remember else None
+        ) and context.as_of is None
+        remembered = await self._remember(request, query) if should_remember else None
 
         log.info(
             "chat.completed",
@@ -172,7 +175,7 @@ class ChatService:
 
     # --- Writing the turn back ---------------------------------------------
 
-    async def _remember(self, user_id: str, query: str) -> IngestResponse | None:
+    async def _remember(self, request: ChatRequest, query: str) -> IngestResponse | None:
         """Feed the user's turn through the normal ingest path.
 
         Not a special chat-only reinforcement rule: ingest reinforces on a
@@ -182,7 +185,11 @@ class ChatService:
         try:
             return await self.ingest.ingest(
                 IngestRequest(
-                    user_id=user_id,
+                    # Shared on request: the turn becomes team knowledge, with
+                    # the speaker recorded as its author.
+                    user_id=SHARED_SPACE if request.share else request.user_id,
+                    author=request.user_id if request.share else None,
+                    author_email=request.author_email if request.share else None,
                     messages=[Message(role="user", content=query)],
                     source_id=f"chat:{uuid.uuid4()}",
                 )
@@ -200,10 +207,17 @@ class ChatService:
 def build_system_prompt(context: ChatContext) -> str:
     """Render the memory block. Pure, so the disputed-memory wording is testable."""
     numbering = _numbering(context)
+    when = (
+        f"\n\nAS OF {context.as_of.date()}: the person is asking about the past. MEMORY "
+        "below is what was believed on that date — some of it has changed since. "
+        "Answer about then, and say it is the record as of that date."
+        if context.as_of
+        else ""
+    )
 
     if not numbering:
         return (
-            f"{CHAT_SYSTEM_PROMPT}\n\n"
+            f"{CHAT_SYSTEM_PROMPT}{when}\n\n"
             "MEMORY: nothing recorded is relevant to this question. Say so rather "
             "than guessing at what they might have told you before."
         )
@@ -212,9 +226,11 @@ def build_system_prompt(context: ChatContext) -> str:
         memory.id for group in context.disagreements for memory in group.memories
     }
 
-    lines = [CHAT_SYSTEM_PROMPT, "", "MEMORY"]
+    lines = [CHAT_SYSTEM_PROMPT + when, "", "MEMORY"]
     for index, memory in numbering.items():
         marker = " [DISPUTED]" if memory.id in disputed_ids else ""
+        if memory.kind == "summary":
+            marker += f" [SUMMARY of {len(memory.derived_from)} memories]"
         subject = f" ({memory.subject})" if memory.subject else ""
         lines.append(
             f"[{index}]{marker} {memory.content}{subject} "

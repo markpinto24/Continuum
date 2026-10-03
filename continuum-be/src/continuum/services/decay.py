@@ -54,6 +54,8 @@ class DecayService:
         )
 
         for memory in candidates:
+            if memory.kind == "summary":
+                continue  # derived: rewritten when its sources change, never decayed
             report.scanned += 1
 
             new_confidence = memory.decayed_confidence(

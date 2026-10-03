@@ -1,4 +1,16 @@
-import { Check, Copy, KeyRound, Lock, Plus, Users } from 'lucide-react'
+import {
+  Check,
+  Copy,
+  Database,
+  Download,
+  KeyRound,
+  Layers,
+  Loader2,
+  Lock,
+  Plus,
+  Users,
+  Volume2,
+} from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -8,10 +20,11 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useResource } from '@/hooks/use-resource'
+import { VoiceSettingsPanel } from '@/components/voice-settings'
+import { type Resource, useResource } from '@/hooks/use-resource'
 import { api } from '@/lib/api'
 import { PASSWORD_MIN_LENGTH, newPasswordFeedback } from '@/lib/password'
-import type { ApiKeyCreated, Me } from '@/lib/types'
+import type { ApiKeyCreated, Me, VoiceSettings } from '@/lib/types'
 
 /**
  * Where an agent should point: the API itself on :8000, not this dev server —
@@ -25,10 +38,12 @@ export function AccountDialog({
   me,
   open,
   onOpenChange,
+  voiceSettings,
 }: {
   me: Me
   open: boolean
   onOpenChange: (open: boolean) => void
+  voiceSettings: Resource<VoiceSettings>
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -38,9 +53,13 @@ export function AccountDialog({
           Signed in as {me.email}. Memory owner id <code className="text-accent">{me.user_id}</code>.
         </DialogDescription>
 
-        <Tabs defaultValue="keys" className="flex min-h-0 flex-1 flex-col">
+        <Tabs defaultValue="voice" className="flex min-h-0 flex-1 flex-col">
           <div className="px-4 pt-3">
             <TabsList className="w-full">
+              <TabsTrigger value="voice">
+                <Volume2 className="size-3.5" />
+                Voice
+              </TabsTrigger>
               <TabsTrigger value="keys">
                 <KeyRound className="size-3.5" />
                 API keys
@@ -48,6 +67,10 @@ export function AccountDialog({
               <TabsTrigger value="password">
                 <Lock className="size-3.5" />
                 Password
+              </TabsTrigger>
+              <TabsTrigger value="data">
+                <Database className="size-3.5" />
+                Data
               </TabsTrigger>
               {me.is_admin && (
                 <TabsTrigger value="users">
@@ -58,11 +81,17 @@ export function AccountDialog({
             </TabsList>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            <TabsContent value="voice">
+              <VoiceSettingsPanel settings={voiceSettings} onSaved={voiceSettings.refresh} />
+            </TabsContent>
             <TabsContent value="keys">
               <ApiKeys />
             </TabsContent>
             <TabsContent value="password">
               <PasswordForm />
+            </TabsContent>
+            <TabsContent value="data">
+              <YourData isAdmin={me.is_admin} />
             </TabsContent>
             {me.is_admin && (
               <TabsContent value="users">
@@ -73,6 +102,74 @@ export function AccountDialog({
         </Tabs>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// --- Your data ----------------------------------------------------------------
+
+function YourData({ isAdmin }: { isAdmin: boolean }) {
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+
+  const summarise = async () => {
+    setBusy(true)
+    setNote(null)
+    try {
+      const { written } = await api.refreshSummaries()
+      setNote(
+        written.length
+          ? `Wrote ${written.length} ${written.length === 1 ? 'summary' : 'summaries'}: ${written.map((m) => m.subject).join(', ')}.`
+          : 'Nothing to summarise: no subject has enough memories that changed since its last summary.',
+      )
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4 text-xs leading-relaxed text-muted">
+      <section className="space-y-1.5">
+        <p className="font-medium text-foreground">Download your memories</p>
+        <p>
+          Your whole graph as JSON: every memory in every state, with the edges that say what
+          replaced what. The team space is not included — it belongs to everyone.
+        </p>
+        <Button asChild size="sm" variant="secondary">
+          <a href={api.memoryExportUrl} download>
+            <Download />
+            Download my memories
+          </a>
+        </Button>
+      </section>
+
+      <section className="space-y-1.5">
+        <p className="font-medium text-foreground">Summaries</p>
+        <p>
+          Subjects with five or more memories get a short summary, rewritten daily when they
+          change, so a broad question can find the whole subject at once. Summaries are never
+          evidence of their own.
+        </p>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => void summarise()}>
+          {busy ? <Loader2 className="animate-spin" /> : <Layers />}
+          Summarise now
+        </Button>
+        {note && <p className="text-foreground/90">{note}</p>}
+      </section>
+
+      {isAdmin && (
+        <section className="space-y-1.5">
+          <p className="font-medium text-foreground">Backups (admin)</p>
+          <p>
+            Everyone&apos;s memories and accounts, from <code className="text-accent">continuum-be/</code>:
+          </p>
+          <pre className="overflow-x-auto rounded bg-surface-raised px-2 py-1.5 font-mono text-[11px] text-foreground">
+            uv run python scripts/backup.py{'\n'}uv run python scripts/restore.py backups/&lt;stamp&gt; --yes
+          </pre>
+        </section>
+      )}
+    </div>
   )
 }
 
@@ -103,10 +200,20 @@ function ApiKeys() {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs leading-relaxed text-muted">
-        Give each agent its own key. It can read and write your memories, but it cannot create
-        keys, change your password or manage users — revoke it and it stops working at once.
-      </p>
+      <div className="space-y-1.5 text-xs leading-relaxed text-muted">
+        <p>
+          <span className="text-foreground">An API key lets software use your memory without
+          your password</span> — an AI agent, a script, another app. With it, a program can add
+          notes (<code>/ingest</code>), ask questions (<code>/chat</code>) and search what you
+          remember, exactly as you can here. Everything it adds lands in your graph.
+        </p>
+        <p>
+          You do not need one to use Continuum in this browser. Give each program its own key,
+          named for what it is, so you can see when it was last used and revoke just that one.
+          A key can never create other keys, change your password or manage users — so a leaked
+          key is never a takeover, and revoking it stops it at once.
+        </p>
+      </div>
 
       <form onSubmit={create} className="flex gap-2">
         <Input

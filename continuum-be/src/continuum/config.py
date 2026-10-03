@@ -94,12 +94,29 @@ class Settings(BaseSettings):
     # Largest note or transcript accepted by ingest and chat, in characters.
     max_input_chars: int = 50_000
 
+    # --- Shared team space --------------------------------------------------
+    # One shared graph for everyone on the instance. Every user's chat, search,
+    # graph and inbox read their own memories plus the shared ones; nothing is
+    # shared unless someone shares it (a memory's Share button, or `share` on an
+    # ingest or chat turn). Off: every account is fully private, as before.
+    shared_space_enabled: bool = True
+
     # --- Learning from decisions -------------------------------------------
     # Escalated `supersedes` verdicts below the gate, all confirmed by people,
     # needed before the evidence report says a lower gate is worth considering.
     # 15 with none wrong bounds the error rate below 20% (rule of three: 3/n).
     # The report only recommends; changing the gate stays a product decision.
     feedback_min_gate_evidence: int = 15
+    # Calibration: map the judge's stated confidence onto how often people
+    # actually agreed with it (pooled across the instance), and gate on THAT.
+    # Off by default — turning it on changes what gets retired without asking,
+    # which is a product decision. The curve is only used once it rests on at
+    # least `calibration_min_labels` settled `supersedes` verdicts.
+    calibrated_gate: bool = False
+    calibration_min_labels: int = 30
+    # "Both are true" this many times about one subject, with no decision the
+    # other way, and the system suggests a rule to stop asking. You approve it.
+    rule_suggestion_min_decisions: int = 2
 
     # --- Speech to text ----------------------------------------------------
     # Dictation in the chat box. Transcribed HERE, by a local Whisper model —
@@ -128,6 +145,31 @@ class Settings(BaseSettings):
     # Load the model in the background at startup, so the first dictation does
     # not wait for a download. Startup itself does not wait for it.
     speech_preload: bool = True
+
+    # --- Text to speech ----------------------------------------------------
+    # Read-aloud and autopilot answers, synthesised HERE by a local neural voice
+    # (Piper), not by the browser: browser speech depends on the OS speech
+    # service (often not running on Linux) and on the browser's own policy
+    # (Brave limits voices to resist fingerprinting), so it fails silently for
+    # some users. Piper runs ~20x faster than real time on a CPU.
+    tts_enabled: bool = True
+    # A voice from huggingface.co/rhasspy/piper-voices, as lang_REGION-name-quality.
+    # Downloaded once (~63 MB for a "medium" voice) to the Hugging Face cache.
+    tts_voice: str = "en_US-lessac-medium"
+    # 1.0 is the voice's natural pace; below 1 is faster, above slower.
+    tts_length_scale: float = 1.0
+    # One request is one sentence or a few — autopilot sends them as the answer
+    # streams. Long enough for a paragraph, short enough that one request cannot
+    # tie up the CPU.
+    tts_max_chars: int = 800
+    # Per user per minute. Separate from the LLM limit: autopilot makes one
+    # request per sentence, and each costs a fraction of a second of CPU.
+    tts_requests_per_minute: int = 240
+    tts_preload: bool = True
+    # Voices people pick in Settings are loaded on first use (~60 MB each, a
+    # few seconds the first time). This many stay in memory, least recently used
+    # dropped first — each costs roughly 100-150 MB of RAM while loaded.
+    tts_max_loaded_voices: int = 3
 
     # --- Qdrant ------------------------------------------------------------
     qdrant_url: str = "http://localhost:6333"
@@ -236,6 +278,27 @@ class Settings(BaseSettings):
     retrieval_recency_half_life_days: float = 45.0
     # Floor so an old memory is down-weighted, never erased, by age alone.
     retrieval_recency_floor: float = 0.30
+    # Periodic summaries of busy subjects (services/summaries.py). One LLM call
+    # per subject whose memories changed since its last summary; none otherwise.
+    summaries_enabled: bool = True
+    # A subject needs this many live memories before a summary is worth it.
+    summary_min_memories: int = 5
+    summary_interval_hours: float = 24.0
+    # Cap per graph per run, so a first run on a large graph cannot queue
+    # hundreds of LLM calls at once.
+    summary_max_per_run: int = 50
+
+    # Check each new private fact against the team space too. A disagreement is
+    # flagged on the private memory (never on the team's) and lands in the inbox.
+    # Costs at most one more judge call per fact that has team neighbours.
+    team_cross_check: bool = True
+
+    # Keyword matching alongside similarity: rank uses max(similarity,
+    # keyword x this). A memory containing every content word of the question
+    # ranks like one at this cosine. Catches names and numbers embeddings blur;
+    # too high and a memory that merely repeats the question's words wins.
+    # 0 turns keyword retrieval off exactly.
+    retrieval_keyword_weight: float = 0.7
 
     @model_validator(mode="after")
     def _thresholds_for_model(self) -> Settings:

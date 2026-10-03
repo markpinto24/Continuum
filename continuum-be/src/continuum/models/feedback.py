@@ -65,6 +65,9 @@ class ResolutionLabel(BaseModel):
 
     decision: Decision
     expected_action: ExpectedAction
+    # The graph the pair lived in (a user id or the shared space); "cross" for a
+    # private belief settled against team knowledge.
+    graph_owner: str | None = None
 
 
 class GateBand(BaseModel):
@@ -100,3 +103,107 @@ class GateEvidence(BaseModel):
         ..., description="Judged 'conflict' but both were true: over-escalation."
     )
     recommendation: str
+
+
+# --- Calibration -----------------------------------------------------------------
+
+
+class CalibrationPoint(BaseModel):
+    """How often the judge was right when it said `supersedes` in one band."""
+
+    low: float
+    high: float
+    total: int
+    confirmed: int
+    observed: float | None = Field(..., description="confirmed / total, or None if empty.")
+    calibrated: float = Field(
+        ..., description="The band's probability after smoothing and forcing it to rise "
+        "with the judge's confidence — what the gate compares when calibration is on."
+    )
+
+
+class CalibrationReport(BaseModel):
+    """The judge's stated confidence against how often people agreed with it.
+
+    Pooled across everyone on the instance: how well-calibrated the judge is is a
+    property of the model, not of one person's graph.
+    """
+
+    labels: int
+    points: list[CalibrationPoint]
+    usable: bool = Field(..., description="Enough decisions to trust the curve.")
+    in_use: bool = Field(..., description="CALIBRATED_GATE is on and the curve is usable.")
+    min_labels: int
+
+
+# --- Rules ---------------------------------------------------------------------
+
+
+class ResolutionRule(BaseModel):
+    id: str
+    owner: str
+    subject: str
+    kind: str = "compatible"
+    created_by: str
+    created_at: datetime
+    revoked_at: datetime | None = None
+
+
+class RuleSuggestion(BaseModel):
+    """A rule worth proposing: the person keeps saying both are true about this subject."""
+
+    owner: str
+    subject: str
+    both_hold: int = Field(..., description="Times you said both statements were true.")
+
+
+class RuleList(BaseModel):
+    rules: list[ResolutionRule]
+    suggestions: list[RuleSuggestion]
+
+
+# --- Extraction and answer feedback ------------------------------------------------
+
+
+class RejectReason(StrEnum):
+    NOT_A_FACT = "not_a_fact"  # a question, a greeting, a guess
+    MERGED = "merged"  # two separate facts joined into one memory
+    MISREAD = "misread"  # the text says something else
+    OTHER = "other"
+
+
+class ExtractionFeedback(BaseModel):
+    id: str
+    user_id: str
+    created_at: datetime
+    memory_id: str
+    content: str
+    category: str
+    source_excerpt: str | None = None
+    reason: RejectReason
+    note: str | None = None
+
+
+class AnswerFeedback(BaseModel):
+    id: str
+    user_id: str
+    created_at: datetime
+    query: str
+    answer: str
+    rating: int = Field(..., description="+1, -1, or 0 for a missing-memory report only.")
+    note: str | None = None
+    used_ids: list[str] = Field(default_factory=list)
+    cited_ids: list[str] = Field(default_factory=list)
+    missing_ids: list[str] = Field(
+        default_factory=list, description="Memories the person says should have come up."
+    )
+
+
+class FeedbackSummary(BaseModel):
+    """Everything the system has been taught, in counts."""
+
+    decisions: int
+    rejected_facts: int
+    answers_up: int
+    answers_down: int
+    missing_memories: int

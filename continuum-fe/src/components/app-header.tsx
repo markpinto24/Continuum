@@ -1,4 +1,4 @@
-import { Archive, LogOut, RefreshCw, User } from 'lucide-react'
+import { Archive, History, LogOut, RefreshCw, User, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -16,6 +16,8 @@ export function AppHeader({
   onIncludeArchived,
   onRefresh,
   refreshing,
+  asOf,
+  onAsOf,
 }: {
   me: Me
   onAccount: () => void
@@ -27,7 +29,11 @@ export function AppHeader({
   onIncludeArchived: (value: boolean) => void
   onRefresh: () => void
   refreshing: boolean
+  /** A past day (YYYY-MM-DD) to view beliefs as they stood, or null for now. */
+  asOf: string | null
+  onAsOf: (day: string | null) => void
 }) {
+  const today = new Date().toISOString().slice(0, 10)
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
       <div className="flex items-baseline gap-2">
@@ -47,6 +53,30 @@ export function AppHeader({
       </span>
 
       <div className="ml-auto flex items-center gap-1.5">
+        <Tooltip label="See what was believed on a past day. The graph and the chat both go back; nothing said meanwhile is remembered.">
+          <label
+            className={cn(
+              'flex h-7 items-center gap-1 rounded px-2 text-xs',
+              asOf ? 'bg-amber-500/15 text-amber-300' : 'text-muted hover:bg-surface-raised',
+            )}
+          >
+            <History className="size-3.5" />
+            <span className="sr-only">As of</span>
+            <input
+              type="date"
+              aria-label="As of"
+              max={today}
+              value={asOf ?? ''}
+              onChange={(e) => onAsOf(e.target.value || null)}
+              className="w-[7.5rem] bg-transparent text-xs outline-none [color-scheme:dark]"
+            />
+            {asOf && (
+              <button type="button" aria-label="Back to now" onClick={() => onAsOf(null)}>
+                <X className="size-3" />
+              </button>
+            )}
+          </label>
+        </Tooltip>
         <Tooltip
           label={
             includeArchived

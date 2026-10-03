@@ -26,6 +26,9 @@ export function toSpeakableText(markdown: string): string {
       .replace(/\|/g, ' ')
       .replace(/^\s*[-=:]{3,}\s*$/gm, '')
       .replace(/(\*\*|__|\*|_|~~)(.+?)\1/g, '$2')
+      // Whatever markup is left unpaired — common while an answer is still
+      // streaming — would be read out as "asterisk".
+      .replace(/[*`#~]+/g, '')
       .replace(/\s+/g, ' ')
       .trim()
   )
@@ -57,4 +60,25 @@ export function speechChunks(text: string): string[] {
   }
   if (current) chunks.push(current)
   return chunks
+}
+
+/**
+ * For an answer that is still arriving: the sentences that are finished, and
+ * the tail that may still grow. Speaking finished sentences as they land is what
+ * makes a spoken answer start in a second instead of after the whole reply.
+ *
+ * An unclosed code fence cuts the text where it opens, so half a code block is
+ * never read as prose.
+ */
+export function finishedSentences(markdown: string): string[] {
+  const fences = markdown.split('```').length - 1
+  const cut = fences % 2 === 1
+  const settled = cut ? markdown.slice(0, markdown.lastIndexOf('```')) : markdown
+  // toSpeakableText trims; keep the evidence that something followed the last
+  // sentence — trailing whitespace, or the code block we just cut away.
+  const text = toSpeakableText(settled) + (cut || /\s$/.test(settled) ? ' ' : '')
+  // Finished means followed by whitespace: "version 3." at the very end may
+  // still become "version 3.5". The last sentence is spoken when the stream ends.
+  const complete = text.match(/[^.!?]+[.!?]+["')\]]*(?=\s)/g) ?? []
+  return complete.map((sentence) => sentence.trim()).filter(Boolean)
 }

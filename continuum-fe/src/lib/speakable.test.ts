@@ -37,3 +37,22 @@ describe('speechChunks', () => {
     expect(speechChunks('Hello there. How are you')).toEqual(['Hello there. How are you'])
   })
 })
+
+describe('finishedSentences (an answer still arriving)', () => {
+  it('returns only sentences something has followed', async () => {
+    const { finishedSentences } = await import('./speakable')
+    expect(finishedSentences('Atlas uses Postgres. You later said Mon')).toEqual(['Atlas uses Postgres.'])
+    // "version 3." at the very end may still become "version 3.5".
+    expect(finishedSentences('We are on version 3.')).toEqual([])
+  })
+
+  it('never reads half a code block', async () => {
+    const { finishedSentences } = await import('./speakable')
+    expect(finishedSentences('Run this. ```bash\necho hi. more. ')).toEqual(['Run this.'])
+  })
+
+  it('drops unpaired markup a stream leaves behind', async () => {
+    const { finishedSentences } = await import('./speakable')
+    expect(finishedSentences('**Mark is the admin. **Ra')).toEqual(['Mark is the admin.'])
+  })
+})

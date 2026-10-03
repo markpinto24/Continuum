@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import ForceGraph3D, { type ForceGraphMethods } from 'react-force-graph-3d'
+import {
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  type Object3D,
+  SphereGeometry,
+  TorusGeometry,
+} from 'three'
 
 import { useElementSize } from '@/hooks/use-element-size'
 import {
   EDGE_COLOR,
   STATUS_COLOR,
   STATUS_LABEL,
+  SUMMARY_COLOR,
   nodeVolume,
 } from '@/lib/memory-style'
 import type { GraphEdgeKind, GraphNode, GraphResponse } from '@/lib/types'
@@ -145,6 +154,10 @@ export function BeliefGraph({ data, selectedId, onSelect }: BeliefGraphProps) {
               : STATUS_COLOR[node.status]
           }
           nodeOpacity={0.92}
+          // Team knowledge wears a faint wireframe halo, a summary a ring: both
+          // visible from any angle, and independent of colour, which means status.
+          nodeThreeObjectExtend
+          nodeThreeObject={nodeDecoration}
           nodeResolution={16}
           linkColor={linkColor}
           linkWidth={(link) => (link.kind === 'conflicts_with' ? 1.4 : 0.6)}
@@ -170,8 +183,42 @@ export function BeliefGraph({ data, selectedId, onSelect }: BeliefGraphProps) {
   )
 }
 
+// Matches the library's default nodeRelSize, so the halo hugs the sphere.
+const NODE_REL_SIZE = 4
+
+function nodeDecoration(node: SceneNode): Object3D {
+  const group = new Group()
+  const radius = Math.cbrt(nodeVolume(node.confidence)) * NODE_REL_SIZE
+  if (node.shared) {
+    group.add(
+      new Mesh(
+        new SphereGeometry(radius * 1.45, 12, 8),
+        new MeshBasicMaterial({ color: '#7dd3fc', wireframe: true, transparent: true, opacity: 0.28 }),
+      ),
+    )
+  }
+  if (node.kind === 'summary') {
+    group.add(
+      new Mesh(
+        new TorusGeometry(radius * 1.7, radius * 0.12, 6, 32),
+        new MeshBasicMaterial({ color: SUMMARY_COLOR, transparent: true, opacity: 0.6 }),
+      ),
+    )
+  }
+  return group
+}
+
 function nodeTooltip(node: SceneNode): string {
   const subject = node.subject ? ` · ${escapeHtml(node.subject)}` : ''
+  const summary =
+    node.kind === 'summary'
+      ? `<div style="color:${SUMMARY_COLOR};font-size:11px;margin-top:.2rem">Summary of a subject — derived, not evidence</div>`
+      : ''
+  const shared = node.shared
+    ? `<div style="color:#7dd3fc;font-size:11px;margin-top:.2rem">Shared with the team${
+        node.shared_by_email ? ` by ${escapeHtml(node.shared_by_email)}` : ''
+      }</div>`
+    : ''
   return `
     <div style="max-width:20rem;padding:.5rem .625rem;border-radius:.5rem;
                 background:#1c2128;border:1px solid #30363d;color:#e6edf3;
@@ -180,7 +227,7 @@ function nodeTooltip(node: SceneNode): string {
       <div style="color:#8b949e;font-size:11px">
         ${STATUS_LABEL[node.status]} · ${node.category}${subject} ·
         confidence ${node.confidence.toFixed(2)}
-      </div>
+      </div>${shared}${summary}
     </div>`
 }
 

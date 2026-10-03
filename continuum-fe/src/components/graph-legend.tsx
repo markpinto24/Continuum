@@ -1,7 +1,7 @@
 import { ArrowRight, Sparkles } from 'lucide-react'
 
 import { Tooltip } from '@/components/ui/tooltip'
-import { EDGE_COLOR, STATUS_BLURB, STATUS_COLOR, STATUS_LABEL } from '@/lib/memory-style'
+import { EDGE_COLOR, STATUS_BLURB, STATUS_COLOR, STATUS_LABEL, SUMMARY_COLOR } from '@/lib/memory-style'
 import type { MemoryStatus } from '@/lib/types'
 
 const ORDER: MemoryStatus[] = ['active', 'contradicted', 'superseded', 'archived']
@@ -49,6 +49,22 @@ export function GraphLegend({ counts }: { counts: Record<MemoryStatus, number> }
             <span className="size-2.5 rounded-full bg-muted/60" />
           </span>
           <span>size = confidence</span>
+        </li>
+        <li className="flex items-center gap-2">
+          <span className="flex w-3.5 justify-center">
+            <span className="size-3 rounded-full border border-dashed border-sky-300/70" />
+          </span>
+          <span>
+            <span className="text-foreground">halo</span> — shared with the team
+          </span>
+        </li>
+        <li className="flex items-center gap-2">
+          <span className="flex w-3.5 justify-center">
+            <span className="size-3 rounded-full border-2" style={{ borderColor: SUMMARY_COLOR }} />
+          </span>
+          <span>
+            <span className="text-foreground">ring</span> — a summary of a subject
+          </span>
         </li>
       </ul>
     </div>

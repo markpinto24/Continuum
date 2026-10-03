@@ -53,6 +53,13 @@ services:
       - "127.0.0.1:6334:6334"   # gRPC
     volumes:
       - qdrant_storage:/qdrant/storage
+    # Every segment and payload index is its own RocksDB, each holding files
+    # open. Docker's default of 1024 ran out at four collections ("Too many open
+    # files" creating a new one); Qdrant's docs recommend raising it.
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     environment:
       QDRANT__SERVICE__ENABLE_CORS: "true"
     healthcheck:

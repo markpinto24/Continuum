@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from continuum.db.models import ApiKeyRow, SessionRow, UserRow
-from continuum.models.auth import ApiKey, User
+from continuum.models.auth import ApiKey, User, VoicePreferences
 
 
 class DuplicateRecord(Exception):
@@ -132,6 +132,21 @@ class AuthDB:
             return
         async with self.sessions.begin() as s:
             await s.execute(update(UserRow).where(UserRow.id == user_id).values(**values))
+
+    async def get_voice_preferences(self, user_id: str) -> VoicePreferences:
+        async with self.sessions() as s:
+            row = await s.get(UserRow, user_id)
+        if row is None:
+            return VoicePreferences()
+        return VoicePreferences(voice=row.tts_voice, speed=row.tts_speed)
+
+    async def set_voice_preferences(self, user_id: str, prefs: VoicePreferences) -> None:
+        async with self.sessions.begin() as s:
+            await s.execute(
+                update(UserRow)
+                .where(UserRow.id == user_id)
+                .values(tts_voice=prefs.voice, tts_speed=prefs.speed)
+            )
 
     async def set_password_hash(self, user_id: str, password_hash: str) -> None:
         async with self.sessions.begin() as s:

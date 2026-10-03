@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
 from enum import StrEnum
 from typing import NamedTuple, TypeVar
 
@@ -148,10 +149,16 @@ class ResolutionService:
         memories: MemoryStore,
         llm: LLMClient,
         settings: Settings | None = None,
+        *,
+        calibrate: Callable[[float], float | None] | None = None,
     ) -> None:
         self.memories = memories
         self.llm = llm
         self.settings = settings or get_settings()
+        # Maps the judge's confidence onto how often people agreed with it
+        # (services/feedback.Calibration). Used only when CALIBRATED_GATE is on
+        # and it returns a value, i.e. once it rests on enough decisions.
+        self.calibrate = calibrate
 
     # --- Entry point -------------------------------------------------------
 
@@ -159,8 +166,15 @@ class ResolutionService:
         self,
         fact: ExtractedFact,
         neighbours: list[tuple[Memory, float]],
+        *,
+        compatible_subjects: frozenset[str] | set[str] = frozenset(),
     ) -> Resolution:
-        """Decide what to do with `fact` given its nearest existing memories."""
+        """Decide what to do with `fact` given its nearest existing memories.
+
+        `compatible_subjects`: subjects a person has approved a rule for — "these
+        statements can all hold". A conflict about one is stored side by side
+        instead of escalated. Only a person creates such a rule.
+        """
         if not neighbours:
             return Resolution(Verdict.NEW, reason="no similar memories")
 
@@ -190,6 +204,25 @@ class ResolutionService:
             )
 
         resolution = await self._resolve_candidate(fact, neighbours)
+        if (
+            resolution.verdict is Verdict.CONFLICT
+            and resolution.target is not None
+            and fact.subject
+            and fact.subject == resolution.target.subject
+            and fact.subject in compatible_subjects
+        ):
+            log.info("resolution.rule_applied", target_id=resolution.target.id)
+            resolution = Resolution(
+                Verdict.INDEPENDENT,
+                target=resolution.target,
+                reason=(
+                    f"{resolution.reason} [stored side by side: you approved a rule that "
+                    "statements about this subject can all hold]"
+                ).strip(),
+                judge_confidence=resolution.judge_confidence,
+                confidence_source=resolution.confidence_source,
+                self_reported_confidence=resolution.self_reported_confidence,
+            )
         if withheld:
             resolution.reason = (
                 f"{resolution.reason} [scored {best_score:.3f} against an existing memory, "
@@ -246,8 +279,19 @@ class ResolutionService:
                 )
 
             # The confidence gate. This is the guard against silently erasing a
-            # belief on a coin-flip judgement.
-            if confidence >= self.settings.auto_supersede_confidence:
+            # belief on a coin-flip judgement. With calibration on, it compares how
+            # often the judge has actually been right at this confidence; the raw
+            # value is still what gets recorded, since calibration is built from it.
+            effective = confidence
+            calibrated = (
+                self.calibrate(confidence)
+                if self.settings.calibrated_gate and self.calibrate
+                else None
+            )
+            if calibrated is not None:
+                effective = calibrated
+                reason = f"{reason} [calibrated {calibrated:.2f} from judge {confidence:.2f}]"
+            if effective >= self.settings.auto_supersede_confidence:
                 return Resolution(
                     Verdict.SUPERSEDES,
                     target=candidate,
@@ -258,13 +302,14 @@ class ResolutionService:
             log.info(
                 "resolution.escalated",
                 judge_confidence=confidence,
+                calibrated=calibrated,
                 gate=self.settings.auto_supersede_confidence,
                 target_id=candidate.id,
             )
             return Resolution(
                 Verdict.CONFLICT,
                 target=candidate,
-                reason=f"{reason} (judge confidence {confidence:.2f} below auto-resolve gate)",
+                reason=f"{reason} (confidence {effective:.2f} below auto-resolve gate)",
                 judge_confidence=confidence,
                 escalated_from=Verdict.SUPERSEDES,
                 **provenance,
