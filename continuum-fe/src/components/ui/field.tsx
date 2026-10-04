@@ -34,8 +34,8 @@ export function Field({
   })
 
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={children.props.id ?? id} className="text-[11px] font-medium text-muted">
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={children.props.id ?? id} className="text-xs font-medium text-foreground/80">
         {label}
       </label>
       {control}
@@ -45,8 +45,8 @@ export function Field({
           // Polite: announced when the user pauses typing, not on every keystroke.
           aria-live={error ? 'polite' : undefined}
           className={cn(
-            'text-[11px] leading-relaxed',
-            error ? 'text-danger' : 'text-muted/70',
+            'text-xs leading-relaxed',
+            error ? 'text-danger' : 'text-muted',
           )}
         >
           {note}

@@ -152,7 +152,7 @@ export function MemoryDetail({
       (memory.user_id === SHARED_SPACE && (isAdmin || memory.shared_by === userId)))
 
   return (
-    <div className="scrollbar-slim h-full overflow-y-auto px-4 py-4">
+    <div className="scrollbar-slim h-full overflow-y-auto px-5 py-5 animate-fade-up">
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <Badge className={cn('border', STATUS_CLASS[memory.status])}>
           {STATUS_LABEL[memory.status]}
@@ -177,7 +177,7 @@ export function MemoryDetail({
         )}
       </div>
 
-      <p className="text-sm leading-relaxed text-foreground">{memory.content}</p>
+      <p className="text-[15px] leading-relaxed font-medium text-foreground">{memory.content}</p>
       {summary && (
         <p className="mt-1 text-[11px] leading-relaxed text-muted/80">
           Written from {memory.derived_from.length} memories about this subject. A summary is never
@@ -416,26 +416,13 @@ function EdgeList({
 }) {
   if (ids.length === 0) return null
   return (
-    <section className="mt-4">
+    <section className="mt-5">
       <SectionLabel>{title}</SectionLabel>
-      <p className="mb-1.5 text-[11px] leading-relaxed text-muted/80">{hint}</p>
-      <ul className="space-y-1">
+      <p className="mb-2 text-xs leading-relaxed text-muted">{hint}</p>
+      <ul className="space-y-1.5">
         {ids.map((id) => (
           <li key={id}>
-            <button
-              type="button"
-              onClick={() => onSelect(id)}
-              className={cn(
-                'flex w-full items-center gap-1.5 rounded border px-2 py-1 text-left font-mono text-[11px]',
-                'transition-colors hover:bg-surface-raised',
-                tone === 'danger'
-                  ? 'border-danger/30 text-danger/90'
-                  : 'border-border text-muted',
-              )}
-            >
-              <ArrowUpRight className="size-3 shrink-0" />
-              {id.slice(0, 8)}…
-            </button>
+            <EdgeItem id={id} onSelect={onSelect} tone={tone} />
           </li>
         ))}
       </ul>
@@ -443,9 +430,46 @@ function EdgeList({
   )
 }
 
+/** One linked memory, by what it says — an id means nothing to a person. */
+function EdgeItem({
+  id,
+  onSelect,
+  tone,
+}: {
+  id: string
+  onSelect: (id: string) => void
+  tone?: 'danger'
+}) {
+  const linked = useResource<Memory | null>(() => api.memory(id).catch(() => null), [id])
+  const memory = linked.data
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(id)}
+      className={cn(
+        'group flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs leading-relaxed ring-1 transition-colors',
+        tone === 'danger'
+          ? 'bg-amber-400/[0.06] text-amber-50/90 ring-amber-400/25 hover:bg-amber-400/10'
+          : 'bg-surface text-foreground/85 ring-border hover:bg-surface-raised',
+      )}
+    >
+      <ArrowUpRight className="mt-0.5 size-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100" />
+      <span className="min-w-0 flex-1">
+        {memory ? memory.content : <span className="font-mono text-muted">{id.slice(0, 8)}…</span>}
+        {memory && (
+          <span className="mt-0.5 block text-[11px] text-muted">
+            {STATUS_LABEL[memory.status]} · {CATEGORY_LABEL[memory.category]} ·{' '}
+            {formatDate(memory.created_at)}
+          </span>
+        )}
+      </span>
+    </button>
+  )
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-muted uppercase">
+    <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">
       {children}
     </h4>
   )

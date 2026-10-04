@@ -14,18 +14,19 @@ export function DialogContent({
 }: ComponentProps<typeof DialogPrimitive.Content>) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/55 backdrop-blur-sm" />
       <DialogPrimitive.Content
         className={cn(
-          'panel fixed top-1/2 left-1/2 z-50 flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-lg',
-          '-translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden outline-none',
+          'fixed top-1/2 left-1/2 z-50 flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-lg',
+          '-translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border',
+          'bg-surface shadow-2xl shadow-black/50 outline-none animate-fade-up',
           className,
         )}
         {...props}
       >
         {children}
         <DialogPrimitive.Close
-          className="absolute top-3 right-3 rounded p-1 text-muted hover:bg-surface-raised hover:text-foreground"
+          className="absolute top-3.5 right-3.5 rounded-lg p-1.5 text-muted transition-colors hover:bg-surface-raised hover:text-foreground"
           aria-label="Close"
         >
           <X className="size-4" />
@@ -38,7 +39,7 @@ export function DialogContent({
 export function DialogTitle({ className, ...props }: ComponentProps<typeof DialogPrimitive.Title>) {
   return (
     <DialogPrimitive.Title
-      className={cn('px-4 pt-3.5 text-sm font-semibold tracking-tight', className)}
+      className={cn('px-5 pt-5 text-base font-semibold tracking-tight', className)}
       {...props}
     />
   )
@@ -50,7 +51,7 @@ export function DialogDescription({
 }: ComponentProps<typeof DialogPrimitive.Description>) {
   return (
     <DialogPrimitive.Description
-      className={cn('px-4 pt-1 text-xs leading-relaxed text-muted', className)}
+      className={cn('px-5 pt-1 text-xs leading-relaxed text-muted', className)}
       {...props}
     />
   )

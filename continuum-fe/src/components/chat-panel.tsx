@@ -1,9 +1,12 @@
 import {
   AlertTriangle,
+  ArrowUp,
   AudioLines,
   Check,
-  CornerDownLeft,
+  ChevronDown,
+  Layers,
   Loader2,
+  Lock,
   Mic,
   Scale,
   Square,
@@ -11,10 +14,11 @@ import {
   Volume2,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 
 import { AnswerFeedback } from '@/components/answer-feedback'
 import { AutopilotOverlay, type PilotStage } from '@/components/autopilot-overlay'
+import { BrandMark } from '@/components/brand'
 import { Markdown } from '@/components/markdown'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -77,6 +81,12 @@ interface SendOptions {
  * the answer, because the backend refused to pick a side and the UI must not
  * quietly do it instead.
  */
+/** What the rest of the app may ask of the chat: start Lumen from elsewhere. */
+export interface ChatControl {
+  /** Resolves false when Lumen could not start; the reason is shown in the chat. */
+  startLumen: () => Promise<boolean>
+}
+
 export function ChatPanel({
   me,
   openDisputes,
@@ -84,8 +94,14 @@ export function ChatPanel({
   onGraphChanged,
   onSelectMemory,
   asOf = null,
+  controlRef,
+  onLumenAvailable,
 }: {
   me: Me
+  /** Lets the collapsed sidebar rail start Lumen. */
+  controlRef?: Ref<ChatControl>
+  /** Whether the server offers voice — so a Lumen button elsewhere can hide. */
+  onLumenAvailable?: (available: boolean) => void
   /** Answer from what was believed then (ISO). Such turns are never remembered. */
   asOf?: string | null
   /** Unresolved disagreements, for the greeting. Null while still loading. */
@@ -240,6 +256,8 @@ export function ChatPanel({
 
   const [pilotStage, setPilotStage] = useState<PilotStage>(null)
   const [pilotCaption, setPilotCaption] = useState<string | null>(null)
+  // What Lumen is saying, for the HUD's live subtitle.
+  const [pilotAnswer, setPilotAnswer] = useState<string | null>(null)
   const [pilotError, setPilotError] = useState<string | null>(null)
   // Lumen was on last time. Browsers allow neither the microphone loop nor
   // speech to start without a click, so the overlay asks for one.
@@ -254,11 +272,13 @@ export function ChatPanel({
     async (said: string) => {
       setPilotStage('thinking')
       sayingRef.current = ''
+      setPilotAnswer(null)
       const speech = reader.stream(`pilot-${Date.now()}`)
       await sendText(said, {
         via: 'voice',
         onText: (answer) => {
           sayingRef.current = answer
+          setPilotAnswer(answer)
           if (finishedSentences(answer).length > 0) setPilotStage('speaking')
           speech.push(answer)
         },
@@ -312,6 +332,7 @@ export function ChatPanel({
   const resetPilot = useCallback(() => {
     setPilotStage(null)
     setPilotCaption(null)
+    setPilotAnswer(null)
     setPilotNeedsTap(false)
     writeAutopilotPref(false)
   }, [])
@@ -341,14 +362,14 @@ export function ChatPanel({
   }, [reader])
   handlers.current = { thankAndEnd, interrupt: interruptAutopilot }
 
-  const startAutopilot = useCallback(async () => {
+  const startAutopilot = useCallback(async (): Promise<boolean> => {
     setPilotNeedsTap(false)
     setPilotError(null)
     dictation.cancel()
     reader.stop()
     if (!(await autopilot.start())) {
       writeAutopilotPref(false)
-      return
+      return false
     }
     writeAutopilotPref(true)
     // The session's greeting, spoken by Lumen — once per session, before it listens.
@@ -365,7 +386,13 @@ export function ChatPanel({
         setPilotStage(null)
       })
     }
+    return true
   }, [autopilot, dictation, me.user_id, openDisputes, reader])
+
+  useImperativeHandle(controlRef, () => ({ startLumen: startAutopilot }), [startAutopilot])
+  useEffect(() => {
+    onLumenAvailable?.(dictationOffered)
+  }, [dictationOffered, onLumenAvailable])
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -374,6 +401,7 @@ export function ChatPanel({
           phase={autopilot.phase}
           stage={pilotStage}
           caption={pilotCaption}
+          answer={pilotAnswer}
           levelRef={autopilot.levelRef}
           needsTap={pilotNeedsTap && !autopilot.active}
           onTap={() => void startAutopilot()}
@@ -382,7 +410,7 @@ export function ChatPanel({
           onClose={endAutopilot}
         />
       )}
-      <div ref={scrollRef} className="scrollbar-slim min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} className="scrollbar-slim min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-2">
         {turns.length === 0 ? (
           <div className="mt-6 text-center">
             <p className="text-sm font-medium text-foreground">Ask about their work</p>
@@ -392,9 +420,9 @@ export function ChatPanel({
             </p>
           </div>
         ) : (
-          <ul className="space-y-4">
+          <ul className="space-y-5">
             {turns.map((turn, index) => (
-              <li key={index}>
+              <li key={index} className="animate-fade-up">
                 <TurnView
                   turn={turn}
                   question={previousQuestion(turns, index)}
@@ -413,7 +441,7 @@ export function ChatPanel({
       </div>
 
       <form
-        className="border-t border-border p-3"
+        className="px-3 pt-2 pb-3"
         onSubmit={(event) => {
           event.preventDefault()
           void send()
@@ -422,13 +450,13 @@ export function ChatPanel({
         {dictation.state === 'recording' && (
           <div
             role="status"
-            className="mb-2 flex items-center gap-2 rounded-md border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-xs"
+            className="mb-2 flex items-center gap-2.5 rounded-xl bg-danger/10 px-3 py-2 text-xs ring-1 ring-danger/25 animate-fade-up"
           >
             <span className="relative flex size-2">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-danger opacity-75" />
               <span className="relative inline-flex size-2 rounded-full bg-danger" />
             </span>
-            <span className="text-foreground">Listening…</span>
+            <span className="font-medium text-foreground">Listening…</span>
             <span className="text-muted tabular-nums">
               {clock(dictation.elapsed)} / {clock(maxSeconds)}
             </span>
@@ -445,37 +473,21 @@ export function ChatPanel({
           </div>
         )}
         {dictation.state === 'transcribing' && (
-          <p role="status" className="mb-2 flex items-center gap-1.5 text-xs text-muted">
+          <p role="status" className="mb-2 flex items-center gap-1.5 px-1 text-xs text-muted">
             <Loader2 className="size-3 animate-spin" /> Transcribing on your server…
           </p>
         )}
         {pilotError && (
-          <p role="alert" className="mb-2 flex items-start gap-1.5 text-xs text-danger">
-            <span className="flex-1">{pilotError}</span>
-            <button
-              type="button"
-              onClick={() => setPilotError(null)}
-              aria-label="Dismiss"
-              className="text-danger/70 hover:text-danger"
-            >
-              <X className="size-3.5" />
-            </button>
-          </p>
+          <Notice onDismiss={() => setPilotError(null)}>{pilotError}</Notice>
         )}
-        {dictation.error && (
-          <p role="alert" className="mb-2 flex items-start gap-1.5 text-xs text-danger">
-            <span className="flex-1">{dictation.error}</span>
-            <button
-              type="button"
-              onClick={dictation.dismissError}
-              aria-label="Dismiss"
-              className="text-danger/70 hover:text-danger"
-            >
-              <X className="size-3.5" />
-            </button>
-          </p>
-        )}
-        <div className="flex items-end gap-2">
+        {dictation.error && <Notice onDismiss={dictation.dismissError}>{dictation.error}</Notice>}
+
+        <div
+          className={cn(
+            'rounded-2xl border bg-white/[0.035] shadow-[inset_0_1px_0_rgb(255_255_255/0.06)] transition-colors focus-within:border-accent/50 focus-within:ring-3 focus-within:ring-accent/10',
+            asOf ? 'border-amber-400/40' : 'border-white/10',
+          )}
+        >
           <textarea
             ref={inputRef}
             value={draft}
@@ -487,85 +499,109 @@ export function ChatPanel({
               }
             }}
             rows={2}
-            placeholder="What database are we using?"
-            className="scrollbar-slim min-h-[3.25rem] flex-1 resize-none rounded-md border border-border bg-surface px-2.5 py-2 text-sm outline-none placeholder:text-muted/70 focus-visible:ring-2 focus-visible:ring-accent/50"
+            placeholder={asOf ? 'Ask about that day…' : 'Ask, or tell it something about your work…'}
+            className="scrollbar-slim block max-h-40 min-h-[3.25rem] w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted/60"
           />
-          <Tooltip
-            label={
-              shareTurns
-                ? 'Sharing: what you say here is remembered as team knowledge, signed by you'
-                : 'Private: what you say is remembered in your own graph. Click to share with the team'
-            }
-          >
-            <Button
-              type="button"
-              size="icon"
-              variant={shareTurns ? 'secondary' : 'ghost'}
-              aria-label="Share what I say with the team"
-              aria-pressed={shareTurns}
-              onClick={() => setShareTurns((on) => !on)}
-              className={cn(shareTurns && 'text-sky-300')}
-            >
-              <Users />
-            </Button>
-          </Tooltip>
-          {dictationOffered && (
-            <Tooltip label="Talk to Lumen — hands-free: speak, pause, and hear the answer. Your voice stays on your own server.">
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                aria-label="Talk to Lumen"
-                disabled={dictation.state !== 'idle'}
-                onClick={() => void startAutopilot()}
-              >
-                <AudioLines />
-              </Button>
-            </Tooltip>
-          )}
-          {dictationOffered && (
+          <div className="flex items-center gap-1 px-2 pb-2">
             <Tooltip
               label={
-                dictation.state === 'recording'
-                  ? 'Stop and transcribe'
-                  : 'Dictate a message — transcribed on your own server, not in the cloud'
+                shareTurns
+                  ? 'Sharing: what you say here is remembered as team knowledge, signed by you'
+                  : 'Private: what you say is remembered in your own graph. Click to share with the team'
               }
             >
+              <button
+                type="button"
+                aria-label="Share what I say with the team"
+                aria-pressed={shareTurns}
+                onClick={() => setShareTurns((on) => !on)}
+                className={cn(
+                  'flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors',
+                  shareTurns
+                    ? 'bg-sky-400/15 text-sky-200'
+                    : 'text-muted hover:bg-surface-raised hover:text-foreground',
+                )}
+              >
+                {shareTurns ? <Users className="size-3.5" /> : <Lock className="size-3.5" />}
+                {shareTurns ? 'Team' : 'Private'}
+              </button>
+            </Tooltip>
+
+            <span className="ml-auto" />
+
+            {dictationOffered && (
+              <Tooltip
+                label={
+                  dictation.state === 'recording'
+                    ? 'Stop and transcribe'
+                    : 'Dictate — transcribed on your own server, never in the cloud'
+                }
+              >
+                <Button
+                  type="button"
+                  size="icon"
+                  variant={dictation.state === 'recording' ? 'danger' : 'ghost'}
+                  aria-label={dictation.state === 'recording' ? 'Stop dictation' : 'Dictate a message'}
+                  aria-pressed={dictation.state === 'recording'}
+                  disabled={dictation.state === 'transcribing' || dictation.state === 'requesting'}
+                  onClick={dictation.state === 'recording' ? dictation.stop : dictation.start}
+                  className="size-8"
+                >
+                  {dictation.state === 'recording' ? (
+                    <Square />
+                  ) : dictation.state === 'idle' ? (
+                    <Mic />
+                  ) : (
+                    <Loader2 className="animate-spin" />
+                  )}
+                </Button>
+              </Tooltip>
+            )}
+            {dictationOffered && (
+              <Tooltip label="Talk to Lumen — hands-free: speak, pause, hear the answer. Your voice stays on your own server.">
+                <button
+                  type="button"
+                  aria-label="Talk to Lumen"
+                  disabled={dictation.state !== 'idle'}
+                  onClick={() => void startAutopilot()}
+                  className="group relative flex h-8 items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-xs font-medium text-accent ring-1 ring-accent/30 transition-all hover:bg-accent/10 hover:ring-accent/60 disabled:opacity-40"
+                >
+                  <span className="absolute inset-0 bg-gradient-to-r from-accent/0 via-accent/15 to-accent/0 opacity-0 transition-opacity group-hover:opacity-100" />
+                  <AudioLines className="relative size-3.5" />
+                  <span className="relative">Lumen</span>
+                </button>
+              </Tooltip>
+            )}
+            {streaming ? (
               <Button
                 type="button"
                 size="icon"
-                variant={dictation.state === 'recording' ? 'danger' : 'ghost'}
-                aria-label={dictation.state === 'recording' ? 'Stop dictation' : 'Dictate a message'}
-                aria-pressed={dictation.state === 'recording'}
-                disabled={dictation.state === 'transcribing' || dictation.state === 'requesting'}
-                onClick={dictation.state === 'recording' ? dictation.stop : dictation.start}
+                variant="secondary"
+                aria-label="Stop answering"
+                onClick={() => abortRef.current?.abort()}
+                className="size-8 rounded-full"
               >
-                {dictation.state === 'recording' ? (
-                  <Square />
-                ) : dictation.state === 'idle' ? (
-                  <Mic />
-                ) : (
-                  <Loader2 className="animate-spin" />
-                )}
+                <Square className="size-3.5" />
               </Button>
-            </Tooltip>
-          )}
-          {streaming ? (
-            <Button type="button" size="icon" variant="secondary" onClick={() => abortRef.current?.abort()}>
-              <Square />
-            </Button>
-          ) : (
-            <Button type="submit" size="icon" disabled={!draft.trim()}>
-              <CornerDownLeft />
-            </Button>
-          )}
+            ) : (
+              <Button
+                type="submit"
+                size="icon"
+                aria-label="Send"
+                disabled={!draft.trim()}
+                className="size-8 rounded-full"
+              >
+                <ArrowUp />
+              </Button>
+            )}
+          </div>
         </div>
-        <p className={cn('mt-1.5 text-[11px]', asOf ? 'text-amber-300/90' : 'text-muted/70')}>
+        <p className={cn('mt-1.5 px-1 text-[11px]', asOf ? 'text-amber-300/90' : 'text-muted/60')}>
           {asOf
             ? `Asking about ${new Date(asOf).toLocaleDateString()}: answers use what was believed then, and nothing you say now is remembered.`
             : shareTurns
               ? 'Sharing on: what you say is remembered as team knowledge, visible to everyone here.'
-              : 'Every turn is fed back through ingest — it confirms what it repeats and records what is new.'}
+              : 'Every message is remembered privately — it confirms what it repeats and records what is new.'}
         </p>
       </form>
     </div>
@@ -604,15 +640,19 @@ function TurnView({
   finished: boolean
 }) {
   if (turn.kind === 'greeting') {
-    return <p className="text-sm leading-relaxed text-foreground/90">{greetingText}</p>
+    return (
+      <AssistantRow>
+        <p className="pt-0.5 text-sm leading-relaxed text-foreground/90">{greetingText}</p>
+      </AssistantRow>
+    )
   }
 
   if (turn.role === 'user') {
     return (
       <div className="flex justify-end">
-        <p className="max-w-[85%] rounded-lg rounded-br-sm bg-surface-raised px-3 py-2 text-sm leading-relaxed">
+        <p className="max-w-[85%] rounded-2xl rounded-br-md bg-accent/12 px-3.5 py-2 text-sm leading-relaxed text-foreground ring-1 ring-accent/15">
           {turn.via === 'voice' && (
-            <Mic className="mr-1.5 inline size-3 align-[-1px] text-muted" aria-label="Spoken" />
+            <Mic className="mr-1.5 inline size-3 align-[-1px] text-accent/80" aria-label="Spoken" />
           )}
           {turn.content}
         </p>
@@ -621,10 +661,11 @@ function TurnView({
   }
 
   return (
-    <div className="space-y-2">
+    <AssistantRow>
+    <div className="min-w-0 space-y-2.5">
       {turn.context?.as_of && (
-        <p className="text-[11px] text-amber-300/90">
-          From the record as of {new Date(turn.context.as_of).toLocaleDateString()}.
+        <p className="inline-flex items-center gap-1.5 rounded-full bg-amber-400/10 px-2.5 py-0.5 text-[11px] text-amber-200">
+          From the record as of {new Date(turn.context.as_of).toLocaleDateString()}
         </p>
       )}
       {turn.context?.disagreements.map((group, index) => (
@@ -638,13 +679,14 @@ function TurnView({
       ))}
 
       {turn.context && turn.context.memories.length > 0 && (
-        <details className="group rounded-md border border-border bg-surface/60 px-2.5 py-1.5">
-          <summary className="cursor-pointer list-none text-[11px] text-muted select-none">
+        <details className="group">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-[11px] text-muted transition-colors select-none hover:text-foreground">
+            <Layers className="size-3" />
             Standing on {turn.context.memories.length}{' '}
             {turn.context.memories.length === 1 ? 'memory' : 'memories'}
-            <span className="ml-1 text-muted/60 group-open:hidden">— show</span>
+            <ChevronDown className="size-3 transition-transform group-open:rotate-180" />
           </summary>
-          <ul className="mt-1.5 space-y-1">
+          <ul className="mt-2 space-y-1 rounded-xl bg-surface/60 p-1.5">
             {turn.context.memories.map((item, index) => {
               const cited = turn.done?.cited_ids.includes(item.memory.id)
               return (
@@ -653,7 +695,7 @@ function TurnView({
                     type="button"
                     onClick={() => onSelectMemory(item.memory.id)}
                     className={cn(
-                      'w-full rounded px-1.5 py-1 text-left text-[11px] leading-relaxed transition-colors hover:bg-surface-raised',
+                      'w-full rounded-lg px-2 py-1.5 text-left text-xs leading-relaxed transition-colors hover:bg-surface-raised',
                       cited ? 'text-foreground' : 'text-muted',
                     )}
                   >
@@ -683,14 +725,20 @@ function TurnView({
         <Markdown>{turn.content}</Markdown>
       ) : (
         !turn.error && (
-          <p className="flex items-center gap-1.5 text-xs text-muted">
-            <Loader2 className="size-3 animate-spin" /> thinking…
+          <p className="flex h-6 items-center gap-1" aria-label="thinking">
+            {[0, 1, 2].map((dot) => (
+              <span
+                key={dot}
+                className="size-1.5 animate-bounce rounded-full bg-accent/70"
+                style={{ animationDelay: `${dot * 0.15}s` }}
+              />
+            ))}
           </p>
         )
       )}
 
       {turn.error && (
-        <p className="rounded-md border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-xs text-danger">
+        <p className="rounded-xl bg-danger/10 px-3 py-2 text-xs text-danger ring-1 ring-danger/20">
           {turn.error}
         </p>
       )}
@@ -712,6 +760,39 @@ function TurnView({
         />
       )}
     </div>
+    </AssistantRow>
+  )
+}
+
+/** The assistant's side of the conversation: its mark, then what it said. */
+function AssistantRow({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3">
+      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-accent/10 ring-1 ring-accent/25">
+        <BrandMark className="size-4 text-accent" />
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
+}
+
+/** A dismissible error above the composer. */
+function Notice({ children, onDismiss }: { children: React.ReactNode; onDismiss: () => void }) {
+  return (
+    <p
+      role="alert"
+      className="mb-2 flex items-start gap-2 rounded-xl bg-danger/10 px-3 py-2 text-xs text-danger ring-1 ring-danger/20"
+    >
+      <span className="flex-1 leading-relaxed">{children}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="text-danger/70 hover:text-danger"
+      >
+        <X className="size-3.5" />
+      </button>
+    </p>
   )
 }
 
@@ -724,7 +805,7 @@ function ReadAloud({ reader, id, text }: { reader: Reader; id: string; text: str
       aria-label={speaking ? 'Stop reading aloud' : 'Read aloud'}
       aria-pressed={speaking}
       className={cn(
-        'ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors',
+        'ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] transition-colors',
         speaking ? 'text-accent' : 'text-muted/70 hover:text-foreground',
       )}
     >
@@ -799,7 +880,7 @@ function DisagreementBanner({
 
   if (outcome) {
     return (
-      <p className="flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-2.5 py-1.5 text-[11px] text-accent">
+      <p className="flex items-center gap-1.5 rounded-xl bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200 ring-1 ring-emerald-400/20">
         <Check className="size-3.5" />
         {outcome} Recorded as a decision the resolver learns from.
       </p>
@@ -807,19 +888,19 @@ function DisagreementBanner({
   }
 
   return (
-    <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
-      <p className="flex items-center gap-1.5 text-[11px] font-medium text-amber-300">
+    <div className="rounded-xl bg-amber-400/[0.07] p-3 ring-1 ring-amber-400/25">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-amber-200">
         <AlertTriangle className="size-3.5" />
         {crossGraph ? 'Your note disagrees with the team — which holds?' : 'The record disagrees with itself — which holds?'}
         {group.subject && <Badge className="border-amber-500/30 bg-transparent text-amber-300/90">{group.subject}</Badge>}
       </p>
-      <ul className="mt-1.5 space-y-1">
+      <ul className="mt-2 space-y-1">
         {group.memories.map((memory) => (
-          <li key={memory.id} className="flex items-start gap-1.5">
+          <li key={memory.id} className="flex items-start gap-1.5 rounded-lg bg-background/40 p-1">
             <button
               type="button"
               onClick={() => onSelectMemory(memory.id)}
-              className="flex-1 rounded px-1 py-0.5 text-left text-[11px] leading-relaxed text-amber-100/90 transition-colors hover:bg-amber-500/10"
+              className="flex-1 rounded-md px-1.5 py-0.5 text-left text-xs leading-relaxed text-amber-50/90 transition-colors hover:bg-amber-500/10"
             >
               {crossGraph && (
                 <span className="mr-1 text-amber-200/60">
@@ -837,7 +918,7 @@ function DisagreementBanner({
               variant="ghost"
               disabled={pending !== null}
               onClick={() => void decide(memory, false)}
-              className="h-6 shrink-0 px-2 text-[11px] text-amber-200 hover:text-amber-100"
+              className="h-7 shrink-0 px-2 text-xs text-amber-200 hover:bg-amber-400/15 hover:text-amber-50"
             >
               {pending === memory.id ? <Loader2 className="animate-spin" /> : <Check />}
               This holds
@@ -852,7 +933,7 @@ function DisagreementBanner({
           variant="ghost"
           disabled={pending !== null}
           onClick={() => void decide(group.memories[0], true)}
-          className="h-6 px-2 text-[11px] text-amber-200 hover:text-amber-100"
+          className="h-7 px-2 text-xs text-amber-200 hover:bg-amber-400/15 hover:text-amber-50"
         >
           {pending === 'both' ? <Loader2 className="animate-spin" /> : <Scale />}
           Both are true

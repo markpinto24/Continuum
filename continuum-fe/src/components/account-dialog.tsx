@@ -47,40 +47,44 @@ export function AccountDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogTitle>Account</DialogTitle>
+      <DialogContent className="h-[min(640px,85vh)] max-w-3xl">
+        <DialogTitle>Settings</DialogTitle>
         <DialogDescription>
-          Signed in as {me.email}. Memory owner id <code className="text-accent">{me.user_id}</code>.
+          {me.email} · memory owner <code className="text-accent">{me.user_id}</code>
         </DialogDescription>
 
-        <Tabs defaultValue="voice" className="flex min-h-0 flex-1 flex-col">
-          <div className="px-4 pt-3">
-            <TabsList className="w-full">
-              <TabsTrigger value="voice">
+        <Tabs
+          defaultValue="voice"
+          orientation="vertical"
+          className="mt-4 flex min-h-0 flex-1 border-t border-border/60"
+        >
+          <div className="w-44 shrink-0 border-r border-border/60 p-2">
+            <TabsList className="h-auto w-full flex-col items-stretch gap-0.5 bg-transparent p-0">
+              <TabsTrigger className="h-9 flex-none justify-start px-3" value="voice">
                 <Volume2 className="size-3.5" />
                 Voice
               </TabsTrigger>
-              <TabsTrigger value="keys">
+              <TabsTrigger className="h-9 flex-none justify-start px-3" value="keys">
                 <KeyRound className="size-3.5" />
                 API keys
               </TabsTrigger>
-              <TabsTrigger value="password">
+              <TabsTrigger className="h-9 flex-none justify-start px-3" value="password">
                 <Lock className="size-3.5" />
                 Password
               </TabsTrigger>
-              <TabsTrigger value="data">
+              <TabsTrigger className="h-9 flex-none justify-start px-3" value="data">
                 <Database className="size-3.5" />
                 Data
               </TabsTrigger>
               {me.is_admin && (
-                <TabsTrigger value="users">
+                <TabsTrigger className="h-9 flex-none justify-start px-3" value="users">
                   <Users className="size-3.5" />
                   Users
                 </TabsTrigger>
               )}
             </TabsList>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <div className="scrollbar-slim min-h-0 flex-1 overflow-y-auto px-6 py-5">
             <TabsContent value="voice">
               <VoiceSettingsPanel settings={voiceSettings} onSaved={voiceSettings.refresh} />
             </TabsContent>

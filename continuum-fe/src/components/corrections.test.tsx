@@ -92,7 +92,8 @@ describe('correcting a memory', () => {
     api.memory.mockResolvedValue(makeMemory({ kind: 'summary', derived_from: ['aaaaaaaa1', 'bbbbbbbb2'] }))
     detail()
     expect(await screen.findByText(/Written from 2 memories/)).toBeDefined()
-    expect(screen.getByText('aaaaaaaa…')).toBeDefined()
+    // Each source is listed by what it says (the mock answers every id alike).
+    await waitFor(() => expect(screen.getAllByText('Atlas runs on Postgres').length).toBe(3))
     expect(screen.queryByRole('button', { name: /still true/i })).toBeNull()
   })
 })

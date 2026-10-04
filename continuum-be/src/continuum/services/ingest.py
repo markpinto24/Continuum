@@ -32,7 +32,7 @@ from continuum.models.schemas import IngestRequest, IngestResponse, ResolutionRe
 from continuum.services.extraction import FactExtractor
 from continuum.services.memory_store import MemoryStore
 from continuum.services.resolution import Resolution, ResolutionService, Verdict
-from continuum.services.subjects import canonical_subject
+from continuum.services.subjects import canonical_subject, infer_subject
 
 log = get_logger(__name__)
 
@@ -94,17 +94,20 @@ class IngestService:
         # in this batch count as known too, so one note cannot introduce two
         # spellings of the same thing.
         known = await self.memories.distinct_subjects(user_id=user_id)
-        renamed = 0
+        renamed = inferred = 0
         for fact in facts:
+            if fact.subject is None:
+                fact.subject = infer_subject(fact.content, known)
+                inferred += fact.subject is not None
             canonical = canonical_subject(fact.subject, known)
             if canonical != fact.subject:
                 renamed += 1
                 fact.subject = canonical
             if fact.subject:
                 known.add(fact.subject)
-        if renamed:
-            # A count only: subject slugs are user data.
-            log.info("ingest.subjects_canonicalised", count=renamed)
+        if renamed or inferred:
+            # Counts only: subject slugs are user data.
+            log.info("ingest.subjects_canonicalised", count=renamed, inferred=inferred)
 
         candidates = [
             fact.to_memory(
@@ -170,7 +173,9 @@ class IngestService:
 
             if resolution.verdict is Verdict.CONFLICT and resolution.target:
                 memory.escalations.append(
-                    _escalation(resolution, neighbours, self.settings.auto_supersede_confidence)
+                    escalation_record(
+                        resolution, neighbours, self.settings.auto_supersede_confidence
+                    )
                 )
             await self._apply(memory, vector, resolution)
             created.append(memory)
@@ -231,7 +236,9 @@ class IngestService:
         target = resolution.target
         if resolution.verdict not in (Verdict.SUPERSEDES, Verdict.CONFLICT) or target is None:
             return None
-        escalation = _escalation(resolution, neighbours, self.settings.auto_supersede_confidence)
+        escalation = escalation_record(
+            resolution, neighbours, self.settings.auto_supersede_confidence
+        )
         # A policy escalation, like the role rule: across graphs nothing is ever
         # auto-applied, so no gate decided it and it is no evidence about the gate.
         escalation = escalation.model_copy(update={"forced": True})
@@ -276,7 +283,7 @@ class IngestService:
         await self.memories.write_with_vector(memory, vector)
 
 
-def _escalation(
+def escalation_record(
     resolution: Resolution, neighbours: list[tuple[Memory, float]], gate: float
 ) -> Escalation:
     """What the resolver thought, kept so a person's later answer can grade it."""

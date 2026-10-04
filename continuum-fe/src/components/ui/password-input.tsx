@@ -21,7 +21,7 @@ export function PasswordInput({ className, ...props }: Omit<ComponentProps<'inpu
         {...props}
         type={visible ? 'text' : 'password'}
         // Room for the button, and no second eye from Edge's built-in reveal.
-        className={cn('pr-9 [&::-ms-reveal]:hidden', className)}
+        className={cn('pr-10 [&::-ms-reveal]:hidden', className)}
       />
       <button
         type="button"
@@ -30,7 +30,7 @@ export function PasswordInput({ className, ...props }: Omit<ComponentProps<'inpu
         aria-pressed={visible}
         disabled={props.disabled}
         className={cn(
-          'absolute inset-y-0 right-0 flex w-8 items-center justify-center rounded-r-md',
+          'absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-lg',
           'text-muted transition-colors hover:text-foreground',
           'outline-none focus-visible:ring-2 focus-visible:ring-accent/50',
           'disabled:pointer-events-none disabled:opacity-50',

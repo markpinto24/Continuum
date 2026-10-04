@@ -112,6 +112,9 @@ async def resolve_conflict(
         return ConflictResolutionResponse(winner=winner, losers=losers, action="kept_both")
 
     for loser in losers:
+        # Both sides of the dispute are settled, not only the winner's: a loser
+        # left holding the edge drew a stale dispute over its supersede arrow.
+        loser.clear_conflict_with(winner.id)
         loser.mark_superseded_by(winner.id)
         await memories.save(loser)
         winner.mark_supersedes(loser.id)

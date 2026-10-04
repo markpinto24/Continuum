@@ -90,7 +90,7 @@ export function VoiceSettingsPanel({
       {groups.map(([accent, voices]) => (
         <div key={accent}>
           <p className="mb-1 text-[11px] font-medium text-muted">{accent}</p>
-          <ul className="flex flex-col gap-1">
+          <ul className="grid grid-cols-1 gap-1.5 md:grid-cols-2">
             {voices.map((option) => {
               const selected = option.id === chosen
               return (

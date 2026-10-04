@@ -417,3 +417,23 @@ async def test_an_escalation_records_what_the_resolver_thought(store, settings):
     assert escalation.gate == settings.auto_supersede_confidence
     assert escalation.similarity is not None and escalation.similarity > 0.7
     assert (await memories.get(first.id)).escalations == []  # recorded on the incoming side
+
+
+async def test_a_fact_without_a_subject_is_given_the_one_it_names(store, settings):
+    """Live: the extractor left "Atlas is using MongoDB" without a subject, so it was
+    never judged against the Atlas decision it contradicts."""
+    llm = StubLLM(
+        [
+            [{"content": "Chose Postgres for Atlas", "category": "decision",
+              "subject": "atlas-project"}],
+            [{"content": "Atlas is using MongoDB", "category": "fact", "subject": None}],
+        ],
+        judgement={"relation": "conflict", "confidence": 0.9, "reason": "which db?"},
+    )
+    service = build_service(store, llm, settings)
+    first = (await service.ingest(IngestRequest(user_id="mark", text="a"))).created[0]
+    second = await service.ingest(IngestRequest(user_id="mark", text="b"))
+
+    assert second.created[0].subject == "atlas-project"
+    assert llm.judge_calls == 1
+    assert second.conflicts_raised == [first.id]

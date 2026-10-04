@@ -33,7 +33,12 @@ from typing import NamedTuple, TypeVar
 from continuum.clients.llm import LLMClient, TokenLogprob
 from continuum.config import Settings, get_settings
 from continuum.core.logger import get_logger
-from continuum.models.memory import ExtractedFact, Memory, MemoryCategory
+from continuum.models.memory import (
+    ExtractedFact,
+    Memory,
+    MemoryCategory,
+    comparable_categories,
+)
 from continuum.services.memory_store import MemoryStore
 
 log = get_logger(__name__)
@@ -340,20 +345,31 @@ class ResolutionService:
         """Cheap filters that decide most cases without an LLM call.
 
         A memory is only worth judging if it could plausibly be replaced by the
-        new fact: same category, mutable, and — when both name a subject — the
-        same subject.
+        new fact: a comparable category (`comparable_categories`), mutable, and —
+        when both name a subject — the same subject.
+
+        Only one candidate is judged, so which one matters: a memory naming the
+        same subject is preferred over a closer-worded one with no subject at
+        all. Otherwise "Atlas is using MongoDB" is judged against whatever
+        subject-less memory happens to score highest, and never against the
+        Atlas decision it actually contradicts.
         """
+        eligible: list[Memory] = []
         for memory, score in neighbours:
             if score < self.settings.conflict_similarity_threshold:
                 continue
-            if memory.is_immutable or fact.category in {MemoryCategory.EVENT}:
-                continue  # history is append-only
-            if memory.category is not fact.category:
-                continue  # a preference never replaces a decision
+            if not comparable_categories(fact.category, memory.category):
+                continue  # history is append-only; a preference never replaces a decision
             if fact.subject and memory.subject and fact.subject != memory.subject:
                 continue  # same wording, different entity
-            return memory
-        return None
+            eligible.append(memory)
+        if not eligible:
+            return None
+        if fact.subject:
+            for memory in eligible:
+                if memory.subject == fact.subject:
+                    return memory
+        return eligible[0]
 
     # --- The judge ---------------------------------------------------------
 

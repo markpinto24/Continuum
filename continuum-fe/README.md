@@ -35,6 +35,10 @@ be the UI deciding the very thing the backend escalated to you.
 
 ## What it does
 
+Dark, calm, minimal: Inter for text (bundled — no font requests leave the
+machine), a cyan accent for the interface, and the graph's own status colours
+for the data.
+
 - **Belief graph** off `GET /memories/graph`. Click a node to select it; its
   one-hop neighbourhood stays lit and the rest of the scene dims.
 - **Memory detail** — the verbatim `source_excerpt` the belief was extracted
@@ -65,7 +69,9 @@ be the UI deciding the very thing the backend escalated to you.
   Needs `localhost` or HTTPS — browsers only offer the microphone to secure pages.
 - **Read an answer aloud** with the button under it, in your server's local
   neural voice (the browser's own voice is only a fallback).
-- **Lumen** (the waveform button): talk hands-free. Speak, pause for two
+- **Lumen** (the glowing button in the composer): a full-screen, JARVIS-style
+  heads-up display — rings, a voice-reactive waveform and core, live captions.
+  Talk hands-free. Speak, pause for two
   seconds, and hear the answer as it is written. Say “stop, Lumen” to interrupt
   its mid-answer, and “thank you, Lumen” to finish — the whole conversation is
   then in the chat. Headphones make interrupting its instant.

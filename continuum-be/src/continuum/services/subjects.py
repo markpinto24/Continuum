@@ -17,13 +17,17 @@ are not equally bad:
   * **Splitting** one subject into two silently switches off contradiction
     detection between them. Nothing is escalated; the stale belief just stays.
 
-Null subjects are left alone. With no subject on either side the filter does not
-apply at all, so the pair is judged on category and similarity like any other —
-guessing a subject for it could only ever narrow what gets compared.
+A null subject is filled from the words (`infer_subject`) when they name exactly
+one subject the graph already knows. The extractor leaves the subject out often
+— 8 of one user's 12 memories — and a subject-less memory was never preferred
+as the candidate for its real subject: "Atlas is using MongoDB" was judged
+against an unrelated subject-less memory instead of the Atlas decision. Only an
+unambiguous match counts; naming two known subjects, or none, leaves it null.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 # Tokens that describe the *kind* of thing rather than which thing it is.
@@ -73,6 +77,47 @@ def canonical_subject(candidate: str | None, known: Iterable[str]) -> str | None
     if not matches:
         return candidate
     return max(matches)[1]
+
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+# What a model writes when it means "no subject". Stored as a slug, "null" made
+# every subject-less memory one entity — found live on Acme's budget.
+PLACEHOLDER_SUBJECTS = frozenset(
+    {"null", "none", "nil", "n-a", "na", "unknown", "general", "misc", "-", "--", "—"}
+)
+
+
+def clean_subject(value: str | None) -> str | None:
+    """A subject slug, or None when it is empty or a placeholder for nothing."""
+    if not value or value.strip().lower() in PLACEHOLDER_SUBJECTS:
+        return None
+    return value
+
+
+def infer_subject(content: str, known: Iterable[str]) -> str | None:
+    """The one known subject `content` names, or None.
+
+    A subject is named when every meaningful token of its slug appears as a word
+    ("atlas-project" by "Atlas"). Single short tokens ("ui", "db") are too common
+    to count. Two different subjects named means it is about both, or about
+    neither: no guess.
+    """
+    words = set(_WORD.findall(content.lower()))
+    named = set()
+    for slug in known:
+        core = _core(slug)
+        if len(core) == 1 and len(next(iter(core))) < 3:
+            continue
+        if core and core <= words:
+            named.add(slug)
+    # Drop names contained in a longer one ("sara" inside "sara-chen"), then
+    # spellings of one entity ("atlas", "atlas-project") count once.
+    widest = [s for s in named if not any(_core(s) < _core(o) for o in named)]
+    if len({_core(s) for s in widest}) != 1:
+        return None
+    # Same tie-break as canonical_subject: the shorter slug.
+    return min(widest, key=lambda s: (len(s), s))
 
 
 def _core(slug: str) -> frozenset[str]:

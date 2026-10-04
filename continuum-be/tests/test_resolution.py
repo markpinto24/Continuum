@@ -600,3 +600,55 @@ def test_non_role_facts_are_not_treated_as_roles(old, new):
     assert not is_role_statement(
         fact(new, MemoryCategory.FACT, "x"), memory(old, MemoryCategory.FACT, "x")
     )
+
+
+# --- Statements filed under different categories ---------------------------
+
+
+async def test_a_fact_contradicting_a_decision_reaches_the_judge(settings):
+    """Found live: "Atlas is using MongoDB" (fact) vs "chose Postgres" (decision)
+    was waved through as NEW and the old choice stayed active."""
+    judge = ScriptedJudge("conflict", 0.9)
+    result = await service(judge, settings).resolve(
+        fact("Atlas is using MongoDB", MemoryCategory.FACT, "atlas"),
+        [(memory("Chose Postgres for Atlas", MemoryCategory.DECISION, "atlas"), 0.8)],
+    )
+    assert judge.calls == 1 and result.verdict is Verdict.CONFLICT
+
+
+@pytest.mark.parametrize(
+    ("incoming", "existing"),
+    [
+        (MemoryCategory.PREFERENCE, MemoryCategory.DECISION),  # a taste never replaces a choice
+        (MemoryCategory.CONSTRAINT, MemoryCategory.PREFERENCE),
+        (MemoryCategory.FACT, MemoryCategory.EVENT),  # history is append-only
+        (MemoryCategory.EVENT, MemoryCategory.FACT),
+    ],
+)
+async def test_categories_outside_the_family_stay_free(settings, incoming, existing):
+    judge = ScriptedJudge("supersedes", 0.99)
+    result = await service(judge, settings).resolve(
+        fact("Acme budget is 8k", incoming, "acme"),
+        [(memory("Acme budget is 5k", existing, "acme"), 0.85)],
+    )
+    assert judge.calls == 0 and result.verdict is Verdict.NEW
+
+
+async def test_the_same_subject_is_judged_before_a_closer_subjectless_memory(settings):
+    judge = ScriptedJudge("conflict", 0.9)
+    atlas = memory("Chose Postgres for Atlas", MemoryCategory.DECISION, "atlas")
+    unrelated = memory("The user's name changed to Mark II", MemoryCategory.FACT, None)
+    result = await service(judge, settings).resolve(
+        fact("Atlas is using MongoDB", MemoryCategory.FACT, "atlas"),
+        [(unrelated, 0.90), (atlas, 0.80)],
+    )
+    assert result.target is atlas
+
+
+async def test_a_different_named_subject_is_still_never_judged(settings):
+    judge = ScriptedJudge("supersedes", 0.99)
+    result = await service(judge, settings).resolve(
+        fact("Orion uses DynamoDB", MemoryCategory.FACT, "orion"),
+        [(memory("Chose Postgres for Atlas", MemoryCategory.DECISION, "atlas"), 0.9)],
+    )
+    assert judge.calls == 0 and result.verdict is Verdict.NEW

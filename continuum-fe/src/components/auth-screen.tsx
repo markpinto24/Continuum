@@ -1,8 +1,9 @@
-import { KeyRound, LogIn } from 'lucide-react'
+import { ArrowRight, Loader2 } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 
+import { BrandMark } from '@/components/brand'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
@@ -75,7 +76,7 @@ export function AuthScreen({
   if (setup && !webSetupAllowed) {
     return (
       <Shell>
-        <CardHeader>
+        <CardHeader className="pb-6 text-center">
           <CardTitle>No account yet</CardTitle>
           <CardDescription>
             Web setup is turned off on this instance. Set <code>ADMIN_EMAIL</code> and{' '}
@@ -89,20 +90,17 @@ export function AuthScreen({
 
   return (
     <Shell>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {setup ? <KeyRound className="size-4 text-accent" /> : <LogIn className="size-4 text-accent" />}
-          {setup ? 'Create the admin account' : 'Sign in to Continuum'}
-        </CardTitle>
+      <CardHeader className="items-center text-center">
+        <CardTitle>{setup ? 'Create the admin account' : 'Sign in to Continuum'}</CardTitle>
         <CardDescription>
           {setup
-            ? 'This instance has no accounts yet. The first one you create is the admin, and can add everyone else.'
-            : 'Your memories are private to your account. Agents connect with API keys you create after signing in.'}
+            ? 'The first account is the admin, and can add everyone else.'
+            : 'Your work memory — what you decided, and why it changed.'}
         </CardDescription>
       </CardHeader>
 
       <CardContent>
-        <form onSubmit={submit} className="flex flex-col gap-3">
+        <form onSubmit={submit} className="flex flex-col gap-4">
           <Field label="Email">
             <Input
               type="email"
@@ -133,7 +131,7 @@ export function AuthScreen({
               </Field>
               <Field
                 label="Keep memories stored under (optional)"
-                hint="If you used Continuum before sign-in existed, enter the user id you used — your existing graph becomes this account's. Leave empty to start fresh."
+                hint="Used Continuum before accounts existed? Enter that user id to keep your graph. Otherwise leave it empty."
               >
                 <Input
                   value={userId}
@@ -145,13 +143,23 @@ export function AuthScreen({
           )}
 
           {error && (
-            <p role="alert" className="text-xs leading-relaxed text-danger">
+            <p
+              role="alert"
+              className="rounded-lg bg-danger/10 px-3 py-2 text-xs leading-relaxed text-danger"
+            >
               {error}
             </p>
           )}
 
-          <Button type="submit" disabled={busy || (setup && !feedback.ready)} className="mt-1">
-            {busy ? 'Working…' : setup ? 'Create account' : 'Sign in'}
+          <Button
+            type="submit"
+            size="lg"
+            disabled={busy || (setup && !feedback.ready)}
+            className="group mt-1 w-full"
+          >
+            {busy && <Loader2 className="animate-spin" />}
+            {setup ? 'Create account' : 'Sign in'}
+            {!busy && <ArrowRight className="transition-transform group-hover:translate-x-0.5" />}
           </Button>
         </form>
       </CardContent>
@@ -159,10 +167,66 @@ export function AuthScreen({
   )
 }
 
+/** The sign-in page: one calm card over a slow constellation of beliefs. */
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full items-center justify-center px-4">
-      <Card className="w-full max-w-sm">{children}</Card>
+    <div className="relative flex h-full items-center justify-center overflow-hidden px-4">
+      <Backdrop />
+      <div className="relative w-full max-w-[400px] animate-fade-up">
+        <div className="mb-6 flex flex-col items-center gap-3">
+          <span className="relative flex size-14 items-center justify-center rounded-2xl bg-accent/10 ring-1 ring-accent/25">
+            <span className="absolute inset-0 rounded-2xl bg-accent/20 blur-xl" />
+            <BrandMark className="relative size-8 text-accent" />
+          </span>
+          <span className="text-sm font-medium tracking-[0.2em] text-muted uppercase">
+            Continuum
+          </span>
+        </div>
+        <div className="glass rounded-2xl shadow-2xl shadow-black/40">{children}</div>
+        <p className="mt-5 text-center text-xs text-muted/70">
+          Runs on your own machine. Nothing leaves it.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+const NODES = [
+  [12, 18], [28, 72], [44, 30], [63, 82], [78, 24], [88, 60], [20, 46], [54, 56], [70, 44],
+] as const
+const LINKS = [
+  [0, 2], [2, 4], [4, 8], [8, 5], [1, 6], [6, 2], [7, 3], [7, 8], [6, 7],
+] as const
+
+function Backdrop() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0">
+      <div className="absolute -top-1/3 left-1/2 size-[900px] -translate-x-1/2 rounded-full bg-accent/[0.07] blur-3xl" />
+      <div className="absolute -bottom-1/2 -left-1/4 size-[700px] rounded-full bg-emerald-500/[0.05] blur-3xl" />
+      {/* Lines stretch with the page; the dots are HTML so they stay round. */}
+      <svg className="absolute inset-0 size-full opacity-60" preserveAspectRatio="none" viewBox="0 0 100 100">
+        {LINKS.map(([a, b]) => (
+          <line
+            key={`${a}-${b}`}
+            x1={NODES[a][0]}
+            y1={NODES[a][1]}
+            x2={NODES[b][0]}
+            y2={NODES[b][1]}
+            stroke="var(--color-accent)"
+            strokeOpacity="0.14"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </svg>
+      {NODES.map(([x, y], index) => (
+        <span
+          key={index}
+          className="hud-breathe absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/70 shadow-[0_0_12px_var(--color-accent)]"
+          style={{ left: `${x}%`, top: `${y}%`, animationDelay: `${index * 0.37}s` }}
+        />
+      ))}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_40%,var(--color-background)_85%)]" />
     </div>
   )
 }

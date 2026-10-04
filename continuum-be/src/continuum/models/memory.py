@@ -45,6 +45,32 @@ class MemoryStatus(StrEnum):
 # Categories that represent immutable history and must never be superseded.
 IMMUTABLE_CATEGORIES: frozenset[MemoryCategory] = frozenset({MemoryCategory.EVENT})
 
+# Categories that state what is true of the work, and so can contradict each
+# other whichever one the extractor chose. It files the same kind of statement
+# under different categories ("Atlas is using MongoDB" as a fact, "chose Postgres
+# for Atlas" as a decision; ownership as fact or person), and a strict
+# same-category filter waved those contradictions through as NEW without asking.
+# Comparing within the family costs a judge call between memories about the same
+# subject; splitting it silently switches contradiction detection off.
+# PREFERENCE stays on its own (a taste does not replace a decision), and EVENT
+# is never compared at all.
+STATEMENT_CATEGORIES: frozenset[MemoryCategory] = frozenset(
+    {
+        MemoryCategory.DECISION,
+        MemoryCategory.FACT,
+        MemoryCategory.CONSTRAINT,
+        MemoryCategory.PERSON,
+    }
+)
+
+
+def comparable_categories(a: MemoryCategory, b: MemoryCategory) -> bool:
+    """Could a memory of category `b` be contradicted by a new one of `a`?"""
+    if a in IMMUTABLE_CATEGORIES or b in IMMUTABLE_CATEGORIES:
+        return False
+    return a is b or (a in STATEMENT_CATEGORIES and b in STATEMENT_CATEGORIES)
+
+
 # Statuses that participate in retrieval for chat context.
 #
 # CONTRADICTED is deliberately retrievable. When two beliefs are in unresolved

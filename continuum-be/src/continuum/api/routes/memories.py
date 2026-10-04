@@ -207,14 +207,32 @@ async def memory_graph(
         for m in items
     ]
 
+    by_id = {m.id: m for m in items}
     edges: list[GraphEdge] = []
+    replaced: set[tuple[str, str]] = set()
+    for m in items:
+        # Read from both ends: a memory shared to the team records its new home
+        # only on itself (superseded_by), and that link was never drawn.
+        pairs = [(m.id, old_id) for old_id in m.supersedes]
+        if m.superseded_by:
+            pairs.append((m.superseded_by, m.id))
+        for new_id, old_id in pairs:
+            if new_id in known and old_id in known and (new_id, old_id) not in replaced:
+                replaced.add((new_id, old_id))
+                edges.append(GraphEdge(source=new_id, target=old_id, kind="supersedes"))
+
     seen_conflicts: set[tuple[str, str]] = set()
     for m in items:
-        for old_id in m.supersedes:
-            if old_id in known:
-                edges.append(GraphEdge(source=m.id, target=old_id, kind="supersedes"))
         for other_id in m.conflicts_with:
-            if other_id not in known:
+            other = by_id.get(other_id)
+            # A dispute is drawn only while both sides are still disputed. An
+            # edge left behind on a memory that has since been superseded is
+            # history, not an open question — and it hid under the arrow.
+            if (
+                other is None
+                or m.status is not MemoryStatus.CONTRADICTED
+                or other.status is not MemoryStatus.CONTRADICTED
+            ):
                 continue
             key = tuple(sorted((m.id, other_id)))
             if key in seen_conflicts:

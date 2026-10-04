@@ -871,3 +871,106 @@
     subject: deploy-pipeline
   expect: retire
   tags: [found-in-use, reversal, role-as-fact]
+
+# --- Held-out: statements filed under different categories (written and
+# labelled before the category-family change ran; see CLAUDE.md Phase 13) ---
+
+- id: family-fact-states-change-of-decision
+  why: >
+    Found live: the extractor filed the new statement as a fact and the old one
+    as a decision, so the category filter waved a stated change through as NEW
+    and the old database choice stayed active. "Now ... instead of" states the
+    change, so retiring is right.
+  existing:
+    content: Chose Postgres over Mongo for Atlas because reporting needs joins
+    category: decision
+    subject: atlas
+    age_days: 30
+  incoming:
+    content: Atlas now uses MongoDB instead of Postgres
+    category: fact
+    subject: atlas
+  expect: retire
+  tags: [held-out-family, cross-category]
+
+- id: family-fact-contradicts-decision-without-change
+  why: >
+    The live wording exactly: a bare present-tense claim against a recorded
+    decision. It may be a reversal or may be about another part of Atlas (the
+    event store moved to Mongo earlier). Unclear, so a person decides.
+  existing:
+    content: Chose Postgres over Mongo for Atlas because reporting needs joins
+    category: decision
+    subject: atlas
+    age_days: 30
+  incoming:
+    content: Atlas is using MongoDB
+    category: fact
+    subject: atlas
+  expect: escalate
+  tags: [held-out-family, cross-category]
+
+- id: family-constraint-replaced-by-fact
+  why: >
+    A budget cap filed as a constraint, raised in a later statement the extractor
+    filed as a fact. A stated change to the same number.
+  existing:
+    content: The Atlas budget is capped at 5k per month
+    category: constraint
+    subject: atlas
+    age_days: 40
+  incoming:
+    content: The Atlas budget was raised to 8k per month
+    category: fact
+    subject: atlas
+  expect: retire
+  tags: [held-out-family, cross-category]
+
+- id: family-unrelated-fact-about-decided-subject
+  why: >
+    Same subject, different categories, nothing in common: a fact about the
+    dashboard's size does not touch the framework decision. Now judged instead of
+    free, so this measures what the change costs when the judge is right.
+  existing:
+    content: Chose React for the Atlas dashboard
+    category: decision
+    subject: atlas
+    age_days: 20
+  incoming:
+    content: The Atlas dashboard has twelve pages
+    category: fact
+    subject: atlas
+  expect: store
+  tags: [held-out-family, cross-category, cost-of-change]
+
+- id: family-person-and-fact-different-roles
+  why: >
+    Labelled against the fix. Two people with two different roles, filed under
+    different categories. Before the change this was free; now it reaches the
+    judge, which may call it a conflict (over-escalation) — the cost made visible.
+  existing:
+    content: Sara leads the Atlas data team
+    category: person
+    subject: atlas
+    age_days: 15
+  incoming:
+    content: Raj owns Atlas billing
+    category: fact
+    subject: atlas
+  expect: store
+  tags: [held-out-family, cross-category, cost-of-change]
+
+- id: family-constraint-and-decision-independent
+  why: >
+    A spending limit and a deployment decision about the same project. Both hold.
+  existing:
+    content: Atlas deploys on Kubernetes
+    category: decision
+    subject: atlas
+    age_days: 25
+  incoming:
+    content: Atlas must stay under 5k per month in cloud spend
+    category: constraint
+    subject: atlas
+  expect: store
+  tags: [held-out-family, cross-category, cost-of-change]

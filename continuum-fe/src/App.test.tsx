@@ -193,3 +193,44 @@ describe('App', () => {
     expect(screen.getByText(/What are you working on\?/)).toBeDefined()
   })
 })
+
+describe('the side panel', () => {
+  beforeEach(() => localStorage.removeItem('continuum.panel_open'))
+
+  it('collapses to a rail and reopens on the tab you pick, remembering the choice', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide panel' })).toBeDefined())
+
+    await userEvent.click(screen.getByRole('button', { name: 'Hide panel' }))
+    expect(screen.getByRole('navigation', { name: 'Open the panel' })).toBeDefined()
+    expect(localStorage.getItem('continuum.panel_open')).toBe('0')
+
+    expect(screen.getByRole('button', { name: 'Open inbox' })).toBeDefined() // with its badge
+    await userEvent.click(screen.getByRole('button', { name: 'Open memory' }))
+    expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull()
+    expect(screen.getByRole('tab', { name: /Memory/ }).getAttribute('data-state')).toBe('active')
+  })
+
+  it('offers Ask Lumen on the rail, and opens the chat to explain when it cannot start', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide panel' })).toBeDefined())
+    await userEvent.click(screen.getByRole('button', { name: 'Hide panel' }))
+
+    // jsdom has no microphone, so Lumen refuses to start — and says why in the chat.
+    await userEvent.click(screen.getByRole('button', { name: 'Ask Lumen' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull(),
+    )
+    expect(screen.getByRole('tab', { name: /Chat/ }).getAttribute('data-state')).toBe('active')
+    expect(screen.getByRole('alert').textContent).toMatch(/Lumen needs a secure page|cannot record/)
+  })
+
+  it('toggles with Ctrl+\\', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide panel' })).toBeDefined())
+    await userEvent.keyboard('{Control>}\\{/Control}')
+    expect(screen.getByRole('navigation', { name: 'Open the panel' })).toBeDefined()
+    await userEvent.keyboard('{Control>}\\{/Control}')
+    expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull()
+  })
+})

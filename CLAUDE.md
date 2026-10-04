@@ -94,6 +94,7 @@ not let us do something.
 Continuum/                            ← git root
 ├── README.md                         the project story; links to each side
 ├── CLAUDE.md                         this file — the engineering brief
+├── requirements.md                   planned: Personal (life) mode beside Workspace
 ├── .env.example                      template for continuum-be/.env (uv run)
 ├── .gitignore                        covers both projects
 ├── .github/workflows/
@@ -112,7 +113,8 @@ Continuum/                            ← git root
 │   ├── scripts/
 │   │   ├── seed_demo.py              end-to-end demo incl. a reversed decision
 │   │   ├── run_eval.py               Phase 5 harness: record once, sweep free
-│   │   └── backup.py · restore.py    Qdrant snapshots + pg_dump, and back
+│   │   ├── backup.py · restore.py    Qdrant snapshots + pg_dump, and back
+│   │   └── recheck.py                re-check stored memories under today's rules
 │   ├── src/continuum/
 │   │   ├── main.py                   app factory, lifespan, scheduler wiring
 │   │   ├── config.py                 all settings (pydantic-settings)
@@ -153,7 +155,9 @@ Continuum/                            ← git root
 │   │   │   ├── summaries.py          per-subject summaries: derived, never evidence
 │   │   │   ├── keywords.py           keyword terms + score for retrieval
 │   │   │   ├── chat.py               ★ prompt assembly; surfaces disputes
-│   │   │   ├── subjects.py           one entity, one slug (atlas = atlas-project)
+│   │   │   ├── subjects.py           one entity, one slug (atlas = atlas-project);
+│   │   │   │                           a missing subject from the words
+│   │   │   ├── recheck.py            backfill: stored memories through the resolver
 │   │   │   └── reindex.py            ★ re-embed on model change; crash-safe
 │   │   ├── evaluation/               ← Phase 5: the instrument
 │   │   │   ├── README.md             what each metric means, how to read it
@@ -192,6 +196,7 @@ Continuum/                            ← git root
 │       ├── test_corrections.py       ★ reject restores; forget leaves no copy
 │       ├── test_team_check.py        ★ private vs team, never touching the team
 │       ├── test_summaries.py         derived, never a neighbour, forgotten with sources
+│       ├── test_recheck.py           backfill: dry run writes nothing; never merges
 │       └── test_ingest_pipeline.py   end-to-end vs in-memory Qdrant
 └── continuum-fe/                     ← the belief graph UI
     ├── package.json · yarn.lock      yarn 1; `resolutions` pins one vite
@@ -209,6 +214,7 @@ Continuum/                            ← git root
         ├── hooks/                    use-resource, use-recorder, use-dictation,
         │                             use-voice, use-autopilot ★, use-element-size
         ├── components/
+        │   ├── brand.tsx             the mark + wordmark (currentColor)
         │   ├── auth-screen.tsx       sign-in + first-run admin setup
         │   ├── account-dialog.tsx    API keys, password, users (admins)
         │   ├── belief-graph.tsx      ★ the Three.js scene
@@ -216,7 +222,7 @@ Continuum/                            ← git root
         │   ├── contradiction-inbox.tsx   + why it escalated, learning panel
         │   ├── learning-panel.tsx    what your decisions say about the gate
         │   ├── chat-panel.tsx        ★ streaming, citations, disputes, autopilot
-        │   ├── autopilot-overlay.tsx Lumen's hands-free screen over the chat
+        │   ├── autopilot-overlay.tsx ★ Lumen's full-screen HUD: reactor, waveform
         │   ├── voice-settings.tsx    Settings → Voice: pick, hear, speed
         │   └── ui/                   shadcn-style primitives, owned in-repo
         └── App.tsx                   ★ the auth gate, then the workspace
@@ -356,16 +362,20 @@ ingest (note / transcript)
    │
    ▼  embed whole batch in ONE call; reuse each vector for lookup AND write
    │
-   ▼  canonicalise subjects onto slugs the graph already uses (subjects.py)
+   ▼  canonicalise subjects onto slugs the graph already uses (subjects.py);
+   │  a missing subject is taken from the words when they name exactly one
    │
    ▼  ResolutionService.resolve(fact, neighbours)
    │
    ├─ score ≥ dup band ................. DUPLICATE     → reinforce, no write
    │     └─ unless a number, date, name or negation differs → judged instead ★
-   ├─ different category ............... NEW           → free, no LLM call
+   ├─ incomparable category ............ NEW           → free, no LLM call
+   │     (decision, fact, constraint, person compare with each other ★;
+   │      preference only with preference)
    ├─ different subject ................ NEW           → free, no LLM call
    ├─ either side is an event .......... NEW           → free, no LLM call
    └─ score ≥ conflict band, same kind . judge (LLM call, reason first)
+         (one candidate: the same named subject first, then the closest)
          ├─ duplicate ................... reinforce
          ├─ supersedes, p ≥ 0.80 ........ SUPERSEDES   → write edges, retire old
          │     └─ a role (owns, maintains, reviews, leads…) and the new
@@ -621,6 +631,93 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
 - API keys panel now says what a key is for, in plain words
 
+### ✅ Phase 14 — The interface, redesigned (done, this release)
+- **Inter and JetBrains Mono, bundled** (`@fontsource-variable/*`, no Google
+  request). The UI asked for `system-ui`, which on this machine resolved to a
+  monospace face — the whole app looked like a terminal
+- **Cyan interface accent, separate from the status colours.** The graph owns
+  emerald / amber / slate; a button the same green as an active node blurred UI
+  and data. Status colours are unchanged and still come from `memory-style.ts`
+- Sign-in: one glass card over a slow constellation. Header: wordmark, a health
+  dot with the belief count, as-of date, archived, refresh, settings, sign out.
+  Legend folds its key away ("How to read", remembered per browser)
+- Chat: assistant mark, accent user bubbles, typing dots, memory chips; one
+  composer with Private/Team, dictation, a **Lumen** button and send inside it
+- **Lumen is a full-screen HUD**: counter-rotating arc rings, a tick ring, a
+  96-bar radial waveform driven by the microphone level, a reactor core that
+  breathes with your voice, ripples, scan line and grid. Colour follows the
+  state — cyan listening, amber transcribing, violet thinking (a crest circles
+  the ring), teal speaking — with the question and a live subtitle of the answer.
+  Motion is written straight to the DOM per frame, never through React state;
+  `prefers-reduced-motion` stops it
+- Settings is a two-column dialog with side navigation; memory edges show the
+  linked memory's words, status and date instead of an id
+- **The graph**, rebuilt for stability: no bloom pass (it disables the canvas's
+  antialiasing, so thin edges shimmered as the camera moved), no point starfield
+  (sub-pixel stars twinkled), no auto-rotation; orbit controls with damping. The
+  sky — gradient, faint nebulae, fixed stars — is painted once into a texture.
+  Nodes glow with an additive sprite in their status colour; disputed ones
+  breathe. Edges curve slightly so two relations between one pair never hide
+  each other; particles flow along arrows (new → old)
+- **Labels are HTML, laid out every frame without overlap**: projected to screen,
+  sorted by priority (selection, its neighbours, disputed, confidence, nearness)
+  and placed greedily; a label that would collide fades out until there is room.
+  With a selection, only its neighbourhood is labelled, in bold glass pills
+- Selecting a memory anywhere moves the camera to frame it **and its
+  neighbours**, keeping the current angle, at a distance set by their spread
+- **The sidebar is a floating liquid-glass panel** over a full-width graph
+  (`.liquid-glass`: translucent, blur + saturation, a specular top sheen). The
+  camera's view offset centres the graph in the area the panel leaves open
+- Logos: the header uses the mark on its tile (`BrandTile`); the tab icon is
+  the bare mark (`public/logo.svg`)
+- **The panel collapses** (its header button, or Ctrl+\) to a glass rail of
+  Chat / Inbox / Memory buttons, plus **Ask Lumen** (it starts Lumen full-screen
+  with the panel left collapsed; if Lumen cannot start, the chat opens to say
+  why); remembered per browser. It is hidden with
+  `inert`, never unmounted, so the conversation and Lumen keep running
+- **Next: Personal mode.** Continuum becomes a personal assistant first, with
+  Workspace as the second mode — planned in `requirements.md`, not built
+- **Edge count fixed.** "2 edges" with one visible: settling a dispute cleared
+  the winner's conflict edge but not the loser's, so a stale dispute sat under
+  the new arrow. The resolve route now clears both sides, the graph draws a
+  dispute only while both memories are still disputed, and a memory shared to
+  the team is linked to its shared copy (read from `superseded_by`). The one
+  stale edge in live data was cleared
+- Checked in a real browser (headless Brave over CDP, fake microphone) against a
+  throwaway API and graph; 150 frontend tests, no behaviour changed
+
+### ✅ Phase 13 — Edges across categories, subjects from the words (done, this release)
+
+Found live: "Atlas is using MongoDB" sat next to "Chose Postgres over Mongo"
+with no edge. The extractor had filed it as a **fact** with **no subject**; the
+old belief was a **decision** about `atlas-project`. The category filter waved it
+through as NEW, and the subject-less fact was judged against an unrelated
+subject-less memory ("name changed to Mark II") instead.
+
+- **Category families.** `comparable_categories`: decision, fact, constraint and
+  person are compared with each other — the extractor files one kind of
+  statement under any of them. Preference only with preference; event never
+- **A missing subject is taken from the words** when they name exactly one known
+  subject (`infer_subject`); naming two, or none, leaves it null
+- **The same named subject is judged first.** Only one candidate reaches the
+  judge, so a closer-worded subject-less memory no longer takes its place
+- **`scripts/recheck.py`** puts stored memories through the same resolver, oldest
+  first: fills subjects (re-embedding), writes supersede edges, raises disputes,
+  reports duplicates without merging. Dry run by default
+- **Held-out cases written and labelled before the change** (6, tag
+  `held-out-family`, 3 of them labelled against it). Two passes, same day, same
+  judge, against a before-run: the 49 existing cases unchanged; belief loss 0% →
+  0%, stale belief 3.6% → 0%, accuracy 76.4% → 80.0%, band misses 9.1% → 3.6%;
+  the cost — free decisions 30.9% → 20.0%, escalation 36.4% → 40.0%. The one
+  held-out miss is the safe direction: "now uses MongoDB instead of Postgres"
+  escalated rather than retired. Pass 2 matched on every changed case; two
+  untouched single-memory cases flipped on the judge alone (one each way —
+  run-to-run noise, the reason for two passes). Crowded graphs 8/8 both ways.
+  Runs kept: `baselines/bgem3-qwen7b-c55-{before-families,families}.json`
+- The host `continuum-be/.env` still had nomic and its thresholds pinned (0.94 /
+  0.78): the first before-run was meaningless. Fixed to bge-m3 with calibrated
+  bands; every host command (`run_eval`, `recheck`, `uvicorn --reload`) reads it
+
 ### ✅ Phase 12 — Learning more, remembering better (done, this release)
 
 Self-learning:
@@ -761,6 +858,23 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
   stops a node reading amber in the canvas and grey in the sidebar.
 - Node size uses `confidence ** 3` because `nodeVal` is a sphere *volume*. Linear
   confidence makes a 0.9 belief look barely larger than a 0.3 one.
+- **Fonts are bundled.** Never fall back to `system-ui` for the interface —
+  on Linux it can resolve to a monospace face. Inter for text, JetBrains Mono
+  for code (`--font-sans` / `--font-mono` in `index.css`).
+- **The accent is not a status colour.** UI chrome uses `accent` (cyan); green,
+  amber and slate mean active, disputed and superseded, everywhere.
+- **No bloom pass on the graph.** EffectComposer renders without MSAA; every
+  thin edge shimmered while the camera moved. Glow comes from per-node sprites.
+- **Graph labels are HTML with collision avoidance, not 3D text.** Sprite labels
+  overlapped in every cluster and smeared under bloom.
+- **Rendering Lumen inside the panel.** Any `filter`/`backdrop-filter` makes an
+  ancestor the containing block for `position: fixed`, so the glass sidebar
+  trapped the full-screen HUD inside itself. It is a portal to `<body>`.
+- **`.liquid-glass` sets no `position`.** A utility-layer `position: relative`
+  overrode `absolute` and dropped the floating panel into the top-left corner.
+- **Lumen's motion goes to the DOM, not state.** The waveform and core update
+  every frame from `levelRef`; routing that through React would re-render the
+  overlay 60 times a second.
 - **Exactly one copy of three.js.** `3d-force-graph` needs `three >= 0.179`;
   pinning the direct dependency below that made the package manager install a
   second copy, and the renderer threw `intersectsFrustum is not a function` every
@@ -828,7 +942,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 381 tests, no services needed
+uv run pytest                          # 402 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -848,6 +962,7 @@ uv run python scripts/run_eval.py --retrieval continuum-retrieval.yaml   # live 
 
 uv run python scripts/backup.py                       # -> backups/<UTC stamp>/
 uv run python scripts/restore.py backups/<stamp> --yes   # replaces current data
+uv run python scripts/recheck.py               # dry run; --apply after a backup
 ```
 
 ---
@@ -1003,6 +1118,13 @@ uv run python scripts/restore.py backups/<stamp> --yes   # replaces current data
 - **Relaxing the person-role rule because the judge is confident.** It was
   confident — at 1.0 — on every belief it lost. Confidence is not the signal for
   this class; the words are.
+- **Narrowing `STATEMENT_CATEGORIES` back to same-category-only "to save judge
+  calls".** It hid a stated database change (fact vs decision) from the resolver
+  entirely. Splitting silently turns detection off; merging costs a call.
+- **Guessing a subject when the words name two, or none.** A wrong subject hides
+  the pair from the right comparison; a null one at least stays comparable.
+- **Merging duplicates in the recheck backfill.** DUPLICATE discards a memory —
+  that is ingest's call on new input, never a backfill's on stored beliefs.
 - **Keying a resolution rule on the extracted category.** The extractor files
   "Sara owns billing" as `fact`; a `person`-only rule passed every corpus test and
   failed the first live one. The corpus skips extraction, so check live.

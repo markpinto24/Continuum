@@ -25,6 +25,7 @@ from continuum.clients.llm import LLMClient
 from continuum.config import Settings
 from continuum.core.logger import get_logger
 from continuum.models.memory import ExtractedFact, MemoryCategory
+from continuum.services.subjects import clean_subject
 
 log = get_logger(__name__)
 
@@ -156,8 +157,8 @@ def _coerce_category(value: object) -> MemoryCategory:
 def _normalise_subject(value: object) -> str | None:
     if not isinstance(value, str):
         return None
-    slug = value.strip().lower().replace(" ", "-").replace("_", "-")
-    return slug or None
+    slug = value.strip().lower().replace(" ", "-").replace("_", "-").replace("/", "-")
+    return clean_subject(slug)
 
 
 class Mem0Extractor:
