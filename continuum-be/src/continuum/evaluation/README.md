@@ -53,7 +53,7 @@ to `CALIBRATED_THRESHOLDS` in `config.py`.
 Then, with a reachable LLM and embedding endpoint:
 
 ```bash
-docker compose up -d qdrant     # from the repo root; Ollama runs on the host
+docker-compose -f local.yml up -d qdrant     # from continuum-be/; Ollama runs on the host
 cd continuum-be
 
 uv run python scripts/run_eval.py --record eval-run.json   # one slow pass
@@ -168,3 +168,19 @@ evaluation/
 `metrics.py` is pure — no I/O, no LLM — so the instrument can be tested before it
 is pointed at anything. `tests/test_evaluation.py` covers the scoring, the
 replay, and the runner against a stubbed judge.
+
+## Cases from real use
+
+Every conflict settled in the app is stored as a labelled example next to what
+the resolver thought (`services/feedback.py`). Download them from the Inbox's
+learning panel (or `GET /api/v1/feedback/export`) and score the resolver on them
+alongside this corpus:
+
+```bash
+uv run python scripts/run_eval.py --record run.json --add-cases continuum-cases.yaml
+uv run python scripts/run_eval.py --record run.json --add-cases continuum-cases.yaml --only from-use
+```
+
+They are tagged `from-use` plus the decision (`newer_holds`, `older_holds`,
+`both_hold`), so per-tag scoring separates them. The file copies memory content:
+keep it out of the repository unless you mean to publish it.

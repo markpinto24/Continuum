@@ -24,8 +24,8 @@ export function Tooltip({
           side={side}
           sideOffset={6}
           className={cn(
-            'z-50 max-w-72 rounded-md border border-border bg-surface-raised px-2.5 py-1.5',
-            'text-xs leading-relaxed text-foreground shadow-xl',
+            'z-50 max-w-72 rounded-lg border border-border bg-surface-raised px-2.5 py-1.5',
+            'text-xs leading-relaxed text-foreground shadow-xl shadow-black/40 animate-fade-up',
             className,
           )}
         >

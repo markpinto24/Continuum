@@ -4,8 +4,8 @@ Project brief for Claude Code. Read this before touching anything.
 
 This file lives at the **repo root**. Continuum is one repository with two
 projects under it — `continuum-be` and `continuum-fe` — and no workspace tool
-binding them. They build, test and deploy independently; this brief and
-`docker-compose.yml` are the only things that span both.
+binding them. They build, test and deploy independently; this brief, the
+ignore rules and CI are the only things that span both.
 
 ---
 
@@ -65,7 +65,11 @@ simplify an implementation.**
 | Embeddings | `bge-m3`, 1024-dim | same client. Was nomic until it proved blind to entity swaps (FINDINGS §1, §8) |
 | Extraction | Mem0-inspired, domain-tuned prompt | `mem0ai` is a dependency; its `add()` is not used |
 | Scheduling | APScheduler | decay sweep |
-| Logging | structlog | request-scoped contextvars |
+| Logging | `core/logger.py`: line/JSON formatters over structlog | redaction + request context underneath |
+| Relational DB | Postgres 17, SQLAlchemy 2 (async, asyncpg), Alembic | accounts only — memories stay in Qdrant |
+| Auth | sessions + API keys | argon2id passwords; SHA-256-hashed tokens; no JWT |
+| Dictation | faster-whisper (local Whisper, CPU, int8) | speech to text on the server |
+| Spoken answers | Piper (local neural voice, ONNX, CPU) | read-aloud and autopilot; browser voice only as fallback |
 | Frontend (planned) | React, shadcn/ui, react-bits, Three.js | |
 
 ### Why we do not use Mem0's `Memory.add()`
@@ -90,43 +94,70 @@ not let us do something.
 Continuum/                            ← git root
 ├── README.md                         the project story; links to each side
 ├── CLAUDE.md                         this file — the engineering brief
-├── .env.example                      every setting, with provider presets
+├── requirements.md                   planned: Personal (life) mode beside Workspace
+├── .env.example                      template for continuum-be/.env (uv run)
 ├── .gitignore                        covers both projects
-├── docker-compose.yml                full stack: qdrant + api + web (Ollama on host)
 ├── .github/workflows/
 │   ├── backend.yml                   paths: ['continuum-be/**']
 │   └── frontend.yml                  paths: ['continuum-fe/**']
 ├── continuum-be/
 │   ├── pyproject.toml                uv project, deps, ruff + pytest config
+│   ├── local.yml                     ★ the Docker stack: qdrant, postgres, api
+│   ├── .envs/.local/.api · .postgres its settings (tracked local defaults;
+│   │                                 personal ones in gitignored *.override)
+│   ├── alembic.ini                   migration CLI; DB comes from DATABASE_URL
 │   ├── uv.lock
 │   ├── .dockerignore
 │   ├── Dockerfile                    multi-stage uv build, non-root, healthcheck
 │   ├── README.md                     backend setup + architecture
 │   ├── scripts/
 │   │   ├── seed_demo.py              end-to-end demo incl. a reversed decision
-│   │   └── run_eval.py               Phase 5 harness: record once, sweep free
+│   │   ├── run_eval.py               Phase 5 harness: record once, sweep free
+│   │   ├── backup.py · restore.py    Qdrant snapshots + pg_dump, and back
+│   │   └── recheck.py                re-check stored memories under today's rules
 │   ├── src/continuum/
 │   │   ├── main.py                   app factory, lifespan, scheduler wiring
 │   │   ├── config.py                 all settings (pydantic-settings)
 │   │   ├── core/
-│   │   │   ├── logging.py            structlog config, redaction processors
+│   │   │   ├── logger.py             ★ get_logger(); line/JSON output; redaction
 │   │   │   └── middleware.py         request id, timing, context binding
 │   │   ├── clients/                  ← thin, owned I/O adapters
+│   │   │   ├── authdb.py             ★ users, sessions, API keys (SQLAlchemy)
+│   │   │   ├── labels.py             resolution labels (SQLAlchemy)
+│   │   │   ├── learning.py           rejections, answer ratings, approved rules
 │   │   │   ├── llm.py                OpenAI-compatible chat + embeddings
 │   │   │   └── qdrant.py             collection bootstrap, filters, scroll
+│   │   ├── db/                       ← relational storage (accounts only)
+│   │   │   ├── models.py             ★ tables; what migrations are checked against
+│   │   │   ├── engine.py             engine + migrate() run at startup
+│   │   │   └── migrations/           Alembic env + versions/, shipped in the image
 │   │   ├── models/
 │   │   │   ├── memory.py             ★ domain model: Memory, categories,
 │   │   │   │                           statuses, half-lives, decay maths
+│   │   │   ├── auth.py               User, ApiKey, Principal
+│   │   │   ├── feedback.py           Decision → ExpectedAction, labels, evidence
 │   │   │   └── schemas.py            HTTP request/response models
 │   │   ├── services/                 ← all business logic lives here
+│   │   │   ├── auth.py               ★ sign-in, sessions, keys, lockout
+│   │   │   ├── limits.py             sliding windows: lockout + rate limit
 │   │   │   ├── extraction.py         text → ExtractedFact[]
 │   │   │   ├── resolution.py         ★ the judge + confidence gate
 │   │   │   ├── ingest.py             orchestration; applies verdicts to graph
 │   │   │   ├── memory_store.py       domain ops over Qdrant
 │   │   │   ├── decay.py              confidence decay + archival sweep
 │   │   │   ├── retrieval.py          ★ similarity × confidence × recency rank
+│   │   │   ├── speech.py             dictation: local Whisper, audio never kept
+│   │   │   ├── voice.py              spoken answers: local Piper voice
+│   │   │   ├── sharing.py            ★ private memory → shared space, via resolver
+│   │   │   ├── feedback.py           ★ decisions → labels, gate evidence, export,
+│   │   │   │                           calibration curve, rule suggestions
+│   │   │   ├── corrections.py        ★ reject a misreading; forget (redaction)
+│   │   │   ├── summaries.py          per-subject summaries: derived, never evidence
+│   │   │   ├── keywords.py           keyword terms + score for retrieval
 │   │   │   ├── chat.py               ★ prompt assembly; surfaces disputes
-│   │   │   ├── subjects.py           one entity, one slug (atlas = atlas-project)
+│   │   │   ├── subjects.py           one entity, one slug (atlas = atlas-project);
+│   │   │   │                           a missing subject from the words
+│   │   │   ├── recheck.py            backfill: stored memories through the resolver
 │   │   │   └── reindex.py            ★ re-embed on model change; crash-safe
 │   │   ├── evaluation/               ← Phase 5: the instrument
 │   │   │   ├── README.md             what each metric means, how to read it
@@ -140,12 +171,16 @@ Continuum/                            ← git root
 │   │   │   ├── runner.py             executes cases against the REAL resolver
 │   │   │   ├── metrics.py            ★ pure scoring, replay, sweep, recommend
 │   │   │   ├── extraction.py         token matching + the Mem0 baseline
+│   │   │   ├── retrieval.py          recall@k from "should have come up"; weight sweep
 │   │   │   └── report.py             plain-text rendering
 │   │   └── api/
-│   │       ├── deps.py               DI wiring from app.state
+│   │       ├── deps.py               ★ DI wiring; get_principal = identity
 │   │       ├── router.py             router aggregation
-│   │       └── routes/               health, ingest, memories, conflicts,
-│   │                                 decay, chat
+│   │       └── routes/               health, auth, admin, ingest, memories,
+│   │                                 conflicts, decay, chat, speech, feedback
+│   │                                 (memories: + /share /reject /forget /export
+│   │                                 /summaries/refresh; conflicts: + /resolve-team;
+│   │                                 feedback: + /rules /calibration /answer)
 │   └── tests/
 │       ├── test_core_logic.py        parsing, coercion, lifecycle (pure)
 │       ├── test_resolution.py        ★ confidence gate, category policy
@@ -153,34 +188,53 @@ Continuum/                            ← git root
 │       ├── test_retrieval.py         ★ ranking formula, dispute assembly
 │       ├── test_chat.py              ★ stream shape, disputed prompt, write-back
 │       ├── test_evaluation.py        ★ the instrument, before it is trusted
+│       ├── test_auth.py              ★ every route guarded; isolation; refusals
+│       ├── test_feedback.py          ★ decision→label mapping; gate evidence
+│       ├── test_sharing.py           ★ sharing via the resolver; visibility
+│       ├── test_voice.py             synthesis refusals, its own rate limit
+│       ├── test_learning.py          ★ calibration curve + gate; rules; team evidence
+│       ├── test_corrections.py       ★ reject restores; forget leaves no copy
+│       ├── test_team_check.py        ★ private vs team, never touching the team
+│       ├── test_summaries.py         derived, never a neighbour, forgotten with sources
+│       ├── test_recheck.py           backfill: dry run writes nothing; never merges
 │       └── test_ingest_pipeline.py   end-to-end vs in-memory Qdrant
 └── continuum-fe/                     ← the belief graph UI
-    ├── Dockerfile                    node build -> nginx, proxies /api
-    ├── nginx.conf                    SPA fallback + SSE-safe proxy
-    ├── vite.config.ts
+    ├── package.json · yarn.lock      yarn 1; `resolutions` pins one vite
+    ├── vite.config.ts                dev server + /api proxy (no container)
     └── src/
         ├── lib/
         │   ├── types.ts              ★ the backend contract, mirrored by hand
         │   ├── api.ts                thin typed client + SSE chat stream
         │   ├── sse.ts                ★ incremental SSE framing
+        │   ├── vad.ts                ★ speech start/end; the 2-second silence rule
+        │   ├── voice-player.ts       ★ ordered, prefetched spoken chunks
+        │   ├── speakable.ts          markdown → speech; finished sentences
+        │   ├── greeting.ts           the session's opening line
         │   └── memory-style.ts       ★ colour/size vocabulary, shared canvas+DOM
-        ├── hooks/                    use-resource, use-element-size
+        ├── hooks/                    use-resource, use-recorder, use-dictation,
+        │                             use-voice, use-autopilot ★, use-element-size
         ├── components/
+        │   ├── brand.tsx             the mark + wordmark (currentColor)
+        │   ├── auth-screen.tsx       sign-in + first-run admin setup
+        │   ├── account-dialog.tsx    API keys, password, users (admins)
         │   ├── belief-graph.tsx      ★ the Three.js scene
         │   ├── memory-detail.tsx     provenance, edges, reinforce/restore
-        │   ├── contradiction-inbox.tsx
-        │   ├── chat-panel.tsx        ★ streaming, citations, dispute banner
+        │   ├── contradiction-inbox.tsx   + why it escalated, learning panel
+        │   ├── learning-panel.tsx    what your decisions say about the gate
+        │   ├── chat-panel.tsx        ★ streaming, citations, disputes, autopilot
+        │   ├── autopilot-overlay.tsx ★ Lumen's full-screen HUD: reactor, waveform
+        │   ├── voice-settings.tsx    Settings → Voice: pick, hear, speed
         │   └── ui/                   shadcn-style primitives, owned in-repo
-        └── App.tsx
+        └── App.tsx                   ★ the auth gate, then the workspace
 ```
 
 ★ = the files carrying the novel logic. Change these carefully.
 
 **Repo-level concerns live at the root; project-level ones do not.** The brief,
-the compose file, the ignore rules and the env template describe the whole
-system, so they sit above both projects. The `Dockerfile` and `.dockerignore`
-stay inside `continuum-be/` because they describe how *that* project builds —
-and the compose build context is `./continuum-be`, so they still resolve.
+the ignore rules and CI describe the whole repository, so they sit above both
+projects. Everything Docker is backend-only now that the UI runs on the Vite dev
+server, so `local.yml`, its `.envs/`, the `Dockerfile` and `.dockerignore` all
+live in `continuum-be/`.
 
 **There is deliberately no workspace tool.** No Nx, no Turborepo, no uv
 workspace. Two independent projects under one root is the design: the backend is
@@ -205,6 +259,69 @@ api/routes  →  services  →  clients  →  external
 
 ---
 
+## Authentication
+
+**The memory owner comes from the credential and nowhere else.** `get_principal`
+in `api/deps.py` resolves a `Principal` from `Authorization: Bearer ck_...` (an
+agent's API key) or the session cookie (a person in the web UI). Every route
+that touches memories takes `principal: CurrentUser` and passes
+`principal.user_id` to the services. Request bodies have no `user_id`; the
+`ClientBody` base refuses one with a message saying why.
+
+- **New route? Take `CurrentUser`.** `test_every_route_but_the_public_ones_…`
+  walks the OpenAPI schema and fails on any endpoint that answers an anonymous
+  request. The public list is five endpoints; adding to it is a decision, not a
+  convenience.
+- **Fetching by id? Check ownership and answer 404.** `_owned()` in
+  `routes/memories.py`. Qdrant ids are just strings; a lookup by id is the one
+  place a filter by user does not happen for free.
+- **Services stay user-agnostic.** They take a `user_id` argument, as before.
+  `IngestRequest`/`ChatRequest` are the internal commands (body + owner);
+  `IngestBody`/`ChatBody` are what a client may send.
+- **API keys cannot manage credentials** (`SessionUser`, `AdminUser`): a leaked
+  agent key stays a leaked key, not an account takeover.
+- **Cookie writes need the `x-continuum-client` header** (CSRF, on top of
+  SameSite=Strict). The frontend sends it on every request; agents use Bearer
+  and are exempt.
+- Users, sessions and keys are in Postgres (`clients/authdb.py` over the tables
+  in `db/models.py`), not Qdrant: they need unique constraints and an atomic
+  "create only if no account exists". Nothing replayable is stored — argon2id for
+  passwords, SHA-256 for 256-bit tokens.
+- **"Only the first" needs the table lock.** At READ COMMITTED, two racing setups
+  both see an empty `users` table; without `LOCK TABLE` in `insert_user`, eight
+  concurrent setups created 6-8 admins. SQLite hid this — it has one writer —
+  which is why the race test runs against real Postgres.
+
+### Database and migrations
+
+- **Alembic owns the schema.** The API runs `migrate()` on every start, under a
+  Postgres advisory lock so replicas starting together migrate once. There is no
+  separate migrate step, and never `Base.metadata.create_all()`.
+- **Changing a table:** edit `db/models.py`, then from `continuum-be/`:
+  `uv run alembic revision --autogenerate -m "what changed"` (compose Postgres
+  up), read the generated file, commit both. `test_migrations_match_the_models`
+  fails if a model changes without a migration.
+- **Migrations are frozen history.** They never import application code;
+  `env.py` renders `UTCDateTime` as `sa.DateTime(timezone=True)` for this reason.
+  Every migration needs a working `downgrade()` (tested).
+- `UTCDateTime` makes every timestamp timezone-aware UTC in Python. Postgres
+  stores `timestamptz`; SQLite (the tests) stores naive values. Without it,
+  expiry comparisons would work in one database and raise in the other.
+- Tests run the real migrations against in-memory SQLite, so they need no
+  services. Postgres-only behaviour (the setup race, the full flow) runs with
+  `TEST_DATABASE_URL` pointing at a database that may be wiped.
+- `User.id` is the memory owner id and is **never derived from the email**.
+  Random by default; set explicitly (setup, `ADMIN_USER_ID`, admin create) only
+  to adopt memories stored before authentication existed.
+- Lockout and rate limits count in process memory. Correct for one uvicorn
+  process; with several workers, move them to Redis rather than raising limits.
+- Deployment: Qdrant and the api bind to 127.0.0.1 in compose. The UI reaches
+  the api through the Vite dev server's proxy; agents call `:8000` directly
+  (change the port mapping in `local.yml` for remote ones). There is no reverse proxy, so
+  `TRUST_PROXY_HEADERS` stays off and the per-address lockout sees real peers.
+
+---
+
 ## Data model
 
 `Memory` (in `models/memory.py`) is the centre of the system.
@@ -217,6 +334,16 @@ api/routes  →  services  →  clients  →  external
 | `status` | `active` / `superseded` / `contradicted` / `archived`. Never deleted |
 | `supersedes` / `superseded_by` | The belief graph edges. The differentiator |
 | `conflicts_with` | Unresolved conflicts awaiting a human |
+| `escalations` | What the resolver thought when it escalated: judge relation, probability, similarity, gate. Graded against the person's decision later |
+| `shared_by` / `shared_by_email` | On a memory in the shared space (`user_id == "_shared"`): who put it there |
+| `shared_as` | On a private memory that was shared: the shared memory that now carries it. Retired by that edge, never deleted |
+
+**The shared team space is just another graph**, owned by `SHARED_SPACE =
+"_shared"` — an id no account can take (account ids start with a letter or
+digit). Resolution, disputes, decay and labels therefore work on it unchanged.
+Reading is across graphs (`visible_owners()` = your id + `_shared`); writing and
+resolution stay inside one graph, so a decision never reaches from the shared
+space into anyone's private memories.
 | `source_id` / `source_excerpt` | Traceability from any assertion back to its origin text |
 
 `RETRIEVABLE_STATUSES = {active, contradicted}` — **contradicted memories are
@@ -235,16 +362,20 @@ ingest (note / transcript)
    │
    ▼  embed whole batch in ONE call; reuse each vector for lookup AND write
    │
-   ▼  canonicalise subjects onto slugs the graph already uses (subjects.py)
+   ▼  canonicalise subjects onto slugs the graph already uses (subjects.py);
+   │  a missing subject is taken from the words when they name exactly one
    │
    ▼  ResolutionService.resolve(fact, neighbours)
    │
    ├─ score ≥ dup band ................. DUPLICATE     → reinforce, no write
    │     └─ unless a number, date, name or negation differs → judged instead ★
-   ├─ different category ............... NEW           → free, no LLM call
+   ├─ incomparable category ............ NEW           → free, no LLM call
+   │     (decision, fact, constraint, person compare with each other ★;
+   │      preference only with preference)
    ├─ different subject ................ NEW           → free, no LLM call
    ├─ either side is an event .......... NEW           → free, no LLM call
    └─ score ≥ conflict band, same kind . judge (LLM call, reason first)
+         (one candidate: the same named subject first, then the closest)
          ├─ duplicate ................... reinforce
          ├─ supersedes, p ≥ 0.80 ........ SUPERSEDES   → write edges, retire old
          │     └─ a role (owns, maintains, reviews, leads…) and the new
@@ -400,6 +531,269 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   probabilities, and the judge is told the NEW statement is always the later one
   — the gap that made it escalate clear reversals.
 
+### ✅ Phase 6 — Authentication (done, this release)
+- Accounts, web sessions and per-agent API keys; identity only from the
+  credential, never a request field — before this, any caller could read or
+  write any graph by typing a name, and any memory id opened any memory
+- First admin from a web setup screen (prefilled with the pre-auth user id, so an
+  existing graph is adopted) or from `ADMIN_EMAIL` / `ADMIN_PASSWORD`
+- Account panel: create / revoke keys (secret shown once, with a curl line),
+  change password (signs out other browsers), and user admin — disabling a user
+  ends their sessions and keys but deletes nothing
+- Refusals tested one by one: CSRF, login CSRF, lockout by email and by address,
+  expired sessions, revoked keys, disabled users, last-admin protection, keys
+  that try to manage keys, cross-user reads by id, a body naming another user
+- Account store on Postgres via SQLAlchemy 2 + Alembic, migrated on startup
+- Qdrant and the api moved to loopback; 50k-char input
+  cap; 30 LLM requests per user per minute
+- Verified live end to end: two users, a real LLM ingest by key, zero leakage in
+  graph, lookup by id or retrieval
+- 240 backend tests, 51 frontend tests
+
+### ✅ Phase 7 — Voice (done, this release)
+- **Dictation:** a microphone button in the chat box. The browser records
+  (MediaRecorder: webm/opus in Chrome and Brave, ogg in Firefox, mp4 in Safari);
+  the API transcribes with a **local** Whisper model (`faster-whisper`, `base`,
+  int8 on CPU) — about 1 s for 11 s of speech. The text lands in the box for
+  review; it is never sent, or remembered, on its own
+- Not the browser's `SpeechRecognition`: it streams audio to Google, and Brave
+  switches it off entirely, so for this user it would silently do nothing
+- Audio is transcribed in memory and dropped; logs record duration and length,
+  never the words. Capped at 120 s and 10 MB, checked before any CPU is spent
+- The model preloads in the background at startup, cached on a volume
+- **Read aloud:** a button on each answer, using the browser's speech synthesis
+  (OS voices: speech-dispatcher on Linux). Markdown, code and `[n]` citations are
+  stripped first, and text is queued in sentence-sized chunks — Chromium stops a
+  single long utterance after ~15 s without an error
+
+### ✅ Phase 8 — Learning from decisions (done, this release)
+- **Every decision is a labelled example.** Ingest records on the incoming memory
+  what the resolver thought (`Memory.escalations`); settling the conflict — in
+  the inbox or the chat — stores a `resolution_labels` row (Postgres, migration
+  0002) pairing that with what the person said. Older→newer, like the corpus:
+  newer holds → `retire`, both hold → `store`, older holds → `escalate` (asking
+  was right; auto-retiring would have destroyed a true belief)
+- **Gate evidence** (`GET /feedback/evidence`): only escalated `supersedes`
+  verdicts below the gate count — exactly what a lower gate would have
+  auto-applied. One refutation rules out lowering it; zero in n bounds the error
+  below 3/n; below `FEEDBACK_MIN_GATE_EVIDENCE` (15) it says keep the gate.
+  Role-rule escalations and over-escalated conflicts are counted separately
+- **Export** (`GET /feedback/export`) as Phase 5 corpus YAML, each case validated
+  against the schema; `run_eval.py --add-cases FILE` scores the resolver on
+  real decisions. Live: a kept-both second owner came back as
+  `want store, got escalate` — over-escalation that used to leave no trace
+- **Disputes are settled where they come up.** The chat's dispute card has
+  "This holds" per side and "Both are true"; the inbox explains why each pair is
+  there, from the recorded escalation, and shows the learning panel
+- Nothing retunes itself. The report recommends; the gate stays a product
+  decision
+
+### ✅ Phase 9 — Spoken answers, autopilot, greeting (done, this release)
+- **Read-aloud now speaks with the server's local Piper voice** (`services/voice.py`,
+  `POST /speech/synthesize` → WAV). The browser's speechSynthesis failed silently
+  for this user: on Linux it needs speech-dispatcher (not running), and Brave
+  limits voices to resist fingerprinting. Piper: ~20x real time on a CPU, 63 MB
+  voice, preloaded at startup, verified by round-tripping its audio through
+  Whisper. The browser voice is kept only as a fallback
+- `VoicePlayer` synthesises each chunk as it is queued and plays strictly in
+  order, so the next sentence is ready while the current one plays
+- **Autopilot:** hands-free conversation. `vad.ts` learns the room's noise floor,
+  starts an utterance after 120 ms of voice and **ends it after 2 s of continuous
+  silence** (a shorter pause mid-sentence does not end it); coughs under 300 ms
+  are dropped. The clip goes to local Whisper, the text through the normal chat
+  path, and the answer is spoken **sentence by sentence as it streams**. The
+  microphone is ignored while the answer plays, so it never hears itself. "Stop
+  speaking" interrupts; saying "stop autopilot" ends it. Turns are written into
+  the chat underneath the overlay, so ending autopilot reveals the transcript
+- **Greeting:** every session opens with a local, instant greeting — time of
+  day, name when the user id reads as one, open disputes. Written in chat; spoken
+  when autopilot starts. A remembered autopilot asks for one tap first: browsers
+  allow neither the microphone loop nor audio without a gesture
+- Synthesis has its own rate limit (240/min): autopilot asks once per sentence
+
+### ✅ Phase 11 — Lumen, commands mid-answer, voices (done, this release)
+- **Autopilot is Lumen** — a unisex name, since any of the 12 voices may speak
+  it. "Talk to Lumen" starts it; it greets as itself
+- **Commands while it speaks (barge-in).** During thinking and speaking a second
+  listener runs: thresholds 2.5x the learned room level (its own voice comes back
+  through the speakers), and 0.7 s of quiet ends a command. Only commands are
+  acted on, and only with its name attached — "stop, Lumen" interrupts (answer
+  aborted, it listens again), "thank you, Lumen" ends with a spoken goodbye.
+  Ordinary speech over its answer is ignored, and a command phrase that is in
+  its own current answer is never taken as one. The name was chosen for the
+  microphone: across four voices Whisper wrote "Lumen" 11 times in 12 (once
+  "Lumin", accepted). "Avery" was rejected because it collides with "every"
+- **Voices in Settings.** 12 single-speaker Piper voices (US/British, female/male),
+  each verified to exist; "Hear it" previews before choosing; speed 0.8–1.5x.
+  Saved to the account (`users.tts_voice` / `tts_speed`, migration 0003), so it
+  follows the person to any browser. The UI sends the choice with each
+  synthesis; the server accepts only catalogued voices — it never downloads a
+  name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
+- API keys panel now says what a key is for, in plain words
+
+### ✅ Phase 14 — The interface, redesigned (done, this release)
+- **Inter and JetBrains Mono, bundled** (`@fontsource-variable/*`, no Google
+  request). The UI asked for `system-ui`, which on this machine resolved to a
+  monospace face — the whole app looked like a terminal
+- **Cyan interface accent, separate from the status colours.** The graph owns
+  emerald / amber / slate; a button the same green as an active node blurred UI
+  and data. Status colours are unchanged and still come from `memory-style.ts`
+- Sign-in: one glass card over a slow constellation. Header: wordmark, a health
+  dot with the belief count, as-of date, archived, refresh, settings, sign out.
+  Legend folds its key away ("How to read", remembered per browser)
+- Chat: assistant mark, accent user bubbles, typing dots, memory chips; one
+  composer with Private/Team, dictation, a **Lumen** button and send inside it
+- **Lumen is a full-screen HUD**: counter-rotating arc rings, a tick ring, a
+  96-bar radial waveform driven by the microphone level, a reactor core that
+  breathes with your voice, ripples, scan line and grid. Colour follows the
+  state — cyan listening, amber transcribing, violet thinking (a crest circles
+  the ring), teal speaking — with the question and a live subtitle of the answer.
+  Motion is written straight to the DOM per frame, never through React state;
+  `prefers-reduced-motion` stops it
+- Settings is a two-column dialog with side navigation; memory edges show the
+  linked memory's words, status and date instead of an id
+- **The graph**, rebuilt for stability: no bloom pass (it disables the canvas's
+  antialiasing, so thin edges shimmered as the camera moved), no point starfield
+  (sub-pixel stars twinkled), no auto-rotation; orbit controls with damping. The
+  sky — gradient, faint nebulae, fixed stars — is painted once into a texture.
+  Nodes glow with an additive sprite in their status colour; disputed ones
+  breathe. Edges curve slightly so two relations between one pair never hide
+  each other; particles flow along arrows (new → old)
+- **Labels are HTML, laid out every frame without overlap**: projected to screen,
+  sorted by priority (selection, its neighbours, disputed, confidence, nearness)
+  and placed greedily; a label that would collide fades out until there is room.
+  With a selection, only its neighbourhood is labelled, in bold glass pills
+- Selecting a memory anywhere moves the camera to frame it **and its
+  neighbours**, keeping the current angle, at a distance set by their spread
+- **The sidebar is a floating liquid-glass panel** over a full-width graph
+  (`.liquid-glass`: translucent, blur + saturation, a specular top sheen). The
+  camera's view offset centres the graph in the area the panel leaves open
+- Logos: the header uses the mark on its tile (`BrandTile`); the tab icon is
+  the bare mark (`public/logo.svg`)
+- **The panel collapses** (its header button, or Ctrl+\) to a glass rail of
+  Chat / Inbox / Memory buttons, plus **Ask Lumen** (it starts Lumen full-screen
+  with the panel left collapsed; if Lumen cannot start, the chat opens to say
+  why); remembered per browser. It is hidden with
+  `inert`, never unmounted, so the conversation and Lumen keep running
+- **Next: Personal mode.** Continuum becomes a personal assistant first, with
+  Workspace as the second mode — planned in `requirements.md`, not built
+- **Edge count fixed.** "2 edges" with one visible: settling a dispute cleared
+  the winner's conflict edge but not the loser's, so a stale dispute sat under
+  the new arrow. The resolve route now clears both sides, the graph draws a
+  dispute only while both memories are still disputed, and a memory shared to
+  the team is linked to its shared copy (read from `superseded_by`). The one
+  stale edge in live data was cleared
+- Checked in a real browser (headless Brave over CDP, fake microphone) against a
+  throwaway API and graph; 150 frontend tests, no behaviour changed
+
+### ✅ Phase 13 — Edges across categories, subjects from the words (done, this release)
+
+Found live: "Atlas is using MongoDB" sat next to "Chose Postgres over Mongo"
+with no edge. The extractor had filed it as a **fact** with **no subject**; the
+old belief was a **decision** about `atlas-project`. The category filter waved it
+through as NEW, and the subject-less fact was judged against an unrelated
+subject-less memory ("name changed to Mark II") instead.
+
+- **Category families.** `comparable_categories`: decision, fact, constraint and
+  person are compared with each other — the extractor files one kind of
+  statement under any of them. Preference only with preference; event never
+- **A missing subject is taken from the words** when they name exactly one known
+  subject (`infer_subject`); naming two, or none, leaves it null
+- **The same named subject is judged first.** Only one candidate reaches the
+  judge, so a closer-worded subject-less memory no longer takes its place
+- **`scripts/recheck.py`** puts stored memories through the same resolver, oldest
+  first: fills subjects (re-embedding), writes supersede edges, raises disputes,
+  reports duplicates without merging. Dry run by default
+- **Held-out cases written and labelled before the change** (6, tag
+  `held-out-family`, 3 of them labelled against it). Two passes, same day, same
+  judge, against a before-run: the 49 existing cases unchanged; belief loss 0% →
+  0%, stale belief 3.6% → 0%, accuracy 76.4% → 80.0%, band misses 9.1% → 3.6%;
+  the cost — free decisions 30.9% → 20.0%, escalation 36.4% → 40.0%. The one
+  held-out miss is the safe direction: "now uses MongoDB instead of Postgres"
+  escalated rather than retired. Pass 2 matched on every changed case; two
+  untouched single-memory cases flipped on the judge alone (one each way —
+  run-to-run noise, the reason for two passes). Crowded graphs 8/8 both ways.
+  Runs kept: `baselines/bgem3-qwen7b-c55-{before-families,families}.json`
+- The host `continuum-be/.env` still had nomic and its thresholds pinned (0.94 /
+  0.78): the first before-run was meaningless. Fixed to bge-m3 with calibrated
+  bands; every host command (`run_eval`, `recheck`, `uvicorn --reload`) reads it
+
+### ✅ Phase 12 — Learning more, remembering better (done, this release)
+
+Self-learning:
+- **Team evidence.** `GET /feedback/evidence?scope=team` pools everyone's
+  decisions — the gate is one setting for the instance, so pooled evidence
+  reaches a verdict sooner. Only counts leave the labels
+- **Calibrated gate (opt-in).** A curve from decisions: per confidence band,
+  how often people agreed the newer belief held — Laplace-smoothed (one decision
+  is not certainty), then made monotone (pool-adjacent-violators). With
+  `CALIBRATED_GATE=true` and 30+ decisions the gate compares that number, not the
+  raw one; the raw value is still what is recorded, since the curve is built from
+  it. Off by default: switching it on is the same kind of decision as moving the
+  gate. A judge people keep overruling escalates even when it is sure
+- **"This isn't a real fact."** Reject a misreading with a reason: archived, any
+  belief it had wrongly superseded comes back, and it becomes an extraction case
+  with a `forbid` statement (`--add-extraction`; scored as `forbidden_rate`)
+- **Answer feedback.** 👍/👎 on each answer, and "Something missing?" — search,
+  mark the memory that should have come up. Exported as retrieval cases;
+  `run_eval.py --retrieval FILE` measures recall@k on the live graph and sweeps
+  confidence, recency and keyword weights for free from one fetch
+- **Rules from "both are true".** Repeated both-hold decisions about one subject,
+  and never otherwise, produce a suggestion; a person approves it (an admin for
+  the team graph; never an API key). From then on a CONFLICT about that subject
+  is stored side by side. A rule never stops a confident supersede — it only
+  answers what would have been asked. Revoked rules are kept, with the time
+
+Long-term memory:
+- **Private vs team.** Each new private fact is also judged against the team's
+  beliefs. A disagreement is flagged on the private memory only
+  (`team_conflicts_with`) — even a confident supersede never touches team
+  knowledge — and settled by its owner: the team is right, mine holds (shares
+  it, so the team graph's own resolver decides), or both. Recorded as a
+  `forced` escalation: no gate decided it, so it is no gate evidence. Chat shows
+  the dispute even when only the team side was retrieved
+- **Keyword + semantic retrieval.** Qdrant full-text index on content; rank uses
+  `max(similarity, keyword × 0.7)` so a memory found both ways is not counted
+  twice, and a memory naming the entity joins the pool below the similarity floor.
+  Live: "Kestrel-9" found its memory at similarity 0.56, keyword 1.0
+- **As of a date.** The header's date picker takes the graph and the chat back:
+  only what was believed then (`Memory.believed_at`, from `superseded_at` /
+  `archived_at`), recency measured from then, and such turns are never
+  remembered
+- **Summaries.** Subjects with 5+ memories get one, rewritten daily when its
+  sources change (fingerprint of ids and disputes — a reinforcement is not a
+  change). Never a resolution neighbour, never decays, never an as-of belief,
+  marked `[SUMMARY]` in the prompt, superseded by its successor
+- **Forget** — the one deliberate exception to "nothing is lost", and only a
+  person's act: content, excerpt, subject, escalation reasons and vector are
+  replaced; copies in labels, rejections, answer ratings and summaries are
+  blanked; the record and its edges stay. Cannot be reactivated
+- **Export and backups.** `GET /memories/export` (your graph, every status);
+  `scripts/backup.py` snapshots each Qdrant collection and `pg_dump`s Postgres,
+  `restore.py --yes` puts them back. Backups are gitignored
+- Qdrant `nofile` raised to 65535 in `local.yml`: at Docker's 1024 a fourth
+  collection failed with "Too many open files"
+- Verified live on an isolated instance (throwaway DB and collection, real
+  Ollama): the judge called a private "moved to MongoDB" a confident supersede of
+  the team's Postgres — flagged on the private side only, team untouched, other
+  member's inbox empty
+- 381 backend tests, 148 frontend tests
+
+### ✅ Phase 10 — Shared team space (done, this release)
+- One shared graph per instance; **private by default, shared explicitly** —
+  a memory's "Share with team" button, `share: true` on ingest, or the chat's
+  "share what I say" toggle (off at the start of every session)
+- **Sharing goes through the shared graph's resolver**, as if a teammate had
+  said it: new → created; already known → merged (reinforced, not duplicated);
+  a stated change → supersedes the old shared belief; a contradiction → a shared
+  conflict in every member's inbox. Only an active memory can be shared — a
+  dispute must not leak into team knowledge unresolved
+- Every account's chat, search, graph and inbox read their own graph plus the
+  shared one. Shared nodes wear a wireframe halo; memories show "Shared by …"
+- Verified live: private stays private both ways; a shared fact reached the
+  other account's graph and chat; a contradicting share raised a conflict in
+  the other person's inbox
+
 **The last lost belief was a class, and it is closed (§10).** Held-out cases,
 written before any fix ran, showed a second owner / maintainer / reviewer /
 rotation member superseded at ≈1.0 every time. Asking the model a narrower
@@ -424,11 +818,18 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
   says what it is protecting against.
 
 **Logging**
-- `structlog.get_logger(__name__)`, event names as `noun.verb` —
-  `ingest.resolved`, `decay.archived`.
-- Values as kwargs, never f-strings: `log.info("x", memory_id=id)`.
-- Bind correlation ids with `core.logging.bind()`; the middleware handles
-  `request_id`.
+- `from continuum.core.logger import get_logger`, then `log = get_logger(__name__)`
+  at module level. Event names as `noun.verb` — `ingest.resolved`,
+  `decay.archived`.
+- Values as kwargs, never f-strings: `log.info("x", memory_id=id)`. They render
+  as `| memory_id=…` after the message, or as JSON fields with `LOG_FORMAT=json`.
+- Output is one line per event: `LEVEL: Timestamp | Module | Function | Message`.
+  Module and Function are the caller's, found automatically — do not repeat them.
+- Bind correlation ids with `core.logger.bind()`; the middleware binds
+  `request_id`, the auth dependency `user_id`.
+- New noisy third-party logger? Lower it in the list in `Logger.__init__`. Check
+  the real logger name first — the "HTTP Request" lines came from `httpx2`, not
+  `httpx`.
 - Never log memory content outside a `SENSITIVE_KEYS`-covered field. Redaction is
   automatic in non-local environments — do not route around it.
 
@@ -443,6 +844,10 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
   **If you change the embedding text format, re-check that geometry.**
 
 **Frontend**
+- Every request goes through `lib/api.ts`, which sends the CSRF header and the
+  session cookie and reports a 401 on a data call to `onUnauthorized` — that is
+  how an expired session lands on the sign-in screen instead of on a panel of
+  errors. A 401 from sign-in itself is a wrong password, not a lapsed session.
 - `src/lib/types.ts` mirrors `models/schemas.py` by hand. Small surface, rare
   changes, and a hand-written mirror turns a breaking backend change into a type
   error rather than a runtime `undefined`. **Change both in the same commit.**
@@ -453,36 +858,60 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
   stops a node reading amber in the canvas and grey in the sidebar.
 - Node size uses `confidence ** 3` because `nodeVal` is a sphere *volume*. Linear
   confidence makes a 0.9 belief look barely larger than a 0.3 one.
+- **Fonts are bundled.** Never fall back to `system-ui` for the interface —
+  on Linux it can resolve to a monospace face. Inter for text, JetBrains Mono
+  for code (`--font-sans` / `--font-mono` in `index.css`).
+- **The accent is not a status colour.** UI chrome uses `accent` (cyan); green,
+  amber and slate mean active, disputed and superseded, everywhere.
+- **No bloom pass on the graph.** EffectComposer renders without MSAA; every
+  thin edge shimmered while the camera moved. Glow comes from per-node sprites.
+- **Graph labels are HTML with collision avoidance, not 3D text.** Sprite labels
+  overlapped in every cluster and smeared under bloom.
+- **Rendering Lumen inside the panel.** Any `filter`/`backdrop-filter` makes an
+  ancestor the containing block for `position: fixed`, so the glass sidebar
+  trapped the full-screen HUD inside itself. It is a portal to `<body>`.
+- **`.liquid-glass` sets no `position`.** A utility-layer `position: relative`
+  overrode `absolute` and dropped the floating panel into the top-left corner.
+- **Lumen's motion goes to the DOM, not state.** The waveform and core update
+  every frame from `levelRef`; routing that through React would re-render the
+  overlay 60 times a second.
 - **Exactly one copy of three.js.** `3d-force-graph` needs `three >= 0.179`;
-  pinning the direct dependency below that made npm install a second copy, and
-  the renderer threw `intersectsFrustum is not a function` every frame — a blank
-  canvas with the legend drawn over it. `vite.config.ts` dedupes `three`; when
-  bumping it, check `npm ls three` shows a single version.
+  pinning the direct dependency below that made the package manager install a
+  second copy, and the renderer threw `intersectsFrustum is not a function` every
+  frame — a blank canvas with the legend drawn over it. `vite.config.ts` dedupes
+  `three`; when bumping it, check `yarn why three` shows a single copy
+  (`@types/three` is only the type definitions).
 
 **Config**
 - Every tunable goes in `continuum-be/src/continuum/config.py` with a comment on
-  what it trades off, and in the root `.env.example`. No magic numbers in
+  what it trades off, in the root `.env.example`, and in
+  `continuum-be/.envs/.local/.api` if the container should set it. No magic numbers in
   services.
-- Two `.env` locations, both gitignored, because the two entry points have
-  different working directories: the repo root for `docker compose`, and
-  `continuum-be/.env` for a local `uvicorn` run (pydantic-settings resolves
-  `env_file=".env"` against the CWD).
+- **Two sets of backend settings, never mixed.** `continuum-be/.env`
+  (gitignored, from the root `.env.example`) is for `uv run uvicorn` on the host:
+  every URL is `localhost`. `continuum-be/.envs/.local/.api` (tracked) is for the
+  container: compose-network and `host.docker.internal` URLs. `local.yml`
+  interpolates nothing, so Compose's automatic read of the `.env` beside it has
+  no effect — otherwise it would have pushed localhost URLs and a stale embedding
+  model into the container, silently.
 
 ---
 
 ## Commands
 
-### Running it — one command
+### Running it — one command for the backend, one for the UI
 
-The whole stack is defined in compose: Qdrant, a one-shot `models` job, the API
-and the web UI. **Ollama is not a container** — it runs on the host, and the
+Compose defines the backend: Qdrant, a one-shot `models` job and the API. **The
+UI is not a container** — it runs on the Vite dev server with yarn, whose proxy
+makes `/api` same-origin. **Ollama is not a container either** — it runs on the host, and the
 containers reach it as `host.docker.internal`. The `models` job asks it to pull
 the configured models (from an 8 MB alpine image, via Ollama's HTTP API). The API
 waits for Qdrant and the models, then creates or re-embeds its collection in the
 FastAPI lifespan hook and starts the decay scheduler.
 
 ```bash
-docker compose up -d --build        # from the repo root
+cd continuum-be && docker-compose -f local.yml up -d --build   # the backend
+cd continuum-fe && yarn && yarn dev                           # the UI at :5173
 ```
 
 There is deliberately **no** separate migrate, init or model-pull step. If you
@@ -490,46 +919,133 @@ find yourself adding a startup command that has to be run by hand, put it in the
 lifespan hook or the compose graph instead.
 
 ```bash
-docker compose logs -f api
-docker compose down        # keeps volumes
-docker compose down -v     # wipes memories
+docker-compose -f local.yml logs -f api
+docker-compose -f local.yml down        # keeps volumes
+docker-compose -f local.yml down -v     # wipes memories
 ```
 
-A local `.env` at the repo root overrides the compose defaults — that is how you
-point the LLM at Groq or a remote vLLM instead of the host's Ollama.
+Container settings are in `continuum-be/.envs/.local/.api`. Personal ones — a
+Groq key, a different model — go in `.envs/.local/.api.override`, which is
+gitignored and wins over `.api`. `local.yml` pins `name: continuum`: the folder is
+`continuum-be`, and a derived project name would create new, empty volumes.
+It needs Compose v2 (`docker-compose` on this machine is a link to it).
 
 ### Developing against it
 
-Compose runs from the repo root; `uv` runs from `continuum-be/`. Nothing binds
-the two, which is the point — the backend is a self-contained uv project.
+Both run from `continuum-be/`: Docker for the dependencies, `uv` for the API.
 
 ```bash
-docker compose up -d qdrant                      # repo root; Ollama on host
-
-cd continuum-be
+docker-compose -f local.yml up -d qdrant postgres   # Ollama is on the host
 uv sync --extra dev
 uv run uvicorn continuum.main:app --reload
 ```
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 207 tests, no services needed
+uv run pytest                          # 402 tests, no services needed
+TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
+  uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
+uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
+uv run alembic current                 # which revision the database is at
 uv run ruff check . --fix
-uv run python scripts/seed_demo.py     # end-to-end against a running stack
+CONTINUUM_API_KEY=ck_... uv run python scripts/seed_demo.py   # end-to-end, live
 
 # Phase 5: check the embedder, then one slow pass, then sweep the gate for free
 uv run python scripts/run_eval.py --preflight
 uv run python scripts/run_eval.py --crowded     # right memory judged in a crowded graph?
 uv run python scripts/run_eval.py --record eval-run.json
 uv run python scripts/run_eval.py --replay eval-run.json
+# decisions from real use, exported from the Inbox → learning panel:
+uv run python scripts/run_eval.py --record run.json --add-cases continuum-cases.yaml
+uv run python scripts/run_eval.py --extraction --add-extraction continuum-extraction.yaml
+uv run python scripts/run_eval.py --retrieval continuum-retrieval.yaml   # live graph
+
+uv run python scripts/backup.py                       # -> backups/<UTC stamp>/
+uv run python scripts/restore.py backups/<stamp> --yes   # replaces current data
+uv run python scripts/recheck.py               # dry run; --apply after a backup
 ```
 
 ---
 
 ## Things that look like improvements but are not
 
+- **`Base.metadata.create_all()` "to skip Alembic in development".** Then the
+  schema the tests and developers use is not the one the migrations build, and
+  the first deploy finds out. Every environment migrates.
+- **Removing the `LOCK TABLE` in `insert_user` because the tests pass without
+  it.** The SQLite tests always pass without it. The Postgres race test does not.
+- **Moving memories into Postgres "now that we have a database".** The belief
+  graph's access patterns are vector search plus payload filters; that is what
+  Qdrant is for. Postgres holds accounts.
+- **Accepting a `user_id` in a request "for admin tools" or "for testing".**
+  That is exactly the hole authentication closed. An admin acting on someone
+  else's graph needs its own audited endpoint, not a trusted field.
+- **Swapping sessions for JWTs "to be stateless".** A session row can be deleted
+  — sign-out, password change, disabling a user all take effect on the next
+  request. A JWT stays valid until it expires, and revocation then needs the
+  very table JWTs were meant to avoid.
+- **Reading the speech out with the browser's speechSynthesis again.** It is
+  silent on Linux without speech-dispatcher and restricted in Brave, and it
+  never reports failure. Piper is the voice; the browser is the fallback.
+- **Treating speech heard while Lumen talks as a new question.** The microphone
+  hears its answer too, so what comes back is often its words mixed with yours.
+  While it is busy, only commands with its name count; everything else waits
+  until it has finished.
+- **Accepting a bare "stop" while it is speaking.** Its own answer can contain
+  the word. Mid-answer, a command needs its name ("stop, Lumen"); a lone "stop"
+  works only when it is idle.
+- **Letting /speech/synthesize load any voice a request names.** It would download
+  arbitrary models on demand. Only `VOICE_CATALOGUE` (plus the server default).
+- **Auto-starting autopilot audio on page load.** Browsers block both audio and
+  a microphone loop without a gesture; it would fail silently. The overlay asks
+  for one tap.
+- **Resolving across graphs** — letting a shared decision retire a private
+  memory, or a private fact supersede team knowledge. Sharing runs the fact
+  through the shared graph's resolver instead; losers come from the winner's
+  graph only.
+- **Copying or moving a memory into the shared space directly.** It would skip
+  the resolver: duplicates instead of reinforcement, and contradictions of team
+  knowledge that nobody is asked about.
+- **Remembering the chat's share toggle across sessions.** Sharing is always a
+  choice made now, never a leftover from last week.
+- **Letting the evidence report move the gate by itself.** It counts; a person
+  decides. The gate is the most consequential setting in the project, and a
+  run of confirmations can end with the one refutation that matters.
+- **Resolving a dispute from a free-text chat reply** ("yes, Mongo now") with
+  an LLM reading intent. That is a second LLM call arbitrating a contradiction
+  (commitment 2). The person presses "This holds".
+- **Labelling a pair that was never in dispute.** The resolve endpoint accepts
+  any loser ids; `build_labels` skips pairs without a `conflicts_with` edge, or
+  arbitrary pairings would enter the test data as contradictions.
+- **Switching dictation to the browser's `SpeechRecognition` "to drop the
+  model".** It sends every word to Google, and in Brave it does not work at all.
+- **Logging or storing a transcript.** It is user content that the user has not
+  yet chosen to send. Log its length.
+- **Sending a dictated transcript straight to chat.** Whisper mishears names and
+  numbers — the very tokens the resolver cares most about — and a sent message
+  is remembered. The user reviews it first.
+- **Letting API keys manage keys, passwords or users.** Agents run in places a
+  person does not watch; a key that can mint keys turns one leak into permanent
+  access.
+- **Publishing Qdrant or the api port on all interfaces again.** Qdrant has no
+  auth of its own by default; anyone reaching it reads every memory and never
+  meets the API's checks.
 - **Hard-deleting superseded memories to keep the collection small.** Breaks
-  commitment 1. Archive instead.
+  commitment 1. Archive instead. The only way content leaves is a person pressing
+  Forget, which redacts — the record and its edges stay.
+- **Letting a private fact retire, or flag, a team belief.** The team check
+  writes only to the private memory. If the team is out of date, the person
+  shares theirs and the team graph's resolver decides.
+- **Turning on `CALIBRATED_GATE` because the curve looks good.** It changes what
+  is silently retired, exactly like moving the gate. A person decides.
+- **Applying a suggested rule automatically.** Suggestions come from counts; the
+  last both-hold might be the exception. A person approves each rule.
+- **Judging new facts against summaries, or decaying them.** A summary is made
+  from the graph; letting it confirm a fact is the graph agreeing with itself.
+- **Re-embedding a forgotten memory's old text, or keeping its vector.** A vector
+  of the words is a trace of the words.
+- **Counting cross-graph escalations as gate evidence.** Nothing across graphs
+  is ever auto-applied, so no gate decided them; they are recorded `forced`.
 - **Auto-resolving every conflict with a second LLM call to raise throughput.**
   Breaks commitment 2. That is precisely the failure mode the project exists to
   fix.
@@ -540,21 +1056,34 @@ uv run python scripts/run_eval.py --replay eval-run.json
 - **Adding a workspace tool to "tie the monorepo together".** Nx, Turborepo and
   uv workspaces all solve shared-dependency problems these two projects do not
   have. Their only relationship is an HTTP contract.
+- **Running the stack with Compose v1 (`docker-compose` 1.29).** It cannot parse
+  `local.yml` (`name:`, optional env file), and it crashes with
+  `KeyError: 'ContainerConfig'` on Docker Engine 25+ when recreating a container,
+  leaving the stack stopped with renamed containers. `docker-compose` must be v2
+  (`docker-compose --version`); if a terminal still shows 1.29, run `rehash`.
+- **Adding `${VAR}` interpolation back into `local.yml`.** Compose would fill it
+  from `continuum-be/.env` — the host-run settings, with localhost URLs. Add the
+  setting to `.envs/.local/.api` instead.
+- **Removing `name: continuum` from `local.yml`.** The project name would become
+  `continuum-be` and the stack would start on new, empty volumes.
 - **Putting Ollama back in a container "to be self-contained".** It keeps a
   private copy of every model — 11.6 GB of pure duplication on a machine that
   already runs Ollama, which is what filled this disk. The `models` job keeps the
   one-command contract without it.
 - **Adding a manual setup step to the README instead of the compose graph.**
-  `up -d --build` is the whole contract. Bootstrap belongs in the lifespan hook
+  `up -d --build` is the whole backend contract (and `yarn dev` the UI's). Bootstrap belongs in the lifespan hook
   or in `depends_on`.
 - **Drawing an arrowhead on a `conflicts_with` edge, or sorting disputes so the
   newer belief reads first.** Both are the UI quietly answering the question the
   resolver refused to answer.
 - **Hiding the keep-both verdict behind a menu.** It is the correct answer often
   enough that burying it pushes people toward picking a side they do not believe.
-- **Baking `VITE_API_URL` into the Docker image.** Vite inlines env vars at build
-  time, so it could not be overridden at run time anyway; nginx proxies
-  same-origin `/api` instead.
+- **Setting `VITE_API_URL` to call the API cross-origin.** The session cookie is
+  SameSite=Strict and cookie writes need the CSRF header, so sign-in only works
+  same-origin. Keep going through the dev server's `/api` proxy.
+- **Switching the frontend back to npm, or dropping `resolutions.vite`.** Yarn is
+  the package manager (`packageManager` in package.json, `yarn.lock`, CI). Without
+  the resolution, yarn 1 nests a second vite under vitest.
 - **Naming a category in an extraction-prompt example, or editing the category
   list to add guidance.** Both measurably skew a 7B extractor (FINDINGS §7). Add
   guidance as a rule, and re-run the extraction corpus three times before and
@@ -567,8 +1096,9 @@ uv run python scripts/run_eval.py --replay eval-run.json
 - **Ingesting the assistant's reply along with the user's turn.** The reply is
   assembled from memory, so it would re-enter the graph as independent evidence
   for what it was derived from.
-- **Logging with `print` or the stdlib logger.** Use the module-level
-  `structlog.get_logger(__name__)`. Request id and user id are bound by
+- **Logging with `print` or `logging.getLogger()`.** Use
+  `core.logger.get_logger(__name__)`. A plain stdlib logger rejects kwargs, and
+  its records skip nothing — but a `print` skips the redaction entirely. Request id and user id are bound by
   middleware and inherited automatically; re-passing them as kwargs is noise.
 - **Adding a corpus case without a rationale, or "fixing" the corpus when a
   number looks bad.** The corpus is the instrument. Relabelling a case to make a
@@ -588,6 +1118,13 @@ uv run python scripts/run_eval.py --replay eval-run.json
 - **Relaxing the person-role rule because the judge is confident.** It was
   confident — at 1.0 — on every belief it lost. Confidence is not the signal for
   this class; the words are.
+- **Narrowing `STATEMENT_CATEGORIES` back to same-category-only "to save judge
+  calls".** It hid a stated database change (fact vs decision) from the resolver
+  entirely. Splitting silently turns detection off; merging costs a call.
+- **Guessing a subject when the words name two, or none.** A wrong subject hides
+  the pair from the right comparison; a null one at least stays comparable.
+- **Merging duplicates in the recheck backfill.** DUPLICATE discards a memory —
+  that is ingest's call on new input, never a backfill's on stored beliefs.
 - **Keying a resolution rule on the extracted category.** The extractor files
   "Sara owns billing" as `fact`; a `person`-only rule passed every corpus test and
   failed the first live one. The corpus skips extraction, so check live.

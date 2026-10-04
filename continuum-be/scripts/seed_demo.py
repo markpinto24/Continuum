@@ -1,9 +1,12 @@
 """End-to-end smoke test against a running stack.
 
-    docker compose up -d                        # from the repo root
+    docker-compose -f local.yml up -d            # from continuum-be/
+    # sign in to the web UI, Account -> API keys -> create one, then:
     cd continuum-be
-    uv run uvicorn continuum.main:app --reload
-    uv run python scripts/seed_demo.py
+    CONTINUUM_API_KEY=ck_... uv run python scripts/seed_demo.py
+
+The notes are stored as whoever owns the key. Use a throwaway account if you do
+not want demo memories in your own graph.
 
 Feeds in a short arc of work notes where a decision is later reversed, then asks
 about it over chat. Watch three things:
@@ -24,7 +27,7 @@ import os
 import httpx
 
 BASE = os.getenv("CONTINUUM_URL", "http://localhost:8000/api/v1")
-USER = "mark"
+API_KEY = os.getenv("CONTINUUM_API_KEY", "")
 
 NOTES = [
     "Kicked off the Atlas project today. Sara is leading the data platform side. "
@@ -43,7 +46,12 @@ NOTES = [
 
 
 async def main() -> None:
-    async with httpx.AsyncClient(timeout=180.0) as client:
+    if not API_KEY:
+        raise SystemExit(
+            "Set CONTINUUM_API_KEY. Create one in the web UI: Account -> API keys."
+        )
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    async with httpx.AsyncClient(timeout=180.0, headers=headers) as client:
         health = (await client.get(f"{BASE}/health")).json()
         print(f"health: {health}\n")
         if health.get("status") != "ok":
@@ -54,7 +62,7 @@ async def main() -> None:
             print(f"{note[:90]}...\n")
 
             resp = await client.post(
-                f"{BASE}/ingest", json={"user_id": USER, "text": note}
+                f"{BASE}/ingest", json={"text": note}
             )
             resp.raise_for_status()
             data = resp.json()
@@ -78,7 +86,7 @@ async def main() -> None:
         for query in ("What database are we using?", "How does Acme want updates?"):
             resp = await client.post(
                 f"{BASE}/memories/search",
-                json={"user_id": USER, "query": query, "limit": 5},
+                json={"query": query, "limit": 5},
             )
             print(f"\nQ: {query}")
             for row in resp.json()["results"]:
@@ -86,7 +94,7 @@ async def main() -> None:
                 print(f"  {row['score']:.3f}  [{m['category']:<10}] {m['content']}")
 
         # --- Phase 2: the contradiction inbox --------------------------
-        inbox = (await client.get(f"{BASE}/conflicts", params={"user_id": USER})).json()
+        inbox = (await client.get(f"{BASE}/conflicts")).json()
         print("\n" + "=" * 62)
         print(f"contradiction inbox: {inbox['total']} awaiting a human\n")
         for pair in inbox["conflicts"]:
@@ -96,13 +104,11 @@ async def main() -> None:
 
         # --- Phase 2: decay preview ------------------------------------
         preview = await client.post(
-            f"{BASE}/decay/sweep", json={"user_id": USER, "dry_run": True}
+            f"{BASE}/decay/sweep", json={"dry_run": True}
         )
         print(f"\ndecay preview (nothing written): {preview.json()}")
 
-        graph = (await client.get(
-            f"{BASE}/memories/graph", params={"user_id": USER}
-        )).json()
+        graph = (await client.get(f"{BASE}/memories/graph")).json()
         print(f"belief graph: {len(graph['nodes'])} nodes, {len(graph['edges'])} edges")
         for e in graph["edges"]:
             print(f"  {e['kind']}: {e['source'][:8]} -> {e['target'][:8]}")
@@ -115,7 +121,6 @@ async def main() -> None:
         # remember=false so asking a question does not itself become a memory
         # and skew the counts printed below.
         payload = {
-            "user_id": USER,
             "messages": [{"role": "user", "content": question}],
             "remember": False,
         }
@@ -146,7 +151,7 @@ async def main() -> None:
                     elif event == "error":
                         print(f"\n!! chat failed: {data['message']}")
 
-        total = (await client.get(f"{BASE}/memories", params={"user_id": USER})).json()
+        total = (await client.get(f"{BASE}/memories")).json()
         print(f"\ntotal memories stored: {total['total']}")
         print("\nThe reversed database decision was either auto-superseded (judge "
               "was confident) or escalated to the inbox (judge was not). Either "

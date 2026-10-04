@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from continuum.services.subjects import canonical_subject
+from continuum.services.subjects import canonical_subject, infer_subject
 
 KNOWN = {"atlas-project", "acme", "billing-service", "sara", "search-service"}
 
@@ -70,3 +70,35 @@ def test_the_accepted_merge_is_the_cheap_direction():
     """billing-team and billing-service collapse together. That costs a judge call
     ("independent"), which is the price of never splitting billing into two."""
     assert canonical_subject("billing-team", {"billing-service"}) == "billing-service"
+
+
+# --- A missing subject, taken from the words ------------------------------------
+
+NAMED = {"atlas-project", "acme-corp", "orion", "ui"}
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("Atlas is using MongoDB", "atlas-project"),
+        ("The Acme team prefers calls", "acme-corp"),
+        ("Atlas and Orion share a database", None),  # about both: no guess
+        ("Billing runs on ECS", None),  # names nothing known
+        ("The UI is slow", None),  # a two-letter slug is too common a word
+        ("Atlantic shipping is delayed", None),  # whole words only
+    ],
+)
+def test_a_missing_subject_is_taken_from_the_words_only_when_unambiguous(content, expected):
+    assert infer_subject(content, NAMED) == expected
+
+
+def test_a_qualified_and_a_plain_spelling_are_one_entity():
+    assert infer_subject("Atlas uses Postgres", {"atlas", "atlas-project"}) == "atlas"
+
+
+@pytest.mark.parametrize("placeholder", ["null", "None", "n/a", "unknown", " — "])
+def test_a_placeholder_subject_means_no_subject(placeholder):
+    from continuum.services.extraction import _normalise_subject
+
+    assert _normalise_subject(placeholder) is None
+    assert _normalise_subject("Atlas Project") == "atlas-project"

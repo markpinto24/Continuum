@@ -391,3 +391,49 @@ async def test_subjects_are_scoped_per_user(store, settings):
     mine = await service.ingest(IngestRequest(user_id="mark", text="b"))
 
     assert mine.created[0].subject == "atlas"
+
+
+async def test_an_escalation_records_what_the_resolver_thought(store, settings):
+    """So a person's later decision can be scored against it (services/feedback.py)."""
+    llm = StubLLM(
+        [
+            [{"content": "Atlas uses Postgres", "category": "decision", "subject": "atlas"}],
+            [{"content": "Atlas uses Mongo", "category": "decision", "subject": "atlas"}],
+        ],
+        judgement={"relation": "supersedes", "confidence": 0.4, "reason": "unclear"},
+    )
+    service = build_service(store, llm, settings)
+    memories = MemoryStore(store, llm, settings)  # type: ignore[arg-type]
+
+    first = (await service.ingest(IngestRequest(user_id="mark", text="a"))).created[0]
+    second = (await service.ingest(IngestRequest(user_id="mark", text="b"))).created[0]
+
+    stored = await memories.get(second.id)
+    assert stored is not None
+    escalation = stored.escalation_against(first.id)
+    assert escalation is not None
+    assert escalation.judge_relation == "supersedes"  # downgraded by the gate
+    assert escalation.judge_confidence == pytest.approx(0.4)
+    assert escalation.gate == settings.auto_supersede_confidence
+    assert escalation.similarity is not None and escalation.similarity > 0.7
+    assert (await memories.get(first.id)).escalations == []  # recorded on the incoming side
+
+
+async def test_a_fact_without_a_subject_is_given_the_one_it_names(store, settings):
+    """Live: the extractor left "Atlas is using MongoDB" without a subject, so it was
+    never judged against the Atlas decision it contradicts."""
+    llm = StubLLM(
+        [
+            [{"content": "Chose Postgres for Atlas", "category": "decision",
+              "subject": "atlas-project"}],
+            [{"content": "Atlas is using MongoDB", "category": "fact", "subject": None}],
+        ],
+        judgement={"relation": "conflict", "confidence": 0.9, "reason": "which db?"},
+    )
+    service = build_service(store, llm, settings)
+    first = (await service.ingest(IngestRequest(user_id="mark", text="a"))).created[0]
+    second = await service.ingest(IngestRequest(user_id="mark", text="b"))
+
+    assert second.created[0].subject == "atlas-project"
+    assert llm.judge_calls == 1
+    assert second.conflicts_raised == [first.id]

@@ -14,13 +14,13 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-import structlog
 from openai import AsyncOpenAI, BadRequestError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from continuum.config import Settings, get_settings
+from continuum.core.logger import get_logger
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
@@ -185,19 +185,59 @@ class LLMClient:
 
     # --- Embeddings --------------------------------------------------------
 
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """One vector per text, in order.
+
+        Ollama's bge-m3 returns NaN for a few specific inputs — deterministically,
+        e.g. "[acme-corp] Budget ... capped at 5k/month." — and answers the whole
+        batch with a 500, so one such fact made a note impossible to ingest. On
+        that error each text is embedded alone, and a failing one is retried with
+        its spacing nudged ("5k/month" -> "5k / month"): the same meaning, a
+        different token sequence. If every variant fails, the error is raised.
+        """
+        if not texts:
+            return []
+        try:
+            return await self._embed_batch(texts)
+        except Exception as exc:
+            if not _is_nan_error(exc):
+                raise
+        log.warning("llm.embed_nan", batch=len(texts))
+        return [await self._embed_resilient(text) for text in texts]
+
+    async def _embed_resilient(self, text: str) -> list[float]:
+        last: Exception | None = None
+        for variant in _embedding_variants(text):
+            try:
+                return (await self._embed_batch([variant]))[0]
+            except Exception as exc:
+                if not _is_nan_error(exc):
+                    raise
+                last = exc
+        log.error("llm.embed_nan_unrecoverable", characters=len(text))
+        assert last is not None
+        raise last
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=8),
+        # A NaN answer is deterministic: retrying the same input only waits.
+        retry=lambda state: bool(
+            state.outcome and state.outcome.failed
+            and not _is_nan_error(state.outcome.exception())
+        ),
         reraise=True,
     )
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
+    async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         response = await self._embed.embeddings.create(
             model=self.settings.embedding_model,
             input=texts,
         )
-        return [item.embedding for item in response.data]
+        vectors = [item.embedding for item in response.data]
+        # Some servers return NaN in the vector instead of failing; never store one.
+        if any(v != v for vector in vectors for v in vector):  # NaN != NaN
+            raise LLMError("embedding contained NaN")
+        return vectors
 
     async def embed_one(self, text: str) -> list[float]:
         vectors = await self.embed([text])
@@ -249,3 +289,21 @@ def parse_json(raw: str) -> Any:
                 continue
 
     raise LLMError(f"Could not parse JSON from model output: {text[:300]!r}")
+
+
+def _is_nan_error(exc: BaseException | None) -> bool:
+    return exc is not None and "nan" in str(exc).lower()
+
+
+_SPACED = re.compile(r"\s*([/|\\:;,()\[\]])\s*")
+
+
+def _embedding_variants(text: str) -> list[str]:
+    """The text, then the same words with punctuation spacing nudged."""
+    variants = [
+        text,
+        _SPACED.sub(r" \1 ", text).strip(),
+        " ".join(re.sub(r"[^\w\s.-]", " ", text).split()),
+        f"{text} .",
+    ]
+    return list(dict.fromkeys(v for v in variants if v))

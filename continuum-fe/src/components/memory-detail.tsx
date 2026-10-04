@@ -1,5 +1,15 @@
-import { ArrowUpRight, Loader2, Quote, RotateCcw, ThumbsUp } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import {
+  ArrowUpRight,
+  Ban,
+  EraserIcon,
+  Layers,
+  Loader2,
+  Quote,
+  RotateCcw,
+  ThumbsUp,
+  Users,
+} from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,14 +23,24 @@ import {
   STATUS_LABEL,
   clamp01,
 } from '@/lib/memory-style'
-import type { Memory } from '@/lib/types'
+import { SHARED_SPACE, type Memory, type RejectReason, type ShareResponse } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 export interface MemoryDetailProps {
   memoryId: string | null
   onSelect: (id: string) => void
   onMutated: () => void
+  /** Who is looking: decides whether corrections are offered (the server decides for real). */
+  userId?: string
+  isAdmin?: boolean
 }
+
+const REJECT_REASONS: { value: RejectReason; label: string }[] = [
+  { value: 'not_a_fact', label: 'Not a fact (a question, a guess, chit-chat)' },
+  { value: 'merged', label: 'Two separate facts joined into one' },
+  { value: 'misread', label: 'The text says something else' },
+  { value: 'other', label: 'Something else' },
+]
 
 /**
  * Everything the graph node could not say: the verbatim span it came from, the
@@ -30,13 +50,70 @@ export interface MemoryDetailProps {
  * the question a memory system has to be able to answer, and `source_excerpt` is
  * the answer — the exact text that produced this belief.
  */
-export function MemoryDetail({ memoryId, onSelect, onMutated }: MemoryDetailProps) {
+const SHARE_OUTCOME: Record<ShareResponse['outcome'], string> = {
+  created: 'Shared. Everyone on this Continuum can now draw on it.',
+  merged: 'The team already knew this — the shared memory was confirmed instead of duplicated.',
+  superseded: 'Shared, and it replaced an older team belief.',
+  conflict: 'Shared, but it contradicts what the team holds. It is waiting in everyone’s inbox.',
+}
+
+export function MemoryDetail({
+  memoryId,
+  onSelect,
+  onMutated,
+  userId,
+  isAdmin = false,
+}: MemoryDetailProps) {
   const [busy, setBusy] = useState(false)
+  const [correcting, setCorrecting] = useState<'reject' | 'forget' | null>(null)
+  const [correctionNote, setCorrectionNote] = useState<string | null>(null)
   const resource = useResource<Memory | null>(
     () => (memoryId ? api.memory(memoryId) : Promise.resolve(null)),
     [memoryId],
   )
   const memory = resource.data
+
+  const [shareNote, setShareNote] = useState<string | null>(null)
+  // Reset when another memory is selected.
+  useEffect(() => {
+    setShareNote(null)
+    setCorrecting(null)
+    setCorrectionNote(null)
+  }, [memoryId])
+
+  /** Run a correction, then say what it did. */
+  const correct = useCallback(
+    async (run: () => Promise<string>) => {
+      setBusy(true)
+      try {
+        setCorrectionNote(await run())
+        setCorrecting(null)
+        resource.refresh()
+        onMutated()
+      } catch (cause) {
+        setCorrectionNote(cause instanceof Error ? cause.message : String(cause))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [onMutated, resource],
+  )
+
+  /** Share, then say what the shared graph's resolver made of it. */
+  const share = useCallback(async () => {
+    if (!memory) return
+    setBusy(true)
+    try {
+      const { outcome, shared } = await api.shareMemory(memory.id)
+      setShareNote(SHARE_OUTCOME[outcome])
+      onMutated()
+      onSelect(shared.id)
+    } catch (cause) {
+      setShareNote(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }, [memory, onMutated, onSelect])
 
   const act = useCallback(
     async (action: (id: string) => Promise<Memory>) => {
@@ -66,18 +143,53 @@ export function MemoryDetail({ memoryId, onSelect, onMutated }: MemoryDetailProp
   if (!memory) return null
 
   const halfLife = CATEGORY_HALF_LIFE_DAYS[memory.category]
+  const forgotten = memory.redacted_at !== null
+  const summary = memory.kind === 'summary'
+  const mayCorrect =
+    !forgotten &&
+    (userId === undefined ||
+      memory.user_id === userId ||
+      (memory.user_id === SHARED_SPACE && (isAdmin || memory.shared_by === userId)))
 
   return (
-    <div className="scrollbar-slim h-full overflow-y-auto px-4 py-4">
+    <div className="scrollbar-slim h-full overflow-y-auto px-5 py-5 animate-fade-up">
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <Badge className={cn('border', STATUS_CLASS[memory.status])}>
           {STATUS_LABEL[memory.status]}
         </Badge>
         <Badge>{CATEGORY_LABEL[memory.category]}</Badge>
         {memory.subject && <Badge>{memory.subject}</Badge>}
+        {summary && (
+          <Badge className="border-violet-400/30 text-violet-300">
+            <Layers className="size-3" />
+            Summary
+          </Badge>
+        )}
+        {forgotten && <Badge className="border-danger/40 text-danger">Forgotten</Badge>}
+        {memory.rejected_reason && (
+          <Badge className="border-danger/40 text-danger">Rejected</Badge>
+        )}
+        {memory.user_id === SHARED_SPACE && (
+          <Badge className="border-sky-400/30 text-sky-300">
+            <Users className="size-3" />
+            Shared{memory.shared_by_email ? ` by ${memory.shared_by_email}` : ''}
+          </Badge>
+        )}
       </div>
 
-      <p className="text-sm leading-relaxed text-foreground">{memory.content}</p>
+      <p className="text-[15px] leading-relaxed font-medium text-foreground">{memory.content}</p>
+      {summary && (
+        <p className="mt-1 text-[11px] leading-relaxed text-muted/80">
+          Written from {memory.derived_from.length} memories about this subject. A summary is never
+          evidence of its own: it is rewritten when they change.
+        </p>
+      )}
+      {forgotten && (
+        <p className="mt-1 text-[11px] leading-relaxed text-muted/80">
+          Forgotten on {formatDate(memory.redacted_at as string)}. Its words are gone everywhere
+          Continuum kept them; the record stays so what replaced what still reads.
+        </p>
+      )}
 
       <ConfidenceBar value={memory.confidence} />
 
@@ -125,18 +237,33 @@ export function MemoryDetail({ memoryId, onSelect, onMutated }: MemoryDetailProp
         onSelect={onSelect}
         tone="danger"
       />
+      <EdgeList
+        title="Disagrees with the team"
+        hint="Settle it in the inbox: the team is right, yours holds, or both are."
+        ids={memory.team_conflicts_with}
+        onSelect={onSelect}
+        tone="danger"
+      />
+      <EdgeList
+        title="Written from"
+        hint="The memories this summary condenses."
+        ids={memory.derived_from}
+        onSelect={onSelect}
+      />
 
-      <div className="mt-5 flex gap-2">
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={busy}
-          onClick={() => void act(api.reinforce)}
-        >
-          {busy ? <Loader2 className="animate-spin" /> : <ThumbsUp />}
-          Still true
-        </Button>
-        {memory.status !== 'active' && (
+      <div className="mt-5 flex flex-wrap gap-2">
+        {!forgotten && !summary && (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => void act(api.reinforce)}
+          >
+            {busy ? <Loader2 className="animate-spin" /> : <ThumbsUp />}
+            Still true
+          </Button>
+        )}
+        {memory.status !== 'active' && !memory.shared_as && !forgotten && (
           <Button
             size="sm"
             variant="outline"
@@ -147,11 +274,108 @@ export function MemoryDetail({ memoryId, onSelect, onMutated }: MemoryDetailProp
             Restore
           </Button>
         )}
+        {memory.user_id !== SHARED_SPACE && memory.status === 'active' && !summary && (
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void share()}>
+            <Users />
+            Share with team
+          </Button>
+        )}
       </div>
+      {shareNote && <p className="mt-2 text-[11px] leading-relaxed text-sky-300">{shareNote}</p>}
+      {memory.shared_as && (
+        <button
+          type="button"
+          onClick={() => onSelect(memory.shared_as as string)}
+          className="mt-2 text-[11px] text-sky-300 hover:underline"
+        >
+          Moved to the shared space →
+        </button>
+      )}
       <p className="mt-2 text-[11px] leading-relaxed text-muted/70">
         “Still true” raises confidence and resets the decay clock. “Restore” brings a superseded
         or archived belief back — nothing here is a one-way door.
       </p>
+
+      {mayCorrect && (
+        <section className="mt-4 border-t border-border pt-3">
+          <SectionLabel>Correct it</SectionLabel>
+          {correcting === null && (
+            <div className="flex flex-wrap gap-2">
+              {!memory.rejected_reason && (
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => setCorrecting('reject')}>
+                  <Ban />
+                  This isn’t a real fact
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setCorrecting('forget')}>
+                <EraserIcon />
+                Forget…
+              </Button>
+            </div>
+          )}
+          {correcting === 'reject' && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] leading-relaxed text-muted">
+                What went wrong? It is archived with your reason, anything it wrongly replaced comes
+                back, and the extractor is tested against it from now on.
+              </p>
+              {REJECT_REASONS.map(({ value, label }) => (
+                <Button
+                  key={value}
+                  size="sm"
+                  variant="secondary"
+                  className="w-full justify-start"
+                  disabled={busy}
+                  onClick={() =>
+                    void correct(async () => {
+                      const { restored } = await api.rejectMemory(memory.id, value)
+                      return restored.length
+                        ? `Rejected. ${restored.length} belief${restored.length === 1 ? '' : 's'} it had replaced ${restored.length === 1 ? 'is' : 'are'} active again.`
+                        : 'Rejected and archived.'
+                    })
+                  }
+                >
+                  {label}
+                </Button>
+              ))}
+              <Button size="sm" variant="ghost" onClick={() => setCorrecting(null)}>
+                Cancel
+              </Button>
+            </div>
+          )}
+          {correcting === 'forget' && (
+            <div className="space-y-1.5 rounded-md border border-danger/40 bg-danger/5 px-3 py-2">
+              <p className="text-[11px] leading-relaxed text-foreground">
+                Forgetting erases what this memory says — its text, source excerpt, subject and
+                search vector, and the copies in your decisions, feedback and any summary. The empty
+                record stays so the graph still reads. <strong>This cannot be undone.</strong>
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={busy}
+                  onClick={() =>
+                    void correct(async () => {
+                      await api.forgetMemory(memory.id)
+                      return 'Forgotten.'
+                    })
+                  }
+                >
+                  {busy ? <Loader2 className="animate-spin" /> : <EraserIcon />}
+                  Forget permanently
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setCorrecting(null)}>
+                  Keep it
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+      {correctionNote && (
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">{correctionNote}</p>
+      )}
     </div>
   )
 }
@@ -192,26 +416,13 @@ function EdgeList({
 }) {
   if (ids.length === 0) return null
   return (
-    <section className="mt-4">
+    <section className="mt-5">
       <SectionLabel>{title}</SectionLabel>
-      <p className="mb-1.5 text-[11px] leading-relaxed text-muted/80">{hint}</p>
-      <ul className="space-y-1">
+      <p className="mb-2 text-xs leading-relaxed text-muted">{hint}</p>
+      <ul className="space-y-1.5">
         {ids.map((id) => (
           <li key={id}>
-            <button
-              type="button"
-              onClick={() => onSelect(id)}
-              className={cn(
-                'flex w-full items-center gap-1.5 rounded border px-2 py-1 text-left font-mono text-[11px]',
-                'transition-colors hover:bg-surface-raised',
-                tone === 'danger'
-                  ? 'border-danger/30 text-danger/90'
-                  : 'border-border text-muted',
-              )}
-            >
-              <ArrowUpRight className="size-3 shrink-0" />
-              {id.slice(0, 8)}…
-            </button>
+            <EdgeItem id={id} onSelect={onSelect} tone={tone} />
           </li>
         ))}
       </ul>
@@ -219,9 +430,46 @@ function EdgeList({
   )
 }
 
+/** One linked memory, by what it says — an id means nothing to a person. */
+function EdgeItem({
+  id,
+  onSelect,
+  tone,
+}: {
+  id: string
+  onSelect: (id: string) => void
+  tone?: 'danger'
+}) {
+  const linked = useResource<Memory | null>(() => api.memory(id).catch(() => null), [id])
+  const memory = linked.data
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(id)}
+      className={cn(
+        'group flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs leading-relaxed ring-1 transition-colors',
+        tone === 'danger'
+          ? 'bg-amber-400/[0.06] text-amber-50/90 ring-amber-400/25 hover:bg-amber-400/10'
+          : 'bg-surface text-foreground/85 ring-border hover:bg-surface-raised',
+      )}
+    >
+      <ArrowUpRight className="mt-0.5 size-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100" />
+      <span className="min-w-0 flex-1">
+        {memory ? memory.content : <span className="font-mono text-muted">{id.slice(0, 8)}…</span>}
+        {memory && (
+          <span className="mt-0.5 block text-[11px] text-muted">
+            {STATUS_LABEL[memory.status]} · {CATEGORY_LABEL[memory.category]} ·{' '}
+            {formatDate(memory.created_at)}
+          </span>
+        )}
+      </span>
+    </button>
+  )
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-muted uppercase">
+    <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">
       {children}
     </h4>
   )

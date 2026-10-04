@@ -58,6 +58,12 @@ class ExtractionReport(BaseModel):
         ..., description="Extracted facts carrying a source excerpt. Provenance coverage."
     )
 
+    forbidden_total: int = 0
+    forbidden_rate: float = Field(
+        0.0, description="Forbidden statements extracted anyway (rejected in real use)."
+    )
+    forbidden_hits: list[str] = Field(default_factory=list)
+
     missed: list[str] = Field(default_factory=list, description="Labelled facts never found.")
     spurious: list[str] = Field(default_factory=list, description="Extractions matching no label.")
 
@@ -111,8 +117,16 @@ def score_extraction(
     with_excerpt = 0
     missed: list[str] = []
     spurious: list[str] = []
+    forbidden_total = 0
+    forbidden_hits: list[str] = []
 
     for case, actual in results:
+        forbidden_total += len(case.forbid)
+        forbidden_hits.extend(
+            f"{case.id}: {bad}"
+            for bad in case.forbid
+            if any(overlap(bad, got.content) >= MATCH_THRESHOLD for got in actual)
+        )
         labelled += len(case.expect)
         extracted += len(actual)
         with_excerpt += sum(bool(f.source_excerpt) for f in actual)
@@ -149,6 +163,9 @@ def score_extraction(
         category_accuracy=_ratio(right_category, matched),
         subject_accuracy=_ratio(right_subject, matched),
         excerpt_rate=_ratio(with_excerpt, extracted),
+        forbidden_total=forbidden_total,
+        forbidden_rate=_ratio(len(forbidden_hits), forbidden_total),
+        forbidden_hits=forbidden_hits,
         missed=missed,
         spurious=spurious,
     )

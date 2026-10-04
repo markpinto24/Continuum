@@ -35,6 +35,10 @@ be the UI deciding the very thing the backend escalated to you.
 
 ## What it does
 
+Dark, calm, minimal: Inter for text (bundled — no font requests leave the
+machine), a cyan accent for the interface, and the graph's own status colours
+for the data.
+
 - **Belief graph** off `GET /memories/graph`. Click a node to select it; its
   one-hop neighbourhood stays lit and the rest of the scene dims.
 - **Memory detail** — the verbatim `source_excerpt` the belief was extracted
@@ -59,6 +63,34 @@ be the UI deciding the very thing the backend escalated to you.
 - **Answers render as Markdown**: highlighted, language-labelled code blocks
   with a copy button, lists, bold. Model output is untrusted, so HTML it emits
   is shown as text rather than injected.
+- **Dictate instead of typing.** The microphone in the chat box records; your
+  own server transcribes it with a local Whisper model (never a cloud service)
+  and the text lands in the box for you to check before sending. Esc cancels.
+  Needs `localhost` or HTTPS — browsers only offer the microphone to secure pages.
+- **Read an answer aloud** with the button under it, in your server's local
+  neural voice (the browser's own voice is only a fallback).
+- **Lumen** (the glowing button in the composer): a full-screen, JARVIS-style
+  heads-up display — rings, a voice-reactive waveform and core, live captions.
+  Talk hands-free. Speak, pause for two
+  seconds, and hear the answer as it is written. Say “stop, Lumen” to interrupt
+  its mid-answer, and “thank you, Lumen” to finish — the whole conversation is
+  then in the chat. Headphones make interrupting its instant.
+- **Choose its voice** in Settings → Voice: 12 voices, a “Hear it” preview, and
+  speed. Saved to your account.
+- **Share with the team:** a memory's “Share with team” button, or the people
+  button in chat to share what you say. Team knowledge has a halo in the graph.
+- **Teach it.** On a memory: *This isn’t a real fact* (pick why; anything it
+  wrongly replaced comes back) or *Forget…* (asks twice; erases its words
+  everywhere). Under each answer: 👍/👎 and *Something missing?* to mark the
+  memory that should have come up.
+- **Your note vs the team's** shows in the inbox and the chat: *the team is
+  right*, *mine holds — share it*, or *both are true*. Only your side changes.
+- **Learning panel** (Inbox): your decisions or everyone's, the judge's
+  calibration, and rules to approve when you keep saying both are true.
+- **Look back**: the date picker in the header shows the graph, and answers,
+  as they stood on that day.
+- **Summaries** wear a violet ring in the graph. Settings → Data: download your
+  memories, or summarise now.
 - **Drag the sidebar's left edge to resize it** (arrow keys work when it is
   focused; double-click resets). The width is remembered per browser.
 
@@ -66,27 +98,32 @@ be the UI deciding the very thing the backend escalated to you.
 
 ## Running it
 
-With the stack up (`docker compose up -d` from the repo root), `web` is served at
-<http://localhost:3000> and nginx proxies `/api` to the API container.
-
-For hot reload against a locally running backend:
+The UI is not a container. Start the backend with `docker-compose -f local.yml up -d --build`
+from `continuum-be/`, then:
 
 ```bash
 cd continuum-fe
-npm install
-npm run dev            # http://localhost:5173
+yarn                   # install (yarn 1; the version is pinned in package.json)
+yarn dev               # http://localhost:5173
 ```
 
-Vite proxies `/api` to `http://localhost:8000`, so the browser sees one origin
-and CORS never enters the picture. Point it elsewhere with
-`VITE_API_PROXY=http://host:port npm run dev`, or set `VITE_API_URL` to call an
-absolute origin directly.
+Vite proxies `/api` to `http://localhost:8000`, so the browser sees one origin:
+CORS never enters the picture, and the SameSite=Strict session cookie works.
+Point it elsewhere with `VITE_API_PROXY=http://host:port yarn dev`. The dev
+server listens on localhost only; `yarn dev --host` exposes it on your network.
 
 ```bash
-npm run lint           # eslint, flat config, TypeScript
-npm run build          # tsc -b, then vite build
-npm test               # vitest, jsdom — 40 tests, no backend needed
+yarn lint              # eslint, flat config, TypeScript
+yarn build             # tsc -b, then vite build
+yarn test              # vitest, jsdom — 148 tests, no backend needed
 ```
+
+Two yarn-specific details, both in `package.json` / `.yarnrc`:
+
+- `resolutions.vite` keeps vitest on the app's vite. Yarn 1 would otherwise nest
+  a separate vite 7 under vitest and the config stops typechecking.
+- `.yarnrc` ignores engine checks: a few eslint dependencies declare node
+  >= 20.19 and work fine on 20.16. Delete it once node is upgraded.
 
 ---
 

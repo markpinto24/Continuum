@@ -10,6 +10,8 @@
 .env.*.local
 # The template is the one env file that IS tracked.
 !.env.example
+# continuum-be/.envs/.local/* are tracked local defaults; personal overrides are not.
+*.override
 
 # --- Python (continuum-be) -------------------------------------------------
 __pycache__/
@@ -41,3 +43,6 @@ build/
 .DS_Store
 .idea/
 .vscode/
+
+# Backups hold every memory in plain text (scripts/backup.py)
+continuum-be/backups/

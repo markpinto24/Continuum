@@ -1,0 +1,215 @@
+"""Table definitions — the single source Alembic compares migrations against.
+
+Rows here are storage shapes, not the domain: `clients/authdb.py` converts them
+to the pure models in `models/auth.py` at the boundary, so nothing outside the
+adapter ever holds a SQLAlchemy object (or a password hash).
+
+Changing a table means changing this file AND adding a migration:
+
+    uv run alembic revision --autogenerate -m "what changed"
+
+`test_migrations_match_the_models` fails if the two drift apart.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, MetaData, String, Text
+from sqlalchemy.engine import Dialect
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.types import TypeDecorator
+
+# Deterministic constraint names. Without them Postgres invents names, and a
+# later migration that drops or alters a constraint cannot refer to it portably.
+NAMING = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+
+class Base(DeclarativeBase):
+    metadata = MetaData(naming_convention=NAMING)
+
+
+class UTCDateTime(TypeDecorator[datetime]):
+    """A timestamp that is always timezone-aware UTC in Python.
+
+    Postgres stores `timestamptz` and hands back aware values; SQLite (the test
+    database) has no timezone type and hands back naive ones. Normalising here
+    means expiry checks like `expires_at <= now()` behave identically on both,
+    instead of raising "can't compare offset-naive and offset-aware" in tests
+    only — or, worse, in production only.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError("naive datetime given to a UTC column; attach a timezone")
+        return value.astimezone(UTC)
+
+    def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+class UserRow(Base):
+    __tablename__ = "users"
+
+    # The memory owner id (Qdrant payload `user_id`). Never the email.
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True)
+    password_hash: Mapped[str] = mapped_column(Text)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # Spoken-answer preferences. Null = the server default (TTS_VOICE, natural pace).
+    tts_voice: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tts_speed: Mapped[float | None] = mapped_column(nullable=True)
+
+
+class SessionRow(Base):
+    __tablename__ = "sessions"
+
+    # SHA-256 of the cookie value. The cookie itself is never stored.
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+
+
+class ApiKeyRow(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100))
+    prefix: Mapped[str] = mapped_column(String(16))
+    # SHA-256 of the key. Unique, and the lookup path for every agent request.
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_api_keys_user_created", "user_id", "created_at"),)
+
+
+class ResolutionLabelRow(Base):
+    """A conflict a person settled, with what the resolver thought beforehand.
+
+    Each row is one labelled example for the resolver — the thing the Phase 5
+    corpus is made of — except written by real use instead of by hand. It copies
+    the two statements rather than pointing at the memories: those decay, get
+    reinforced and change status, and the label must describe the pair as the
+    resolver saw it.
+    """
+
+    __tablename__ = "resolution_labels"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    # The pair, older first — the corpus's "existing" and "incoming".
+    existing_memory_id: Mapped[str] = mapped_column(String(64))
+    existing_content: Mapped[str] = mapped_column(Text)
+    existing_category: Mapped[str] = mapped_column(String(32))
+    existing_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    existing_confidence: Mapped[float] = mapped_column()
+    # How much older the existing memory was when the new one arrived.
+    existing_age_days: Mapped[float] = mapped_column()
+    incoming_memory_id: Mapped[str] = mapped_column(String(64))
+    incoming_content: Mapped[str] = mapped_column(Text)
+    incoming_category: Mapped[str] = mapped_column(String(32))
+    incoming_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # What the resolver thought. All null for conflicts escalated before this
+    # was recorded — still a valid label, just not evidence about the gate.
+    judge_relation: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    judge_confidence: Mapped[float | None] = mapped_column(nullable=True)
+    similarity: Mapped[float | None] = mapped_column(nullable=True)
+    gate: Mapped[float | None] = mapped_column(nullable=True)
+    forced: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # What the person decided, and the action that makes it right for the resolver.
+    decision: Mapped[str] = mapped_column(String(16))  # newer_holds | older_holds | both_hold
+    expected_action: Mapped[str] = mapped_column(String(16))  # retire | escalate | store
+    # Whose graph the pair lived in: the decider's own, or the shared space. A
+    # rule learned from these decisions applies to that graph only.
+    graph_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    __table_args__ = (Index("ix_resolution_labels_user_created", "user_id", "created_at"),)
+
+
+
+class ExtractionFeedbackRow(Base):
+    """A memory someone said was never a real fact — a lesson for the extractor.
+
+    Copies the text, like resolution labels: the memory itself is archived and
+    may later be forgotten, but the extractor's mistake should stay learnable.
+    """
+
+    __tablename__ = "extraction_feedback"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    memory_id: Mapped[str] = mapped_column(String(64))
+    content: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(32))
+    source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # not_a_fact | merged | misread | other
+    reason: Mapped[str] = mapped_column(String(32))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (Index("ix_extraction_feedback_user_created", "user_id", "created_at"),)
+
+
+class AnswerFeedbackRow(Base):
+    """A thumbs up or down on a chat answer, with what retrieval had put in play.
+
+    The labelled data retrieval has never had: which memories a question
+    should have surfaced (`missing_ids`), against which ones it did.
+    """
+
+    __tablename__ = "answer_feedback"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    query: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    rating: Mapped[int] = mapped_column()  # +1 | -1
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    used_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    cited_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    missing_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    __table_args__ = (Index("ix_answer_feedback_user_created", "user_id", "created_at"),)
+
+
+class ResolutionRuleRow(Base):
+    """A rule a person approved: "statements about <subject> are compatible".
+
+    Suggested from repeated "both are true" decisions, never created by the
+    system alone. While active, the resolver stores such pairs side by side
+    instead of asking again.
+    """
+
+    __tablename__ = "resolution_rules"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    # The graph it governs: a user id, or the shared space.
+    owner: Mapped[str] = mapped_column(String(64), index=True)
+    subject: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(32))  # compatible
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

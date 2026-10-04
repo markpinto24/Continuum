@@ -143,4 +143,29 @@ class ExtractionCase(BaseModel):
     why: str
     text: str
     expect: list[ExpectedFact] = Field(default_factory=list)
+    forbid: list[str] = Field(
+        default_factory=list,
+        description="Statements that must NOT be extracted — e.g. a question someone "
+        "rejected after it was recorded as a belief.",
+    )
+    tags: list[str] = Field(default_factory=list)
+
+
+class ExpectedMemory(BaseModel):
+    id: str
+    content: str
+
+
+class RetrievalCase(BaseModel):
+    """A question, and memories in a live graph that should come up for it.
+
+    From answer feedback ("should have come up"). Unlike the other corpora these
+    are checked against a real graph, by id, so they run where the graph is.
+    """
+
+    id: str
+    why: str
+    owner: str
+    query: str
+    expect: list[ExpectedMemory] = Field(..., min_length=1)
     tags: list[str] = Field(default_factory=list)

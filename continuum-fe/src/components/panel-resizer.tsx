@@ -30,7 +30,7 @@ export function PanelResizer({
     >
       <span
         className={cn(
-          'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors',
+          'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors',
           'group-hover:bg-accent/60 group-focus-visible:bg-accent',
           dragging && 'bg-accent',
         )}

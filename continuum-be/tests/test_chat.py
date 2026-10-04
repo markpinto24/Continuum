@@ -21,6 +21,7 @@ from continuum.models.schemas import (
     RetrievedMemory,
 )
 from continuum.services.chat import ChatService, build_system_prompt
+from tests.auth_helpers import sign_in_as
 
 
 @pytest.fixture
@@ -56,9 +57,10 @@ class StubRetrieval:
         self.context = context
         self.calls: list[str] = []
 
-    async def retrieve(self, *, user_id, query, limit=None):  # noqa: ANN001, ARG002
+    async def retrieve(self, *, user_id, query, limit=None, as_of=None):  # noqa: ANN001, ARG002
         self.calls.append(query)
-        return self.context
+        self.as_of = as_of
+        return self.context.model_copy(update={"as_of": as_of})
 
 
 class StubIngest:
@@ -360,13 +362,14 @@ async def test_the_route_frames_events_as_server_sent_events(settings):
 
     app = FastAPI()
     app.include_router(chat_route.router)
+    sign_in_as(app)
     app.state.chat = service
     app.state.retrieval = StubRetrieval(context)
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/chat", json={"user_id": "mark", "messages": [{"role": "user", "content": "db?"}]}
+            "/chat", json={"messages": [{"role": "user", "content": "db?"}]}
         )
 
     assert response.status_code == 200
@@ -390,13 +393,14 @@ async def test_the_route_rejects_a_turn_with_nothing_to_answer(settings):
 
     app = FastAPI()
     app.include_router(chat_route.router)
+    sign_in_as(app)
     app.state.chat = build(ChatContext(query=""), StubLLM(["x"]), settings)
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/chat",
-            json={"user_id": "mark", "messages": [{"role": "assistant", "content": "hi"}]},
+            json={"messages": [{"role": "assistant", "content": "hi"}]},
         )
 
     assert response.status_code == 422
@@ -413,14 +417,32 @@ async def test_the_context_endpoint_previews_retrieval_without_generating(settin
 
     app = FastAPI()
     app.include_router(chat_route.router)
+    sign_in_as(app)
     app.state.retrieval = retrieval
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/chat/context", json={"user_id": "mark", "query": "db?"}
+            "/chat/context", json={"query": "db?"}
         )
 
     assert response.status_code == 200
     assert response.json()["memories"][0]["memory"]["id"] == used.id
     assert retrieval.calls == ["db?"]
+
+
+# --- As of a date -------------------------------------------------------------
+
+
+async def test_a_question_about_the_past_says_so_and_is_never_remembered(settings):
+    from datetime import UTC, datetime
+
+    march = datetime(2026, 3, 15, tzinfo=UTC)
+    ingest = StubIngest()
+    llm = StubLLM(["Postgres, then."])
+    events = await collect(
+        build(ChatContext(query="q"), llm, settings, ingest=ingest), request(as_of=march)
+    )
+    assert "AS OF 2026-03-15" in llm.system_prompt
+    assert events[0].data["as_of"].startswith("2026-03-15")
+    assert ingest.requests == [] and events[-1].data["remembered"] is None

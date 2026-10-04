@@ -21,14 +21,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import structlog
 from pydantic import BaseModel
 
 from continuum.config import Settings, get_settings
+from continuum.core.logger import get_logger
 from continuum.models.memory import MemoryStatus
 from continuum.services.memory_store import MemoryStore
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 
 class DecayReport(BaseModel):
@@ -54,6 +54,8 @@ class DecayService:
         )
 
         for memory in candidates:
+            if memory.kind == "summary":
+                continue  # derived: rewritten when its sources change, never decayed
             report.scanned += 1
 
             new_confidence = memory.decayed_confidence(

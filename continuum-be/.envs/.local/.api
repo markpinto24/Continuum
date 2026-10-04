@@ -1,0 +1,73 @@
+# Settings for the api container (and the models job) in local.yml.
+#
+# Tracked in git on purpose: local-development defaults, nothing secret, so a
+# fresh clone runs with no setup. Never put a real credential here. For a hosted
+# LLM key or any personal override, create .envs/.local/.api.override (same
+# format, gitignored); values there win over this file.
+#
+# This is NOT continuum-be/.env. That file configures a local `uv run uvicorn`,
+# whose URLs point at localhost; these point at the compose network and the host.
+
+ENVIRONMENT=docker
+DEBUG=false
+LOG_LEVEL=INFO
+# line = coloured human-readable lines; json = one object per line for aggregators
+LOG_FORMAT=line
+LOG_COLORS=true
+
+# --- Where things are, from inside the container ---------------------------
+QDRANT_URL=http://qdrant:6333
+QDRANT_COLLECTION=continuum_memories
+# Must match .postgres.
+DATABASE_URL=postgresql+asyncpg://continuum:continuum@postgres:5432/continuum
+# Ollama runs on the host; host.docker.internal is mapped in local.yml.
+OLLAMA_URL=http://host.docker.internal:11434
+
+# --- Models ----------------------------------------------------------------
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_API_KEY=ollama
+LLM_MODEL=qwen2.5:7b-instruct
+EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1
+EMBEDDING_API_KEY=ollama
+# bge-m3 since Phase 5 (FINDINGS §1, §8). Changing it is safe: on startup the
+# api re-embeds every memory into a collection for the new model.
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_DIM=1024
+
+# --- Behaviour -------------------------------------------------------------
+DECAY_ENABLED=true
+DECAY_INTERVAL_MINUTES=360
+AUTO_SUPERSEDE_CONFIDENCE=0.80
+
+# --- Dictation (speech to text) --------------------------------------------
+# Transcribed locally by Whisper; audio never leaves the machine or is stored.
+SPEECH_ENABLED=true
+SPEECH_MODEL=base
+SPEECH_LANGUAGE=en
+SPEECH_MAX_SECONDS=120
+# Spoken answers (read-aloud, autopilot): a local Piper voice, ~63 MB, cached
+# beside the Whisper model. Any voice from huggingface.co/rhasspy/piper-voices.
+TTS_ENABLED=true
+TTS_VOICE=en_US-lessac-medium
+TTS_LENGTH_SCALE=1.0
+# The model downloads are the only Hugging Face calls; send no usage telemetry.
+HF_HUB_DISABLE_TELEMETRY=1
+
+# --- Shared team space -----------------------------------------------------
+SHARED_SPACE_ENABLED=true
+TEAM_CROSS_CHECK=true
+
+# --- Learning and memory -----------------------------------------------------
+CALIBRATED_GATE=false
+SUMMARIES_ENABLED=true
+RETRIEVAL_KEYWORD_WEIGHT=0.7
+
+# --- Authentication --------------------------------------------------------
+# Empty = create the first admin from the web UI on first visit.
+ADMIN_EMAIL=
+ADMIN_PASSWORD=
+ADMIN_USER_ID=
+AUTH_ALLOW_WEB_SETUP=true
+SESSION_TTL_HOURS=336
+LLM_REQUESTS_PER_MINUTE=30
+MAX_INPUT_CHARS=50000

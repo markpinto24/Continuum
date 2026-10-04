@@ -7,6 +7,7 @@ and in production (vLLM / hosted OpenAI-compatible endpoint + managed Qdrant).
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,8 +26,150 @@ class Settings(BaseSettings):
     environment: str = "local"
     debug: bool = True
     log_level: str = "INFO"
+    # "line": one coloured, human-readable line per event (Level, Timestamp,
+    # Module, Function, Message + fields). "json": one object per line, for a log
+    # aggregator. Both go through the same redaction; see core/logger.py.
+    log_format: Literal["line", "json"] = "line"
+    # ANSI colour by level in the line format. Turn off when logs go to a file
+    # or a system that shows escape codes literally.
+    log_colors: bool = True
     api_prefix: str = "/api/v1"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+
+    # --- Relational database -----------------------------------------------
+    # Users, sessions and API keys live in Postgres, not Qdrant: they need unique
+    # constraints and transactions, and a lost vector index must never be able to
+    # take the credentials with it. Postgres rather than a local file so several
+    # API processes can share one account store. Any SQLAlchemy async URL works;
+    # the tests use sqlite+aiosqlite so they need no running service.
+    # The schema is owned by Alembic and upgraded on startup (db/migrate.py).
+    database_url: str = "postgresql+asyncpg://continuum:continuum@localhost:5432/continuum"
+    # Connections held open per API process. Sign-in, session and key checks are
+    # single indexed queries, so a small pool goes a long way; raise it with the
+    # worker count, keeping the total under Postgres's max_connections.
+    database_pool_size: int = 5
+    database_max_overflow: int = 5
+
+    # --- Authentication ----------------------------------------------------
+    # How long a web sign-in lasts. Absolute, not sliding: a stolen cookie stops
+    # working on a fixed date however actively it is used.
+    session_ttl_hours: int = 24 * 14
+    session_cookie_name: str = "continuum_session"
+    # None = decide per request (Secure when the request arrived over HTTPS,
+    # directly or via X-Forwarded-Proto). Force True behind a TLS proxy that
+    # does not forward the scheme; never force False in production.
+    session_cookie_secure: bool | None = None
+    # A browser request authenticated by cookie must carry this header on every
+    # unsafe method. A custom header cannot be set cross-site without a CORS
+    # preflight, which the CORS policy refuses — so a forged form post fails.
+    csrf_header: str = "x-continuum-client"
+    # Behind a reverse proxy every request arrives from the proxy's address, so
+    # the sign-in lockout would count all users as one client. When true, the
+    # X-Real-IP header identifies the client instead. Only enable behind a proxy
+    # that SETS that header (overwriting any a client sent) and when the API is
+    # reachable solely through it — otherwise a caller can forge its address.
+    # The shipped setup has no such proxy (the UI runs on the Vite dev server),
+    # so it stays off; the per-email lockout applies either way.
+    trust_proxy_headers: bool = False
+    password_min_length: int = 10
+    # Failed sign-ins allowed per email and per client address before a lockout.
+    login_max_failures: int = 5
+    login_lockout_minutes: int = 15
+    # While no account exists, the web UI offers "create the first admin". Turn
+    # off on a deployment reachable by strangers and bootstrap from the env pair
+    # below instead — otherwise whoever loads the page first owns the instance.
+    auth_allow_web_setup: bool = True
+    # Creates the first admin at startup when no account exists yet.
+    admin_email: str | None = None
+    admin_password: str | None = None
+    # Memory owner id for that admin. Set it to adopt memories stored before
+    # authentication existed (they are keyed by whatever user_id was sent then).
+    admin_user_id: str | None = None
+
+    # --- Abuse limits ------------------------------------------------------
+    # Requests per user per minute to endpoints that spend an LLM or embedding
+    # call (ingest, chat, retrieval preview, search). Local models are slow and
+    # hosted ones bill per token; one runaway agent should not starve the rest.
+    llm_requests_per_minute: int = 30
+    # Largest note or transcript accepted by ingest and chat, in characters.
+    max_input_chars: int = 50_000
+
+    # --- Shared team space --------------------------------------------------
+    # One shared graph for everyone on the instance. Every user's chat, search,
+    # graph and inbox read their own memories plus the shared ones; nothing is
+    # shared unless someone shares it (a memory's Share button, or `share` on an
+    # ingest or chat turn). Off: every account is fully private, as before.
+    shared_space_enabled: bool = True
+
+    # --- Learning from decisions -------------------------------------------
+    # Escalated `supersedes` verdicts below the gate, all confirmed by people,
+    # needed before the evidence report says a lower gate is worth considering.
+    # 15 with none wrong bounds the error rate below 20% (rule of three: 3/n).
+    # The report only recommends; changing the gate stays a product decision.
+    feedback_min_gate_evidence: int = 15
+    # Calibration: map the judge's stated confidence onto how often people
+    # actually agreed with it (pooled across the instance), and gate on THAT.
+    # Off by default — turning it on changes what gets retired without asking,
+    # which is a product decision. The curve is only used once it rests on at
+    # least `calibration_min_labels` settled `supersedes` verdicts.
+    calibrated_gate: bool = False
+    calibration_min_labels: int = 30
+    # "Both are true" this many times about one subject, with no decision the
+    # other way, and the system suggests a rule to stop asking. You approve it.
+    rule_suggestion_min_decisions: int = 2
+
+    # --- Speech to text ----------------------------------------------------
+    # Dictation in the chat box. Transcribed HERE, by a local Whisper model —
+    # never by the browser, whose built-in recognition streams audio to Google
+    # (and in Brave is switched off entirely). Audio is transcribed in memory
+    # and discarded; only the text the user then sends is kept.
+    speech_enabled: bool = True
+    # tiny ~75 MB / base ~145 MB / small ~480 MB / medium ~1.5 GB. Bigger is more
+    # accurate and slower. base is quick on a CPU and good on clear speech.
+    # Downloaded once to the Hugging Face cache (a volume in Docker).
+    speech_model: str = "base"
+    speech_device: str = "cpu"  # "cuda" with an NVIDIA GPU and a CUDA build of ctranslate2
+    # int8 on CPU: ~4x smaller and faster than float32, accuracy all but equal.
+    speech_compute_type: str = "int8"
+    # Fixed language skips detection, which is slow and unreliable on a short
+    # clip. None = detect per recording (for multilingual users).
+    speech_language: str | None = "en"
+    speech_beam_size: int = 5
+    # Longest recording accepted. Dictation is a message, not a meeting: a cap
+    # keeps one upload from holding the CPU for minutes.
+    speech_max_seconds: int = 120
+    speech_max_bytes: int = 10 * 1024 * 1024
+    # Transcriptions run one at a time: each already uses every core, and two
+    # together are slower than two in turn.
+    speech_concurrency: int = 1
+    # Load the model in the background at startup, so the first dictation does
+    # not wait for a download. Startup itself does not wait for it.
+    speech_preload: bool = True
+
+    # --- Text to speech ----------------------------------------------------
+    # Read-aloud and autopilot answers, synthesised HERE by a local neural voice
+    # (Piper), not by the browser: browser speech depends on the OS speech
+    # service (often not running on Linux) and on the browser's own policy
+    # (Brave limits voices to resist fingerprinting), so it fails silently for
+    # some users. Piper runs ~20x faster than real time on a CPU.
+    tts_enabled: bool = True
+    # A voice from huggingface.co/rhasspy/piper-voices, as lang_REGION-name-quality.
+    # Downloaded once (~63 MB for a "medium" voice) to the Hugging Face cache.
+    tts_voice: str = "en_US-lessac-medium"
+    # 1.0 is the voice's natural pace; below 1 is faster, above slower.
+    tts_length_scale: float = 1.0
+    # One request is one sentence or a few — autopilot sends them as the answer
+    # streams. Long enough for a paragraph, short enough that one request cannot
+    # tie up the CPU.
+    tts_max_chars: int = 800
+    # Per user per minute. Separate from the LLM limit: autopilot makes one
+    # request per sentence, and each costs a fraction of a second of CPU.
+    tts_requests_per_minute: int = 240
+    tts_preload: bool = True
+    # Voices people pick in Settings are loaded on first use (~60 MB each, a
+    # few seconds the first time). This many stay in memory, least recently used
+    # dropped first — each costs roughly 100-150 MB of RAM while loaded.
+    tts_max_loaded_voices: int = 3
 
     # --- Qdrant ------------------------------------------------------------
     qdrant_url: str = "http://localhost:6333"
@@ -135,6 +278,27 @@ class Settings(BaseSettings):
     retrieval_recency_half_life_days: float = 45.0
     # Floor so an old memory is down-weighted, never erased, by age alone.
     retrieval_recency_floor: float = 0.30
+    # Periodic summaries of busy subjects (services/summaries.py). One LLM call
+    # per subject whose memories changed since its last summary; none otherwise.
+    summaries_enabled: bool = True
+    # A subject needs this many live memories before a summary is worth it.
+    summary_min_memories: int = 5
+    summary_interval_hours: float = 24.0
+    # Cap per graph per run, so a first run on a large graph cannot queue
+    # hundreds of LLM calls at once.
+    summary_max_per_run: int = 50
+
+    # Check each new private fact against the team space too. A disagreement is
+    # flagged on the private memory (never on the team's) and lands in the inbox.
+    # Costs at most one more judge call per fact that has team neighbours.
+    team_cross_check: bool = True
+
+    # Keyword matching alongside similarity: rank uses max(similarity,
+    # keyword x this). A memory containing every content word of the question
+    # ranks like one at this cosine. Catches names and numbers embeddings blur;
+    # too high and a memory that merely repeats the question's words wins.
+    # 0 turns keyword retrieval off exactly.
+    retrieval_keyword_weight: float = 0.7
 
     @model_validator(mode="after")
     def _thresholds_for_model(self) -> Settings:

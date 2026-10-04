@@ -29,6 +29,8 @@ export function describeWriteBack(remembered: IngestResponse | null): string | n
   if (remembered.superseded.length > 0) parts.push(`superseded ${remembered.superseded.length}`)
   const disputes = remembered.conflicts_raised.length
   if (disputes > 0) parts.push(`raised ${disputes} ${disputes === 1 ? 'dispute' : 'disputes'}`)
+  const team = remembered.team_conflicts?.length ?? 0
+  if (team > 0) parts.push(`disagrees with the team on ${team}`)
 
   if (parts.length === 0) return 'Nothing changed in the graph'
   const line = parts.join(' · ')

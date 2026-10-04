@@ -18,18 +18,18 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import structlog
 from qdrant_client import AsyncQdrantClient
 
 from continuum.clients.llm import LLMClient
 from continuum.clients.qdrant import QdrantStore
 from continuum.config import Settings, get_settings
+from continuum.core.logger import get_logger
 from continuum.evaluation.types import CaseOutcome, ResolutionCase, action_of
 from continuum.models.memory import ExtractedFact, Memory, MemoryStatus
 from continuum.services.memory_store import MemoryStore
 from continuum.services.resolution import Resolution, ResolutionService, Verdict
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 EVAL_USER = "eval"
 

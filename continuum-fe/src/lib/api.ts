@@ -7,21 +7,41 @@
  */
 
 import type {
+  ApiKeyCreated,
+  ApiKeySummary,
+  AuthStatus,
   ChatContext,
   ChatDone,
   ChatMessage,
   ConflictListResponse,
   ConflictResolutionRequest,
   ConflictResolutionResponse,
+  GateEvidence,
   GraphResponse,
   HealthResponse,
   IngestResponse,
+  Me,
   Memory,
   MemoryListResponse,
+  AnswerRating,
+  CalibrationReport,
+  FeedbackSummary,
+  RejectReason,
+  RejectResponse,
+  ResolutionRule,
+  RuleList,
+  TeamDecision,
+  TeamResolutionResponse,
+  ShareResponse,
+  SpeechStatus,
+  Transcription,
+  UserSummary,
+  VoiceChoice,
+  VoiceSettings,
 } from './types'
 import { createSSEParser } from './sse'
 
-/** Empty by default: Vite proxies /api in dev, nginx does it in Docker. */
+/** Empty by default: the Vite dev server proxies /api to the backend. */
 const BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
 const PREFIX = `${BASE}/api/v1`
 
@@ -35,17 +55,58 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Sent on every request. The server requires it on any cookie-authenticated
+ * write: a custom header cannot be attached cross-site without a CORS preflight,
+ * so a forged form post from another site is refused even if it somehow carried
+ * the session cookie.
+ */
+const CLIENT_HEADER = { 'x-continuum-client': 'web' }
+
+// Wrong credentials on these are an answer for the form, not a lapsed session.
+const SIGN_IN_PATHS = new Set(['/auth/login', '/auth/setup', '/auth/password'])
+
+let unauthorizedListener: (() => void) | null = null
+
+/**
+ * Called whenever the server says the session is gone — expired, signed out in
+ * another tab, or the account was disabled — so the app can show sign-in instead
+ * of a panel full of 401 errors. Returns an unsubscribe function.
+ */
+export function onUnauthorized(listener: () => void): () => void {
+  unauthorizedListener = listener
+  return () => {
+    if (unauthorizedListener === listener) unauthorizedListener = null
+  }
+}
+
+function headers(init?: RequestInit): HeadersInit {
+  return { 'content-type': 'application/json', ...CLIENT_HEADER, ...init?.headers }
+}
+
+async function fail(path: string, response: Response): Promise<never> {
+  if (response.status === 401 && !SIGN_IN_PATHS.has(path)) unauthorizedListener?.()
+  throw new ApiError(await describeFailure(response), response.status)
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${PREFIX}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...init?.headers },
+    // The session cookie is httpOnly: the page never sees it, the browser just
+    // sends it to its own origin.
+    credentials: 'same-origin',
+    headers: headers(init),
   })
 
-  if (!response.ok) {
-    throw new ApiError(await describeFailure(response), response.status)
-  }
+  if (!response.ok) return fail(path, response)
+  if (response.status === 204) return undefined as T
   return (await response.json()) as T
 }
+
+const post = (body?: unknown): RequestInit => ({
+  method: 'POST',
+  body: body === undefined ? undefined : JSON.stringify(body),
+})
 
 async function describeFailure(response: Response): Promise<string> {
   try {
@@ -64,50 +125,143 @@ async function describeFailure(response: Response): Promise<string> {
 export const api = {
   health: () => request<HealthResponse>('/health'),
 
-  graph: (userId: string, opts: { limit?: number; includeArchived?: boolean } = {}) =>
+  graph: (opts: { limit?: number; includeArchived?: boolean; asOf?: string | null } = {}) =>
     request<GraphResponse>(
       `/memories/graph?${new URLSearchParams({
-        user_id: userId,
         limit: String(opts.limit ?? 500),
         include_archived: String(opts.includeArchived ?? false),
+        ...(opts.asOf ? { as_of: opts.asOf } : {}),
       })}`,
     ),
 
   memory: (id: string) => request<Memory>(`/memories/${id}`),
 
-  memories: (userId: string, limit = 500) =>
-    request<MemoryListResponse>(
-      `/memories?${new URLSearchParams({ user_id: userId, limit: String(limit) })}`,
-    ),
+  memories: (limit = 500) =>
+    request<MemoryListResponse>(`/memories?${new URLSearchParams({ limit: String(limit) })}`),
 
   /** Confirm a memory is still true. Raises confidence, resets the decay clock. */
-  reinforce: (id: string) => request<Memory>(`/memories/${id}/reinforce`, { method: 'POST' }),
+  reinforce: (id: string) => request<Memory>(`/memories/${id}/reinforce`, post()),
+
+  /** Put one of your memories in the shared team space. */
+  shareMemory: (id: string) => request<ShareResponse>(`/memories/${id}/share`, post()),
 
   /** Bring an archived or superseded memory back. Nothing here is a one-way door. */
-  reactivate: (id: string) => request<Memory>(`/memories/${id}/reactivate`, { method: 'POST' }),
+  reactivate: (id: string) => request<Memory>(`/memories/${id}/reactivate`, post()),
 
-  conflicts: (userId: string, limit = 100) =>
-    request<ConflictListResponse>(
-      `/conflicts?${new URLSearchParams({ user_id: userId, limit: String(limit) })}`,
+  /** "This isn't a real fact": archived with the reason, and anything it retired comes back. */
+  rejectMemory: (id: string, reason: RejectReason, note?: string) =>
+    request<RejectResponse>(`/memories/${id}/reject`, post({ reason, note: note || null })),
+
+  /** Erase what a memory says, everywhere it was copied. The one thing that cannot be undone. */
+  forgetMemory: (id: string) => request<Memory>(`/memories/${id}/forget`, post()),
+
+  /** A plain link: your whole graph as JSON, downloaded with the session cookie. */
+  memoryExportUrl: `${PREFIX}/memories/export`,
+
+  refreshSummaries: () => request<{ written: Memory[] }>('/memories/summaries/refresh', post()),
+
+  searchMemories: (query: string, limit = 8) =>
+    request<{ query: string; results: { memory: Memory; score: number }[] }>(
+      '/memories/search',
+      post({ query, limit }),
     ),
 
+  conflicts: (limit = 100) =>
+    request<ConflictListResponse>(`/conflicts?${new URLSearchParams({ limit: String(limit) })}`),
+
   resolveConflict: (body: ConflictResolutionRequest) =>
-    request<ConflictResolutionResponse>('/conflicts/resolve', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+    request<ConflictResolutionResponse>('/conflicts/resolve', post(body)),
 
-  ingest: (userId: string, text: string) =>
-    request<IngestResponse>('/ingest', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userId, text }),
-    }),
+  resolveTeamConflict: (memoryId: string, sharedId: string, decision: TeamDecision) =>
+    request<TeamResolutionResponse>(
+      '/conflicts/resolve-team',
+      post({ memory_id: memoryId, shared_id: sharedId, decision }),
+    ),
 
-  chatContext: (userId: string, query: string) =>
-    request<ChatContext>('/chat/context', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userId, query }),
+  ingest: (text: string) => request<IngestResponse>('/ingest', post({ text })),
+
+  chatContext: (query: string, asOf?: string | null) =>
+    request<ChatContext>('/chat/context', post({ query, as_of: asOf || null })),
+
+  // --- Authentication -------------------------------------------------------
+
+  authStatus: () => request<AuthStatus>('/auth/status'),
+  me: () => request<Me>('/auth/me'),
+  login: (email: string, password: string) =>
+    request<Me>('/auth/login', post({ email, password })),
+  /** First admin. `userId` adopts memories stored before sign-in existed. */
+  setup: (email: string, password: string, userId?: string) =>
+    request<Me>('/auth/setup', post({ email, password, user_id: userId || null })),
+  logout: () => request<void>('/auth/logout', post()),
+  voiceSettings: () => request<VoiceSettings>('/auth/preferences'),
+  saveVoiceSettings: (choice: { voice?: string | null; speed?: number | null }) =>
+    request<VoiceSettings>('/auth/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(choice),
     }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>(
+      '/auth/password',
+      post({ current_password: currentPassword, new_password: newPassword }),
+    ),
+
+  apiKeys: () => request<{ keys: ApiKeySummary[] }>('/auth/keys'),
+  createApiKey: (name: string) => request<ApiKeyCreated>('/auth/keys', post({ name })),
+  revokeApiKey: (id: string) => request<void>(`/auth/keys/${id}`, { method: 'DELETE' }),
+
+  users: () => request<{ users: UserSummary[] }>('/admin/users'),
+  createUser: (body: { email: string; password: string; is_admin: boolean; user_id?: string }) =>
+    request<UserSummary>('/admin/users', post({ ...body, user_id: body.user_id || null })),
+  updateUser: (id: string, body: { disabled?: boolean; is_admin?: boolean }) =>
+    request<UserSummary>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  // --- Learning from decisions ---------------------------------------------
+
+  feedbackEvidence: (scope: 'mine' | 'team' = 'mine') =>
+    request<GateEvidence>(`/feedback/evidence?scope=${scope}`),
+  /** A plain link: the browser downloads it with the session cookie. */
+  feedbackExportUrl: `${PREFIX}/feedback/export`,
+  feedbackExportUrlFor: (kind: 'resolution' | 'extraction' | 'retrieval') =>
+    `${PREFIX}/feedback/export?kind=${kind}`,
+  calibration: () => request<CalibrationReport>('/feedback/calibration'),
+  rules: () => request<RuleList>('/feedback/rules'),
+  approveRule: (subject: string, scope: 'mine' | 'team' = 'mine') =>
+    request<ResolutionRule>('/feedback/rules', post({ subject, scope })),
+  revokeRule: (id: string) => request<void>(`/feedback/rules/${id}`, { method: 'DELETE' }),
+  rateAnswer: (body: AnswerRating) => request<{ missing: number }>('/feedback/answer', post(body)),
+  feedbackSummary: () => request<FeedbackSummary>('/feedback/summary'),
+
+  // --- Dictation ------------------------------------------------------------
+
+  speechStatus: () => request<SpeechStatus>('/speech/status'),
+
+  /** One chunk of an answer, spoken by the server's local voice, as WAV. */
+  synthesize: async (text: string, choice: VoiceChoice = {}): Promise<Blob> => {
+    const response = await fetch(`${PREFIX}/speech/synthesize`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: headers(),
+      body: JSON.stringify({ text, ...choice }),
+    })
+    if (!response.ok) return fail('/speech/synthesize', response)
+    return response.blob()
+  },
+
+  /** Upload one recording; the text comes back. Nothing is stored server-side. */
+  transcribe: async (clip: Blob): Promise<Transcription> => {
+    const form = new FormData()
+    const extension = clip.type.includes('ogg') ? 'ogg' : clip.type.includes('mp4') ? 'mp4' : 'webm'
+    form.append('audio', clip, `dictation.${extension}`)
+    const response = await fetch(`${PREFIX}/speech/transcribe`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      // No content-type: the browser sets multipart/form-data with its boundary.
+      headers: CLIENT_HEADER,
+      body: form,
+    })
+    if (!response.ok) return fail('/speech/transcribe', response)
+    return (await response.json()) as Transcription
+  },
 }
 
 // --- Chat streaming ---------------------------------------------------------
@@ -128,20 +282,25 @@ export interface ChatHandlers {
  * flag a dispute — while the answer is still arriving.
  */
 export async function streamChat(
-  body: { user_id: string; messages: ChatMessage[]; remember?: boolean; limit?: number },
+  body: {
+    messages: ChatMessage[]
+    remember?: boolean
+    limit?: number
+    share?: boolean
+    as_of?: string | null
+  },
   handlers: ChatHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
   const response = await fetch(`${PREFIX}/chat`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    headers: headers(),
     body: JSON.stringify(body),
     signal,
   })
 
-  if (!response.ok) {
-    throw new ApiError(await describeFailure(response), response.status)
-  }
+  if (!response.ok) return fail('/chat', response)
   if (!response.body) {
     throw new ApiError('The chat response carried no body to stream.', 500)
   }

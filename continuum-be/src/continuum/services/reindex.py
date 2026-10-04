@@ -27,14 +27,14 @@ Properties this has to keep, in order:
 
 from __future__ import annotations
 
-import structlog
 from pydantic import BaseModel
 
 from continuum.clients.llm import LLMClient
 from continuum.clients.qdrant import QdrantStore
+from continuum.core.logger import get_logger
 from continuum.services.memory_store import MemoryStore
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 BATCH = 64
 

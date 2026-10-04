@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 
@@ -7,7 +8,8 @@ import App from './App'
  * Shell smoke test. The WebGL scene cannot render under jsdom, so
  * `belief-graph` is stubbed — everything around it is real, which is enough to
  * catch the wiring mistakes that a type check does not: a panel that never
- * mounts, a badge that counts the wrong thing, a user id that fails to persist.
+ * mounts, a badge that counts the wrong thing, a workspace that renders before
+ * anyone has signed in.
  */
 vi.mock('@/components/belief-graph', () => ({
   BeliefGraph: ({ data }: { data: { nodes: unknown[] } }) => (
@@ -39,7 +41,32 @@ const graph = {
   edges: [{ source: 'a', target: 'b', kind: 'conflicts_with' as const }],
 }
 
+const auth = vi.hoisted(() => {
+  class ApiError extends Error {
+    constructor(
+      message: string,
+      readonly status: number,
+    ) {
+      super(message)
+    }
+  }
+  const me = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const }
+  return {
+    ApiError,
+    me,
+    state: { needsSetup: false, signedIn: true },
+    listener: null as null | (() => void),
+    login: vi.fn(() => Promise.resolve(me)),
+    setup: vi.fn(() => Promise.resolve(me)),
+  }
+})
+
 vi.mock('@/lib/api', () => ({
+  ApiError: auth.ApiError,
+  onUnauthorized: (listener: () => void) => {
+    auth.listener = listener
+    return () => {}
+  },
   api: {
     health: () =>
       Promise.resolve({
@@ -48,12 +75,89 @@ vi.mock('@/lib/api', () => ({
         environment: 'test',
         qdrant: 'up',
         llm: 'up',
+        database: 'up',
       }),
     graph: () => Promise.resolve(graph),
     conflicts: () => Promise.resolve({ total: 2, conflicts: [] }),
+    authStatus: () =>
+      Promise.resolve({ needs_setup: auth.state.needsSetup, web_setup_allowed: true }),
+    me: () =>
+      auth.state.signedIn
+        ? Promise.resolve(auth.me)
+        : Promise.reject(new auth.ApiError('Not signed in.', 401)),
+    login: auth.login,
+    setup: auth.setup,
+    logout: () => Promise.resolve(),
+    voiceSettings: () =>
+      Promise.resolve({ voice: 'en_US-lessac-medium', speed: 1, default_voice: 'en_US-lessac-medium', voices: [] }),
+    speechStatus: () =>
+      Promise.resolve({
+        enabled: true, ready: true, max_seconds: 120, language: 'en',
+        synthesis: true, synthesis_ready: true, synthesis_max_chars: 800,
+      }),
   },
   streamChat: () => Promise.resolve(),
 }))
+
+beforeEach(() => {
+  auth.state.needsSetup = false
+  auth.state.signedIn = true
+  auth.login.mockClear()
+  auth.setup.mockClear()
+  localStorage.clear()
+})
+
+describe('the sign-in gate', () => {
+  it('offers first-run setup when the instance has no account', async () => {
+    auth.state.needsSetup = true
+    auth.state.signedIn = false
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText('Create the admin account')).toBeDefined())
+    expect(screen.queryByTestId('graph')).toBeNull()
+  })
+
+  it('prefills setup with the pre-auth user id, so the old graph is kept', async () => {
+    localStorage.setItem('continuum.user_id', 'mark')
+    auth.state.needsSetup = true
+    auth.state.signedIn = false
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByDisplayValue('mark')).toBeDefined())
+  })
+
+  it('asks for sign-in and loads nothing until it succeeds', async () => {
+    auth.state.signedIn = false
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText('Sign in to Continuum')).toBeDefined())
+    expect(screen.queryByTestId('graph')).toBeNull()
+
+    await userEvent.type(screen.getByLabelText('Email'), 'mark@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'correct horse battery')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(auth.login).toHaveBeenCalledWith('mark@example.com', 'correct horse battery')
+    await waitFor(() => expect(screen.getByTestId('graph').textContent).toBe('2 nodes'))
+  })
+
+  it('returns to sign-in when the session lapses mid-use', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByTestId('graph')).toBeDefined())
+
+    act(() => auth.listener?.())
+
+    await waitFor(() => expect(screen.getByText('Sign in to Continuum')).toBeDefined())
+    expect(screen.queryByTestId('graph')).toBeNull()
+  })
+
+  it('shows who is signed in, not an editable user id', async () => {
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText('mark@example.com')).toBeDefined())
+    expect(screen.queryByLabelText('User id')).toBeNull()
+  })
+})
 
 describe('App', () => {
   it('renders the graph and its counts', async () => {
@@ -79,9 +183,54 @@ describe('App', () => {
     expect(screen.getByText('Active')).toBeDefined()
   })
 
-  it('opens on chat, so the graph has something to talk to', async () => {
+  it('opens on chat with a written greeting that mentions open disputes', async () => {
     render(<App />)
 
-    await waitFor(() => expect(screen.getByText(/Ask about their work/i)).toBeDefined())
+    // The mocked inbox holds 2 conflicts; the user id 'mark' reads as a name.
+    await waitFor(() =>
+      expect(screen.getByText(/, Mark\. 2 disagreements are waiting for your decision/)).toBeDefined(),
+    )
+    expect(screen.getByText(/What are you working on\?/)).toBeDefined()
+  })
+})
+
+describe('the side panel', () => {
+  beforeEach(() => localStorage.removeItem('continuum.panel_open'))
+
+  it('collapses to a rail and reopens on the tab you pick, remembering the choice', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide panel' })).toBeDefined())
+
+    await userEvent.click(screen.getByRole('button', { name: 'Hide panel' }))
+    expect(screen.getByRole('navigation', { name: 'Open the panel' })).toBeDefined()
+    expect(localStorage.getItem('continuum.panel_open')).toBe('0')
+
+    expect(screen.getByRole('button', { name: 'Open inbox' })).toBeDefined() // with its badge
+    await userEvent.click(screen.getByRole('button', { name: 'Open memory' }))
+    expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull()
+    expect(screen.getByRole('tab', { name: /Memory/ }).getAttribute('data-state')).toBe('active')
+  })
+
+  it('offers Ask Lumen on the rail, and opens the chat to explain when it cannot start', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide panel' })).toBeDefined())
+    await userEvent.click(screen.getByRole('button', { name: 'Hide panel' }))
+
+    // jsdom has no microphone, so Lumen refuses to start — and says why in the chat.
+    await userEvent.click(screen.getByRole('button', { name: 'Ask Lumen' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull(),
+    )
+    expect(screen.getByRole('tab', { name: /Chat/ }).getAttribute('data-state')).toBe('active')
+    expect(screen.getByRole('alert').textContent).toMatch(/Lumen needs a secure page|cannot record/)
+  })
+
+  it('toggles with Ctrl+\\', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide panel' })).toBeDefined())
+    await userEvent.keyboard('{Control>}\\{/Control}')
+    expect(screen.getByRole('navigation', { name: 'Open the panel' })).toBeDefined()
+    await userEvent.keyboard('{Control>}\\{/Control}')
+    expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull()
   })
 })

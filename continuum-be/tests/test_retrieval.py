@@ -55,13 +55,28 @@ class StubStore:
     def __init__(self, hits: list[tuple[Memory, float]], extra: list[Memory] | None = None):
         self.hits = hits
         self.requested_limit: int | None = None
+        self.keyword_hits: dict[str, float] = {}
         self._by_id = {m.id: m for m, _ in hits}
         for m in extra or []:
             self._by_id[m.id] = m
 
     async def search(self, *, user_id, query, limit=None, score_threshold=None, **kwargs):  # noqa: ANN001, ARG002
         self.requested_limit = limit
-        return [(m, s) for m, s in self.hits if m.user_id == user_id]
+        owners = user_id if isinstance(user_id, list) else [user_id]
+        return [(m, s) for m, s in self.hits if m.user_id in owners]
+
+    async def keyword_memories(self, *, user_id, query: str, limit: int = 50, statuses=None):  # noqa: ANN001, ANN201, ARG002
+        """No keyword hits unless a test scripts them."""
+        owners = user_id if isinstance(user_id, list) else [user_id]
+        hits = self.keyword_hits
+        return [(m, hits[m.id]) for m in self._by_id.values()
+                if m.id in hits and m.user_id in owners][:limit]
+
+    async def referencing(self, memory_ids, *, user_id=None):  # noqa: ANN001, ANN201
+        ids = set(memory_ids)
+        return [m for m in self._by_id.values()
+                if (user_id is None or m.user_id == user_id)
+                and ids & set(m.conflicts_with + m.team_conflicts_with)]
 
     async def resolve_ids(self, memory_ids: list[str]) -> dict[str, Memory]:
         return {mid: self._by_id[mid] for mid in memory_ids if mid in self._by_id}
@@ -228,3 +243,111 @@ async def test_active_memories_produce_no_disagreements(settings):
     store = StubStore([(memory(), 0.9)])
     context = await service(store, settings).retrieve(user_id="mark", query="q")
     assert context.disagreements == []
+
+
+
+# --- The shared team space ------------------------------------------------------
+
+
+async def test_retrieval_reads_your_memories_and_the_shared_space(settings):
+    from continuum.models.memory import SHARED_SPACE
+
+    mine = memory(content="Atlas uses Postgres")
+    shared = memory(content="Raj leads the mobile team", user_id=SHARED_SPACE)
+    theirs = memory(content="Sara is leaving in May", user_id="sara")
+    store = StubStore([(mine, 0.9), (shared, 0.85), (theirs, 0.95)])
+
+    context = await service(store, settings).retrieve(user_id="mark", query="q")
+
+    contents = {item.memory.content for item in context.memories}
+    assert contents == {"Atlas uses Postgres", "Raj leads the mobile team"}  # never Sara's
+
+
+async def test_with_the_shared_space_off_only_your_own_are_read(settings):
+    from continuum.models.memory import SHARED_SPACE
+
+    settings.shared_space_enabled = False
+    store = StubStore(
+        [(memory(content="mine"), 0.9), (memory(content="team", user_id=SHARED_SPACE), 0.9)]
+    )
+
+    context = await service(store, settings).retrieve(user_id="mark", query="q")
+
+    assert [item.memory.content for item in context.memories] == ["mine"]
+
+
+# --- Keywords -------------------------------------------------------------------
+
+
+async def test_a_memory_naming_the_entity_is_found_below_the_similarity_floor(settings):
+    """Embeddings blur names; the words do not."""
+    on_topic = memory(content="We picked Postgres for analytics")
+    named = memory(content="Atlas reporting runs nightly on the warehouse")
+    store = StubStore([(on_topic, 0.62)], extra=[named])
+    store.keyword_hits = {named.id: 1.0}
+    context = await service(store, settings).retrieve(user_id="mark", query="Atlas reporting?")
+    found = {item.memory.id: item for item in context.memories}
+    assert named.id in found
+    assert found[named.id].keyword == 1.0 and found[named.id].similarity == 0.0
+
+
+async def test_a_keyword_match_is_not_counted_twice(settings):
+    both = memory(content="Atlas uses Postgres")
+    store = StubStore([(both, 0.9)])
+    store.keyword_hits = {both.id: 1.0}
+    [item] = (await service(store, settings).retrieve(user_id="mark", query="Atlas")).memories
+    assert item.score == rank_score(similarity=0.9, confidence=both.confidence, recency=1.0,
+                                    confidence_weight=1.0, recency_weight=1.0)
+
+
+async def test_keyword_weight_zero_turns_keywords_off(settings):
+    named = memory(content="Atlas reporting runs nightly")
+    store = StubStore([], extra=[named])
+    store.keyword_hits = {named.id: 1.0}
+    off = settings.model_copy(update={"retrieval_keyword_weight": 0.0})
+    assert (await service(store, off).retrieve(user_id="mark", query="Atlas")).memories == []
+
+
+def test_keyword_terms_skip_question_words():
+    from continuum.services.keywords import keyword_score, terms
+
+    assert terms("What does Atlas use for the DB?") == ["atlas", "use", "db"]
+    assert keyword_score(["atlas", "postgres"], "Atlas runs on Postgres") == 1.0
+    # Longer words weigh more: "postgres" (8 letters) of 13.
+    assert keyword_score(["atlas", "postgres"], "Postgres everywhere") == round(8 / 13, 4)
+    assert keyword_score([], "anything") == 0.0
+
+
+# --- As of a date -------------------------------------------------------------
+
+
+def test_believed_at_follows_the_belief_through_its_life():
+    march, may, july = (datetime(2026, m, 1, tzinfo=UTC) for m in (3, 5, 7))
+    old = Memory(user_id="mark", content="Atlas uses Postgres", category=MemoryCategory.DECISION,
+                 created_at=march)
+    assert not old.believed_at(march - timedelta(days=1))  # not yet recorded
+    assert old.believed_at(may)
+    old.mark_superseded_by("newer")
+    old.superseded_at = july
+    assert old.believed_at(may) and not old.believed_at(july + timedelta(days=1))
+    summary = old.model_copy(update={"kind": "summary", "status": MemoryStatus.ACTIVE})
+    assert not summary.believed_at(may)  # derived, never a belief of its own
+
+
+async def test_retrieval_as_of_keeps_only_what_was_believed_then(settings):
+    then = datetime.now(UTC) - timedelta(days=60)
+    retired = memory(content="Atlas uses Postgres", age_days=120)
+    retired.created_at = datetime.now(UTC) - timedelta(days=120)
+    retired.mark_superseded_by("x")
+    retired.superseded_at = datetime.now(UTC) - timedelta(days=30)
+    current = memory(content="Atlas uses Mongo")
+    current.created_at = datetime.now(UTC) - timedelta(days=30)
+    store = StubStore([(retired, 0.8), (current, 0.8)])
+
+    past = await service(store, settings).retrieve(user_id="mark", query="Atlas", as_of=then)
+    assert [m.memory.id for m in past.memories] == [retired.id]
+    assert past.as_of == then
+
+    future = datetime.now(UTC) + timedelta(days=1)  # treated as now
+    assert (await service(store, settings).retrieve(user_id="mark", query="Atlas",
+                                                    as_of=future)).as_of is None

@@ -12,14 +12,14 @@ from __future__ import annotations
 import time
 import uuid
 
-import structlog
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
 
-from continuum.core import logging as clog
+from continuum.core import logger as clog
+from continuum.core.logger import get_logger
 
-log = structlog.get_logger("continuum.http")
+log = get_logger("continuum.http")
 
 REQUEST_ID_HEADER = "x-request-id"
 

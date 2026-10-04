@@ -31,20 +31,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: continuum-fe/package-lock.json
+          cache: yarn
+          cache-dependency-path: continuum-fe/yarn.lock
 
+      # yarn 1 is preinstalled on GitHub runners. --frozen-lockfile fails the
+      # job if package.json and yarn.lock disagree, instead of quietly updating.
       - name: Install dependencies
-        run: npm ci
+        run: yarn install --frozen-lockfile
 
       - name: Lint
-        run: npm run lint
+        run: yarn lint
 
-      # `npm run build` runs `tsc -b` before vite, so this is the typecheck too.
+      # `yarn build` runs `tsc -b` before vite, so this is the typecheck too.
       - name: Build
-        run: npm run build
+        run: yarn build
 
       # jsdom only — no browser, no backend. The SSE parser and the inbox
       # verdicts are pure enough to test without either.
       - name: Test
-        run: npm test
+        run: yarn test
