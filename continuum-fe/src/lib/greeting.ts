@@ -6,6 +6,8 @@
  * disagreements are waiting for a decision.
  */
 
+import type { Mode } from './types'
+
 /** A user id that reads as a name ("mark"), not a random account id. */
 export function displayName(userId: string): string | null {
   if (!/^[a-z][a-z'-]{1,30}$/i.test(userId)) return null
@@ -24,10 +26,13 @@ export function greeting({
   openDisputes,
   now = new Date(),
   speaker,
+  mode = 'workspace',
 }: {
   userId: string
   openDisputes: number | null
   now?: Date
+  /** Personal asks about your day; Work about what you are working on. */
+  mode?: Mode
   /** Spoken by Lumen: she says who she is. */
   speaker?: string
 }): string {
@@ -37,5 +42,5 @@ export function greeting({
     openDisputes && openDisputes > 0
       ? ` ${openDisputes === 1 ? 'One disagreement is' : `${openDisputes} disagreements are`} waiting for your decision — ask me about ${openDisputes === 1 ? 'it' : 'them'}, or settle ${openDisputes === 1 ? 'it' : 'them'} in the inbox.`
       : ''
-  return `${hello}${disputes} What are you working on?`
+  return `${hello}${disputes} ${mode === 'personal' ? 'What’s on your mind?' : 'What are you working on?'}`
 }

@@ -21,6 +21,7 @@ from continuum.api.deps import (
 )
 from continuum.config import Settings
 from continuum.models.auth import ApiKey, Principal, User, VoicePreferences
+from continuum.models.memory import Mode
 from continuum.models.schemas import (
     ApiKeyCreated,
     ApiKeyCreateRequest,
@@ -29,6 +30,7 @@ from continuum.models.schemas import (
     AuthStatus,
     LoginRequest,
     Me,
+    ModeUpdate,
     PasswordChangeRequest,
     SetupRequest,
     VoiceOption,
@@ -74,10 +76,24 @@ def _set_session_cookie(
     )
 
 
-def _me(user: User | Principal, via: str = "session") -> Me:
+def _me(user: User | Principal, via: str = "session", default_mode: Mode | None = None) -> Me:
     if isinstance(user, Principal):
-        return Me(user_id=user.user_id, email=user.email, is_admin=user.is_admin, via=user.via)
-    return Me(user_id=user.id, email=user.email, is_admin=user.is_admin, via=via)
+        return Me(
+            user_id=user.user_id,
+            email=user.email,
+            is_admin=user.is_admin,
+            via=user.via,
+            mode=user.mode,
+            default_mode=default_mode or user.mode,
+        )
+    return Me(
+        user_id=user.id,
+        email=user.email,
+        is_admin=user.is_admin,
+        via=via,
+        mode=user.default_mode,
+        default_mode=user.default_mode,
+    )
 
 
 def _summary(key: ApiKey) -> ApiKeySummary:
@@ -108,7 +124,9 @@ async def setup(
 ) -> Me:
     """Create the first admin and sign them in. Refused once any account exists."""
     try:
-        user = await auth.setup_first_admin(body.email, body.password, body.user_id)
+        user = await auth.setup_first_admin(
+            body.email, body.password, body.user_id, default_mode=body.default_mode
+        )
     except AuthError as exc:
         raise http_error(exc) from exc
     token, expires = await auth.create_session(user)
@@ -157,10 +175,18 @@ async def logout(request: Request, auth: AuthDep, settings: SettingsDep) -> Resp
     return response
 
 
+@router.patch("/mode", response_model=Me)
+async def set_default_mode(body: ModeUpdate, principal: SessionUser, auth: AuthDep) -> Me:
+    """Choose the mode Continuum opens in. A person's choice — not an API key's."""
+    await auth.set_default_mode(principal.user_id, body.default_mode)
+    return _me(principal, default_mode=body.default_mode)
+
+
 @router.get("/me", response_model=Me)
-async def me(principal: CurrentUser) -> Me:
-    """Who this credential belongs to. Handy for checking an agent's key works."""
-    return _me(principal)
+async def me(principal: CurrentUser, auth: AuthDep) -> Me:
+    """Who this credential belongs to, and which mode it is using. Handy for
+    checking an agent's key works (and which memory it reaches)."""
+    return _me(principal, default_mode=await auth.default_mode(principal.user_id))
 
 
 @router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
@@ -197,7 +223,7 @@ async def create_key(
 ) -> ApiKeyCreated:
     """Mint an API key for an agent. The full key is in this response and nowhere else."""
     try:
-        key, secret = await auth.create_api_key(principal.user_id, body.name)
+        key, secret = await auth.create_api_key(principal.user_id, body.name, body.mode)
     except AuthError as exc:
         raise http_error(exc) from exc
     return ApiKeyCreated(key=_summary(key), secret=secret)

@@ -8,7 +8,7 @@ function header(asOf: string | null, onAsOf = vi.fn()) {
   render(
     <TooltipProvider>
       <AppHeader
-        me={{ user_id: 'mark', email: 'm@x.io', is_admin: false, via: 'session' }}
+        me={{ user_id: 'mark', email: 'm@x.io', is_admin: false, via: 'session', mode: 'workspace', default_mode: 'workspace' }}
         onAccount={vi.fn()}
         onSignOut={vi.fn()}
         health={null}
@@ -20,6 +20,8 @@ function header(asOf: string | null, onAsOf = vi.fn()) {
         refreshing={false}
         asOf={asOf}
         onAsOf={onAsOf}
+        mode="workspace"
+        onMode={vi.fn()}
       />
     </TooltipProvider>,
   )

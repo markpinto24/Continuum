@@ -43,7 +43,7 @@ from continuum.models.feedback import (
     RuleList,
     RuleSuggestion,
 )
-from continuum.models.memory import Memory
+from continuum.models.memory import SENSITIVE_CATEGORIES, Memory, Mode, mode_of
 
 log = get_logger(__name__)
 
@@ -202,6 +202,22 @@ def _recommend(
         f"down to confidence {lowest:.2f}. Changing it is a product decision — replay "
         "the corpus with these cases added before you do."
     )
+
+
+_SENSITIVE = {c.value for c in SENSITIVE_CATEGORIES}
+
+
+def in_graphs(graph_owner: str | None, owners: list[str] | None) -> bool:
+    """Does a stored row belong to the graphs a request is looking at?
+
+    `owners` None means no filter. A row with no graph (from before modes) or a
+    private-vs-team label ("cross") is Workspace by construction.
+    """
+    if owners is None:
+        return True
+    if graph_owner is None or graph_owner == "cross":
+        return any(mode_of(o) is Mode.WORKSPACE for o in owners)
+    return graph_owner in owners
 
 
 def _supersede_labels(labels: list[ResolutionLabel]) -> list[ResolutionLabel]:
@@ -496,13 +512,22 @@ class FeedbackService:
         )
         return labels
 
-    async def labels(self, user_id: str, *, limit: int = 1000) -> list[ResolutionLabel]:
-        return await self.store.list_for_user(user_id, limit=limit)
+    async def labels(
+        self, user_id: str, *, limit: int = 1000, owners: list[str] | None = None
+    ) -> list[ResolutionLabel]:
+        labels = await self.store.list_for_user(user_id, limit=limit)
+        return [lb for lb in labels if in_graphs(lb.graph_owner, owners)]
 
-    async def evidence(self, user_id: str, *, team: bool = False) -> GateEvidence:
-        """Yours, or pooled across everyone on the instance (counts only — no
-        one's content leaves their own labels)."""
-        labels = await (self.store.list_all() if team else self.store.list_for_user(user_id))
+    async def evidence(
+        self, user_id: str, *, team: bool = False, owners: list[str] | None = None
+    ) -> GateEvidence:
+        """Yours (in the current mode), or pooled across everyone and every mode —
+        the gate is one setting for the instance. Counts only: no one's content
+        leaves their own labels."""
+        if team:
+            labels = await self.store.list_all()
+        else:
+            labels = await self.labels(user_id, owners=owners)
         return gate_evidence(
             labels,
             gate=self.settings.auto_supersede_confidence,
@@ -517,10 +542,22 @@ class FeedbackService:
         log.info("feedback.answer_rated", rating=item.rating, missing=len(item.missing_ids),
                  used=len(item.used_ids))
 
-    async def summary(self, user_id: str) -> FeedbackSummary:
-        decisions = await self.store.list_for_user(user_id)
+    async def rejections(
+        self, user_id: str, *, owners: list[str] | None = None
+    ) -> list[ExtractionFeedback]:
         rejected = await self.learning.rejections(user_id) if self.learning else []
-        answers = await self.learning.answers(user_id) if self.learning else []
+        return [r for r in rejected if in_graphs(r.graph_owner, owners)]
+
+    async def answers(
+        self, user_id: str, *, owners: list[str] | None = None
+    ) -> list[AnswerFeedback]:
+        rated = await self.learning.answers(user_id) if self.learning else []
+        return [a for a in rated if in_graphs(a.graph_owner, owners)]
+
+    async def summary(self, user_id: str, *, owners: list[str] | None = None) -> FeedbackSummary:
+        decisions = await self.labels(user_id, owners=owners)
+        rejected = await self.rejections(user_id, owners=owners)
+        answers = await self.answers(user_id, owners=owners)
         return FeedbackSummary(
             decisions=len(decisions),
             rejected_facts=len(rejected),
@@ -529,10 +566,16 @@ class FeedbackService:
             missing_memories=sum(len(a.missing_ids) for a in answers),
         )
 
-    async def extraction_yaml(self, user_id: str) -> str:
+    async def extraction_yaml(
+        self, user_id: str, *, owners: list[str] | None = None, sensitive: bool = False
+    ) -> str:
         """Rejected extractions as extraction-corpus cases: the excerpt is the
-        input, and what was wrongly extracted from it must not come back."""
-        rejected = await self.learning.rejections(user_id) if self.learning else []
+        input, and what was wrongly extracted from it must not come back. Health
+        facts only when asked for (requirements §6)."""
+        rejected = [
+            r for r in await self.rejections(user_id, owners=owners)
+            if sensitive or r.category not in _SENSITIVE
+        ]
         cases = to_extraction_cases(list(reversed(rejected)))
         header = (
             "# Extraction cases from real use: memories you rejected in Continuum.\n"
@@ -542,10 +585,14 @@ class FeedbackService:
         )
         return header + yaml.safe_dump(cases, sort_keys=False, allow_unicode=True)
 
-    async def retrieval_yaml(self, user_id: str, lookup: dict[str, Memory]) -> str:
+    async def retrieval_yaml(
+        self, user_id: str, lookup: dict[str, Memory], *, owners: list[str] | None = None
+    ) -> str:
         """Answers where a memory should have come up, as retrieval cases."""
-        answers = await self.learning.answers(user_id) if self.learning else []
-        cases = to_retrieval_cases(user_id, list(reversed(answers)), lookup)
+        answers = await self.answers(user_id, owners=owners)
+        # The case is replayed against the graph it came from, not the account.
+        graph = owners[0] if owners else user_id
+        cases = to_retrieval_cases(graph, list(reversed(answers)), lookup)
         header = (
             "# Retrieval cases from real use: memories you said should have come up.\n"
             "# Check recall, and sweep the ranking weights, against the live graph:\n"
@@ -554,8 +601,14 @@ class FeedbackService:
         )
         return header + yaml.safe_dump(cases, sort_keys=False, allow_unicode=True)
 
-    async def export_yaml(self, user_id: str) -> str:
-        labels = await self.store.list_for_user(user_id)
+    async def export_yaml(
+        self, user_id: str, *, owners: list[str] | None = None, sensitive: bool = False
+    ) -> str:
+        labels = [
+            lb for lb in await self.labels(user_id, owners=owners)
+            if sensitive
+            or not ({lb.existing_category, lb.incoming_category} & _SENSITIVE)
+        ]
         header = (
             "# Resolution cases from real use: conflicts settled in Continuum.\n"
             "# Score the resolver against them with:\n"

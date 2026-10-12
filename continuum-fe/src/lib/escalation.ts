@@ -21,6 +21,17 @@ export function describeEscalation(escalation: Escalation | null): string | null
   const p = escalation.judge_confidence
   const at = p === null ? '' : ` (${p.toFixed(2)})`
   if (escalation.forced) {
+    // Policy, not the judge's confidence. Which policy: the relation it
+    // overrode, and for health the marker the resolver appends to its reason.
+    if (escalation.judge_relation === 'duplicate') {
+      return 'The resolver thought these say the same thing, but each names someone the other does not — so it asked rather than fold one into the other.'
+    }
+    if (escalation.judge_relation === 'independent') {
+      return 'You have one of these at a time, and the two statements name different ones — so it asked which holds.'
+    }
+    if (escalation.reason.includes('a health fact only changes with your say-so')) {
+      return 'Health never changes without asking you, however sure the resolver is.'
+    }
     return 'Asked because this names a new holder for a role that is often shared, and nothing said the earlier one stopped.'
   }
   if (escalation.judge_relation === 'supersedes') {

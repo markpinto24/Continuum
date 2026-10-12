@@ -52,8 +52,9 @@ from continuum.evaluation.calibrate import calibrate, render_calibration
 from continuum.evaluation.crowded import load_crowded, render_crowded, run_crowded
 from continuum.evaluation.extraction import score_extraction
 from continuum.evaluation.preflight import render_preflight, run_preflight
-from continuum.evaluation.runner import ResolutionRunner
+from continuum.evaluation.runner import EVAL_USER, ResolutionRunner
 from continuum.evaluation.types import CaseOutcome
+from continuum.models.memory import Mode, graph_owner
 from continuum.services.extraction import FactExtractor, Mem0Extractor
 from continuum.services.memory_store import MemoryStore
 
@@ -78,10 +79,15 @@ async def check_embedding(llm: LLMClient) -> bool:
 
 
 async def run_resolution(
-    record: Path | None, only: str | None, force: bool, extra: list[Path]
+    record: Path | None, only: str | None, force: bool, extra: list[Path],
+    personal: bool = False,
 ) -> list[CaseOutcome]:
     settings = get_settings()
-    cases = corpus.load_resolution_cases_with(extra)
+    # The Personal corpus runs in a Personal graph: the owner id is what turns the
+    # Personal rules (health, relationships) on, exactly as in the API.
+    base = corpus.PERSONAL_RESOLUTION_CORPUS if personal else None
+    owner = graph_owner(EVAL_USER, Mode.PERSONAL) if personal else EVAL_USER
+    cases = corpus.load_resolution_cases_with(extra, base)
     if extra:
         print(f"Corpus: {len(cases)} cases, including those from {', '.join(map(str, extra))}")
     if only:
@@ -100,7 +106,7 @@ async def run_resolution(
 
         print(f"\nRunning {len(cases)} resolution cases at gate "
               f"{settings.auto_supersede_confidence:.2f} ...")
-        outcomes = await ResolutionRunner(llm, settings).run(cases)
+        outcomes = await ResolutionRunner(llm, settings, owner=owner).run(cases)
     finally:
         await llm.aclose()
 
@@ -136,17 +142,28 @@ def present(outcomes: list[CaseOutcome], *, show_cases: bool) -> None:
     print(report.render_by_tag(metrics.by_tag(outcomes)))
 
 
-async def run_extraction(with_baseline: bool, extra: list[Path]) -> None:
+async def run_extraction(
+    with_baseline: bool, extra: list[Path], personal: bool = False, prompt: str | None = None
+) -> None:
     settings = get_settings()
-    cases = corpus.load_extraction_cases_with(extra)
+    if personal:
+        cases = corpus.load_extraction_cases(corpus.PERSONAL_EXTRACTION_CORPUS)
+        for path in extra:
+            cases.extend(corpus.load_extraction_cases(path))
+    else:
+        cases = corpus.load_extraction_cases_with(extra)
+    # Which prompt reads the corpus. Default: the one its mode uses. Running the
+    # personal corpus through the workspace prompt is the "before" baseline —
+    # what Personal mode would have extracted without its own prompt.
+    mode = Mode(prompt) if prompt else (Mode.PERSONAL if personal else Mode.WORKSPACE)
     llm = LLMClient(settings)
 
     try:
         native = FactExtractor(llm)
-        ours = [(case, await native.extract(case.text)) for case in cases]
+        ours = [(case, await native.extract(case.text, mode=mode)) for case in cases]
 
-        _rule("EXTRACTION")
-        print(report.render_extraction(score_extraction(ours), label="continuum (domain-tuned)"))
+        _rule(f"EXTRACTION — {'personal' if personal else 'work'} corpus, {mode.value} prompt")
+        print(report.render_extraction(score_extraction(ours), label=f"continuum ({mode.value})"))
 
         if with_baseline:
             baseline = []
@@ -245,6 +262,14 @@ async def main() -> None:
         "the live graph.",
     )
     parser.add_argument("--k", type=int, default=None, help="Top k for --retrieval.")
+    parser.add_argument(
+        "--personal", action="store_true",
+        help="The Personal-mode corpus (with --extraction, or for resolution).",
+    )
+    parser.add_argument(
+        "--prompt", choices=["personal", "workspace"],
+        help="With --extraction: force a prompt (default: the corpus's own mode).",
+    )
     args = parser.parse_args()
 
     configure_logging()
@@ -276,7 +301,7 @@ async def main() -> None:
         return
 
     if args.extraction:
-        await run_extraction(args.baseline, args.add_extraction)
+        await run_extraction(args.baseline, args.add_extraction, args.personal, args.prompt)
         return
 
     if args.retrieval:
@@ -286,7 +311,9 @@ async def main() -> None:
     outcomes = (
         load_recorded(args.replay)
         if args.replay
-        else await run_resolution(args.record, args.only, args.force, args.add_cases)
+        else await run_resolution(
+            args.record, args.only, args.force, args.add_cases, args.personal
+        )
     )
     present(outcomes, show_cases=args.cases)
 

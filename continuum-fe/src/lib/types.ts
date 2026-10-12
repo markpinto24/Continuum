@@ -14,12 +14,25 @@ export type MemoryCategory =
   | 'event'
   | 'person'
   | 'constraint'
+  // Personal mode only. Health never decays and never changes without asking.
+  | 'health'
+  | 'routine'
+  | 'goal'
+
+/**
+ * Which of your two graphs a request uses. Personal is your life; Workspace is
+ * your work. They never mix: a memory in one is not found, judged or retrieved
+ * from the other, and only Workspace sees the shared team space.
+ */
+export type Mode = 'personal' | 'workspace'
 
 export type MemoryStatus = 'active' | 'superseded' | 'contradicted' | 'archived'
 
 export interface Escalation {
   target_id: string
-  judge_relation: 'supersedes' | 'conflict' | null
+  /** What the judge said. Forced escalations can override a duplicate or an
+   *  independent too: a swapped name, or a second home. */
+  judge_relation: 'supersedes' | 'conflict' | 'duplicate' | 'independent' | null
   judge_confidence: number | null
   similarity: number | null
   gate: number
@@ -225,6 +238,10 @@ export interface Me {
   email: string
   is_admin: boolean
   via: 'session' | 'api_key'
+  /** The mode this request used — the header's, or the key's. */
+  mode: Mode
+  /** Where the account opens. */
+  default_mode: Mode
 }
 
 export interface ApiKeySummary {
@@ -232,6 +249,8 @@ export interface ApiKeySummary {
   name: string
   /** The first characters of the key — enough to recognise it, not to use it. */
   prefix: string
+  /** A key reads and writes one mode's memory, and never switches. */
+  mode: Mode
   created_at: string
   last_used_at: string | null
   revoked_at: string | null

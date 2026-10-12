@@ -38,3 +38,20 @@ describe('describeEscalation', () => {
     expect(describeEscalation(null)).toBeNull()
   })
 })
+
+describe('forced escalations say which rule asked', () => {
+  it('names the swap, the second home and health apart from the role rule', () => {
+    expect(describeEscalation(esc({ forced: true, judge_relation: 'duplicate' }))).toMatch(
+      /each names someone the other does not/,
+    )
+    expect(describeEscalation(esc({ forced: true, judge_relation: 'independent' }))).toMatch(
+      /one of these at a time/,
+    )
+    expect(
+      describeEscalation(
+        esc({ forced: true, reason: 'x (a health fact only changes with your say-so — escalated)' }),
+      ),
+    ).toMatch(/Health never changes without asking/)
+    expect(describeEscalation(esc({ forced: true }))).toMatch(/role that is often shared/)
+  })
+})

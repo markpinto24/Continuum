@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { type Resource, useResource } from '@/hooks/use-resource'
 import { api } from '@/lib/api'
-import { SHARED_SPACE, type GateEvidence, type RuleSuggestion } from '@/lib/types'
+import { SHARED_SPACE, type GateEvidence, type Mode, type RuleSuggestion } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 export type EvidenceScope = 'mine' | 'team'
@@ -45,6 +45,7 @@ export function LearningPanel({
   onScope,
   isAdmin = false,
   version,
+  mode = 'workspace',
 }: {
   evidence: Resource<GateEvidence>
   scope?: EvidenceScope
@@ -52,6 +53,8 @@ export function LearningPanel({
   isAdmin?: boolean
   /** Anything that changes when a decision is made: refetches the rest. */
   version?: unknown
+  /** Personal exports leave health out unless the person opts in. */
+  mode?: Mode
 }) {
   const data = evidence.data
   const rules = useResource(() => api.rules(), [version])
@@ -60,6 +63,10 @@ export function LearningPanel({
   const [dismissed, setDismissed] = useState<string[]>(readDismissed)
   const [busy, setBusy] = useState<string | null>(null)
   const [ruleError, setRuleError] = useState<string | null>(null)
+  // Off every time: an export is a file that travels, and health is the one
+  // thing in it that should not travel by accident.
+  const [withHealth, setWithHealth] = useState(false)
+  const exportOpts = { sensitive: mode === 'personal' && withHealth }
 
   if (!data) return null
 
@@ -234,7 +241,7 @@ export function LearningPanel({
 
       {data.labels > 0 && (
         <a
-          href={api.feedbackExportUrl}
+          href={api.feedbackExportUrl(exportOpts)}
           download
           className="inline-flex items-center gap-1 text-[11px] text-accent hover:underline"
         >
@@ -242,11 +249,23 @@ export function LearningPanel({
           Export as test cases
         </a>
       )}
+      {mode === 'personal' &&
+        (data.labels > 0 || (counts?.rejected_facts ?? 0) > 0) && (
+          <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted">
+            <input
+              type="checkbox"
+              checked={withHealth}
+              onChange={(e) => setWithHealth(e.target.checked)}
+              className="accent-[var(--color-accent)]"
+            />
+            Include health decisions in exports (left out by default)
+          </label>
+        )}
       {counts && (counts.rejected_facts > 0 || counts.missing_memories > 0) && (
         <div className="flex flex-wrap gap-x-3 gap-y-1">
           {counts.rejected_facts > 0 && (
             <a
-              href={api.feedbackExportUrlFor('extraction')}
+              href={api.feedbackExportUrlFor('extraction', exportOpts)}
               download
               className="inline-flex items-center gap-1 text-[11px] text-accent hover:underline"
             >

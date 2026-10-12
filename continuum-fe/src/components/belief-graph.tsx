@@ -26,7 +26,7 @@ import {
   SUMMARY_COLOR,
   nodeVolume,
 } from '@/lib/memory-style'
-import type { GraphEdgeKind, GraphNode, GraphResponse } from '@/lib/types'
+import type { GraphEdgeKind, GraphNode, GraphResponse, Mode } from '@/lib/types'
 
 /**
  * The belief graph, rendered in three dimensions.
@@ -70,14 +70,43 @@ export interface BeliefGraphProps {
   onSelect: (id: string | null) => void
   /** Pixels on the right covered by a floating panel: the view centres on the rest. */
   rightInset?: number
+  /** Tints the sky: cool for Work, warm for Personal. Never the nodes — status owns those. */
+  mode?: Mode
 }
 
-const SKY = '#050a10'
+/**
+ * The sky per mode. Only the backdrop changes: node and edge colours are status
+ * and mean the same in both modes.
+ */
+const SKIES: Record<Mode, { sky: string; glow: string; mid: string; nebulae: [string, string, string]; star: string }> = {
+  workspace: {
+    sky: '#050a10',
+    glow: '#0e2130',
+    mid: '#08131c',
+    nebulae: ['rgba(56,189,248,0.07)', 'rgba(139,92,246,0.06)', 'rgba(45,212,191,0.05)'],
+    star: '210,232,255',
+  },
+  personal: {
+    sky: '#0b0710',
+    glow: '#2a1428',
+    mid: '#160c18',
+    nebulae: ['rgba(244,114,182,0.07)', 'rgba(167,139,250,0.07)', 'rgba(251,146,60,0.04)'],
+    star: '255,228,240',
+  },
+}
 // Matches the library's default nodeRelSize, so decorations hug the sphere.
 const NODE_REL_SIZE = 4
 const LABEL_GAP = 6
 
-export function BeliefGraph({ data, selectedId, onSelect, rightInset = 0 }: BeliefGraphProps) {
+export function BeliefGraph({
+  data,
+  selectedId,
+  onSelect,
+  rightInset = 0,
+  mode = 'workspace',
+}: BeliefGraphProps) {
+  const palette = SKIES[mode]
+  const sky = palette.sky
   const [containerRef, { width, height }] = useElementSize<HTMLDivElement>()
   const graphRef = useRef<ForceGraphMethods<SceneNode, SceneLink> | undefined>(undefined)
   const labelLayer = useRef<HTMLDivElement | null>(null)
@@ -127,8 +156,8 @@ export function BeliefGraph({ data, selectedId, onSelect, rightInset = 0 }: Beli
     const graph = graphRef.current
     if (!ready || !graph) return
     const scene = graph.scene() as Scene
-    scene.background = skyTexture()
-    scene.fog = new FogExp2(SKY, 0.00038)
+    scene.background = skyTexture(palette)
+    scene.fog = new FogExp2(palette.sky, 0.00038)
     const controls = graph.controls() as { enableDamping?: boolean; dampingFactor?: number }
     // Eased orbiting: the camera glides to a stop instead of jerking.
     controls.enableDamping = true
@@ -136,7 +165,7 @@ export function BeliefGraph({ data, selectedId, onSelect, rightInset = 0 }: Beli
     return () => {
       scene.fog = null
     }
-  }, [ready])
+  }, [ready, palette])
 
   // Centre the view on the part of the canvas the floating panel leaves open.
   useEffect(() => {
@@ -322,7 +351,7 @@ export function BeliefGraph({ data, selectedId, onSelect, rightInset = 0 }: Beli
       ref={containerRef}
       className="relative h-full w-full overflow-hidden"
       // Shown for the instant before WebGL paints, so there is no flash.
-      style={{ background: `radial-gradient(ellipse at 45% 40%, #0b1a26, ${SKY} 70%)` }}
+      style={{ background: `radial-gradient(ellipse at 45% 40%, ${palette.glow}, ${sky} 70%)` }}
     >
       {ready && (
         <ForceGraph3D<SceneNode, SceneLink>
@@ -330,7 +359,7 @@ export function BeliefGraph({ data, selectedId, onSelect, rightInset = 0 }: Beli
           width={width}
           height={height}
           graphData={graphData}
-          backgroundColor={SKY}
+          backgroundColor={sky}
           showNavInfo={false}
           // Orbit, not the default trackball: it keeps "up" up, and damps.
           // Missing from the library's types, present at runtime.
@@ -465,16 +494,16 @@ function glowTexture(): CanvasTexture {
  * The sky, painted once: a lit centre, faint nebula clouds and fixed stars.
  * Painted rather than rendered as points, so nothing in it can twinkle.
  */
-function skyTexture(): CanvasTexture {
+function skyTexture(palette: (typeof SKIES)[Mode]): CanvasTexture {
   const size = 1024
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = size
   const ctx = canvas.getContext('2d')
   if (ctx) {
     const base = ctx.createRadialGradient(size * 0.48, size * 0.42, 10, size / 2, size / 2, size * 0.75)
-    base.addColorStop(0, '#0e2130')
-    base.addColorStop(0.45, '#08131c')
-    base.addColorStop(1, SKY)
+    base.addColorStop(0, palette.glow)
+    base.addColorStop(0.45, palette.mid)
+    base.addColorStop(1, palette.sky)
     ctx.fillStyle = base
     ctx.fillRect(0, 0, size, size)
 
@@ -485,9 +514,9 @@ function skyTexture(): CanvasTexture {
       ctx.fillStyle = g
       ctx.fillRect(0, 0, size, size)
     }
-    nebula(size * 0.22, size * 0.3, size * 0.32, 'rgba(56,189,248,0.07)')
-    nebula(size * 0.8, size * 0.72, size * 0.36, 'rgba(139,92,246,0.06)')
-    nebula(size * 0.62, size * 0.18, size * 0.22, 'rgba(45,212,191,0.05)')
+    nebula(size * 0.22, size * 0.3, size * 0.32, palette.nebulae[0])
+    nebula(size * 0.8, size * 0.72, size * 0.36, palette.nebulae[1])
+    nebula(size * 0.62, size * 0.18, size * 0.22, palette.nebulae[2])
 
     // Deterministic stars, so the sky is the same on every load.
     let seed = 7
@@ -499,7 +528,7 @@ function skyTexture(): CanvasTexture {
       const x = random() * size
       const y = random() * size
       const r = random() < 0.92 ? 0.6 + random() * 0.5 : 1.1 + random() * 0.6
-      ctx.fillStyle = `rgba(210,232,255,${0.18 + random() * 0.45})`
+      ctx.fillStyle = `rgba(${palette.star},${0.18 + random() * 0.45})`
       ctx.beginPath()
       ctx.arc(x, y, r, 0, Math.PI * 2)
       ctx.fill()

@@ -80,6 +80,12 @@ A memory carries far more than its text:
 | `supersedes` / `superseded_by` | The belief graph edges. This is the differentiator |
 | `conflicts_with` | Unresolved conflicts awaiting human confirmation |
 | `source_id` / `source_excerpt` | Full traceability from any assertion back to its origin text |
+| `user_id` | The graph's owner: the account id for Work, `{id}:personal` for Personal. The mode is part of the owner, so every filter that keeps two people apart keeps two modes apart too |
+
+Personal mode adds `health` (never decays; a change always goes to the inbox; left
+out of summaries, logs and exports unless you opt in), `routine` and `goal`.
+**Backups (`scripts/backup.py`) hold both modes** — health included — so store
+them like a medical record.
 
 ---
 

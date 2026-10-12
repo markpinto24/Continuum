@@ -25,6 +25,12 @@
   --radius-panel: 0.875rem;
 }
 
+/* Personal mode: a warm accent, so it is plain which graph you are in. Only the
+   interface accent changes; the status colours mean the same in both modes. */
+:root[data-mode='personal'] {
+  --color-accent: oklch(0.8 0.11 350);
+}
+
 @layer base {
   * {
     border-color: var(--color-border);

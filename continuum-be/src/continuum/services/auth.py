@@ -34,6 +34,7 @@ from continuum.models.auth import (
     is_valid_email,
     normalise_email,
 )
+from continuum.models.memory import Mode
 from continuum.services.limits import LoginThrottle
 
 log = get_logger(__name__)
@@ -147,6 +148,7 @@ class AuthService:
         user_id: str | None = None,
         is_admin: bool = False,
         only_if_first: bool = False,
+        default_mode: Mode | None = None,
     ) -> User:
         email = normalise_email(email)
         if not is_valid_email(email):
@@ -156,13 +158,19 @@ class AuthService:
         # admin adopts memories stored before authentication existed — which is
         # also why it is never derived from the email: a new account must not
         # silently inherit a graph that happens to share its name.
+        # Adopting a pre-auth id means adopting a Workspace graph, so open there;
+        # a brand-new account opens in Personal (requirements.md).
+        if default_mode is None:
+            default_mode = Mode.WORKSPACE if user_id else Mode.PERSONAL
         user_id = (user_id or uuid.uuid4().hex).strip().lower()
         if not USER_ID_PATTERN.match(user_id):
             raise InvalidInput(
                 "User id must be 1-64 characters: lowercase letters, digits, '.', '_' or '-'."
             )
 
-        user = User(id=user_id, email=email, is_admin=is_admin, created_at=_now())
+        user = User(
+            id=user_id, email=email, is_admin=is_admin, created_at=_now(), default_mode=default_mode
+        )
         try:
             created = await self.db.insert_user(
                 user, await self._hash(password), only_if_first=only_if_first
@@ -175,7 +183,11 @@ class AuthService:
         return user
 
     async def setup_first_admin(
-        self, email: str, password: str, user_id: str | None = None
+        self,
+        email: str,
+        password: str,
+        user_id: str | None = None,
+        default_mode: Mode | None = None,
     ) -> User:
         """Create the first account from the web UI. Refused once any account exists."""
         if not self.settings.auth_allow_web_setup:
@@ -183,7 +195,12 @@ class AuthService:
                 "Web setup is disabled. Set ADMIN_EMAIL and ADMIN_PASSWORD and restart."
             )
         return await self.create_user(
-            email, password, user_id=user_id, is_admin=True, only_if_first=True
+            email,
+            password,
+            user_id=user_id,
+            is_admin=True,
+            only_if_first=True,
+            default_mode=default_mode,
         )
 
     async def bootstrap_from_settings(self) -> User | None:
@@ -291,7 +308,23 @@ class AuthService:
         user = await self.db.get_user(user_id)
         if not user or user.disabled:
             return None
-        return Principal(user_id=user.id, email=user.email, is_admin=user.is_admin, via="session")
+        # The UI may pick another mode per request (X-Continuum-Mode, in deps.py);
+        # without one, the account's default.
+        return Principal(
+            user_id=user.id,
+            email=user.email,
+            is_admin=user.is_admin,
+            via="session",
+            mode=user.default_mode,
+        )
+
+    async def default_mode(self, user_id: str) -> Mode:
+        user = await self.db.get_user(user_id)
+        return user.default_mode if user else Mode.WORKSPACE
+
+    async def set_default_mode(self, user_id: str, mode: Mode) -> None:
+        await self.db.set_default_mode(user_id, mode)
+        log.info("auth.default_mode_set", mode=mode.value)
 
     async def change_password(
         self, user_id: str, current: str, new: str, *, current_session: str | None
@@ -318,8 +351,10 @@ class AuthService:
 
     # --- API keys ----------------------------------------------------------
 
-    async def create_api_key(self, user_id: str, name: str) -> tuple[ApiKey, str]:
-        """Mint a key. The plaintext is returned exactly once and never stored."""
+    async def create_api_key(
+        self, user_id: str, name: str, mode: Mode = Mode.WORKSPACE
+    ) -> tuple[ApiKey, str]:
+        """Mint a key for one mode. The plaintext is returned exactly once and never stored."""
         name = name.strip()
         if not name or len(name) > 100:
             raise InvalidInput("Give the key a name of 1-100 characters.")
@@ -330,6 +365,7 @@ class AuthService:
             name=name,
             prefix=secret[:_DISPLAY_PREFIX_LEN],
             created_at=_now(),
+            mode=mode,
         )
         await self.db.insert_api_key(key, hash_token(secret))
         log.info("auth.api_key_created", user_id=user_id, api_key_id=key.id)
@@ -361,4 +397,5 @@ class AuthService:
             is_admin=user.is_admin,
             via="api_key",
             api_key_id=key.id,
+            mode=key.mode,
         )

@@ -28,3 +28,13 @@ describe('greeting', () => {
     )
   })
 })
+
+describe('per mode', () => {
+  it('asks about your life in Personal and your work in Work', () => {
+    const at = new Date(2026, 9, 10, 9)
+    expect(greeting({ userId: 'mark', openDisputes: 0, now: at, mode: 'personal' })).toBe(
+      'Good morning, Mark. What’s on your mind?',
+    )
+    expect(greeting({ userId: 'mark', openDisputes: 0, now: at })).toMatch(/What are you working on\?$/)
+  })
+})

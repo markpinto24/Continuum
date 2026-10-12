@@ -8,7 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import type { Memory } from '@/lib/types'
 import { makeMemory } from '@/test/fixtures'
 
-const ME = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const }
+const ME = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const, mode: 'workspace' as const, default_mode: 'workspace' as const }
 
 const api = vi.hoisted(() => ({ memory: vi.fn(), shareMemory: vi.fn(), streamChat: vi.fn() }))
 
@@ -63,6 +63,30 @@ describe('sharing a memory', () => {
     render(<MemoryDetail memoryId="m1" onSelect={vi.fn()} onMutated={vi.fn()} />)
     await screen.findByText('Raj leads the mobile team')
     expect(screen.queryByRole('button', { name: /share with team/i })).toBeNull()
+  })
+})
+
+describe('a Personal memory', () => {
+  it('is never offered for sharing, fades on Personal time, and stays correctable', async () => {
+    api.memory.mockResolvedValue(
+      memory({ user_id: 'mark:personal', content: 'Chris is the user’s brother', subject: 'chris' }),
+    )
+    render(<MemoryDetail memoryId="m1" userId="mark" onSelect={vi.fn()} onMutated={vi.fn()} />)
+
+    await screen.findByText('Chris is the user’s brother')
+    expect(screen.queryByRole('button', { name: /share with team/i })).toBeNull()
+    expect(screen.getByText('730d')).toBeDefined() // a person, on Personal time
+    expect(screen.getByRole('button', { name: /isn.t a real fact|not a real fact/i })).toBeDefined()
+  })
+
+  it('says how health is handled', async () => {
+    api.memory.mockResolvedValue(
+      memory({ user_id: 'mark:personal', content: 'The user is allergic to penicillin', category: 'health' }),
+    )
+    render(<MemoryDetail memoryId="m1" userId="mark" onSelect={vi.fn()} onMutated={vi.fn()} />)
+
+    expect(await screen.findByText(/it never changes without asking/)).toBeDefined()
+    expect(screen.getByText('never decays')).toBeDefined()
   })
 })
 

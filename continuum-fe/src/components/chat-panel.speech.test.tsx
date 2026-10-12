@@ -16,7 +16,7 @@ const api = vi.hoisted(() => ({
   streamChat: vi.fn(),
 }))
 
-const ME = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const }
+const ME = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const, mode: 'workspace' as const, default_mode: 'workspace' as const }
 
 vi.mock('@/lib/api', () => ({
   api: {

@@ -33,6 +33,10 @@ class MemoryCategory(StrEnum):
     EVENT = "event"             # "Shipped v2 on Mar 4" — immutable, never superseded
     PERSON = "person"           # "Sara owns the data platform"
     CONSTRAINT = "constraint"   # "Budget cap is 5k/month"
+    # Personal mode (requirements.md §4.1). Extracted only by the personal prompt.
+    HEALTH = "health"           # "Mark is allergic to penicillin" — never decays
+    ROUTINE = "routine"         # "Mark goes to the gym on weekday mornings"
+    GOAL = "goal"               # "Mark wants to read 20 books this year"
 
 
 class MemoryStatus(StrEnum):
@@ -60,8 +64,16 @@ STATEMENT_CATEGORIES: frozenset[MemoryCategory] = frozenset(
         MemoryCategory.FACT,
         MemoryCategory.CONSTRAINT,
         MemoryCategory.PERSON,
+        # "Stopped taking vitamin D" must still be compared with "takes vitamin D
+        # daily", whichever category the extractor chose for each.
+        MemoryCategory.HEALTH,
+        MemoryCategory.ROUTINE,
+        MemoryCategory.GOAL,
     }
 )
+
+# Never shared, never summarised, kept out of exports unless asked (requirements §6).
+SENSITIVE_CATEGORIES: frozenset[MemoryCategory] = frozenset({MemoryCategory.HEALTH})
 
 
 def comparable_categories(a: MemoryCategory, b: MemoryCategory) -> bool:
@@ -90,6 +102,11 @@ CATEGORY_HALF_LIFE_DAYS: dict[MemoryCategory, float | None] = {
     MemoryCategory.DECISION: 180.0,
     MemoryCategory.PERSON: 365.0,
     MemoryCategory.EVENT: None,         # never decays
+    # Not extracted in Workspace, but a value for every category keeps the
+    # table total (and the frontend's mirror type-checked).
+    MemoryCategory.HEALTH: None,
+    MemoryCategory.ROUTINE: 45.0,
+    MemoryCategory.GOAL: 120.0,
 }
 
 
@@ -110,9 +127,65 @@ SHARED_SPACE = "_shared"
 Owners = str | list[str]
 
 
+class Mode(StrEnum):
+    """Which of a person's graphs is in use (requirements.md).
+
+    Each mode is its own graph with its own owner id, like the team space: the
+    resolver, decay, summaries and labels all work per graph, so a personal fact
+    can never retire a work one, or appear in a work answer — structurally, not
+    by remembering to add a filter.
+    """
+
+    PERSONAL = "personal"
+    WORKSPACE = "workspace"
+
+
+# Appended to an account id for its Personal graph. `:` cannot appear in an
+# account id (models/auth.USER_ID_PATTERN), so no account can claim the result.
+PERSONAL_SUFFIX = ":personal"
+
+
+def graph_owner(user_id: str, mode: Mode) -> str:
+    """The owner id of `user_id`'s graph in `mode`. Workspace keeps the plain id,
+    so every memory stored before modes existed is still where it was."""
+    return f"{user_id}{PERSONAL_SUFFIX}" if mode is Mode.PERSONAL else user_id
+
+
+def mode_of(owner: str) -> Mode:
+    """The mode a graph belongs to, read from its owner id."""
+    return Mode.PERSONAL if owner.endswith(PERSONAL_SUFFIX) else Mode.WORKSPACE
+
+
+# How fast an unconfirmed memory fades, per mode (requirements.md §4.1). Life
+# facts change more slowly than work ones, except routines and limits; health
+# never fades — a forgotten allergy is dangerous.
+PERSONAL_HALF_LIFE_DAYS: dict[MemoryCategory, float | None] = {
+    MemoryCategory.PERSON: 730.0,
+    MemoryCategory.PREFERENCE: 180.0,
+    MemoryCategory.FACT: 240.0,
+    MemoryCategory.DECISION: 180.0,
+    MemoryCategory.CONSTRAINT: 60.0,
+    MemoryCategory.EVENT: None,
+    MemoryCategory.HEALTH: None,
+    MemoryCategory.ROUTINE: 45.0,
+    MemoryCategory.GOAL: 120.0,
+}
+
+
+def half_life_for(category: MemoryCategory, mode: Mode) -> float | None:
+    table = PERSONAL_HALF_LIFE_DAYS if mode is Mode.PERSONAL else CATEGORY_HALF_LIFE_DAYS
+    return table.get(category)
+
+
 def visible_owners(user_id: str, *, shared: bool = True) -> list[str]:
-    """Whose memories a user may read: their own, plus the shared space."""
-    return [user_id, SHARED_SPACE] if shared and user_id != SHARED_SPACE else [user_id]
+    """Whose memories a graph may read: its own, plus the team space.
+
+    The team space belongs to Workspace only. A Personal graph reads itself and
+    nothing else — decided from the owner id, so every caller is mode-safe.
+    """
+    if mode_of(user_id) is Mode.PERSONAL or user_id == SHARED_SPACE or not shared:
+        return [user_id]
+    return [user_id, SHARED_SPACE]
 
 
 class Escalation(BaseModel):
@@ -352,7 +425,7 @@ class Memory(BaseModel):
 
     @property
     def half_life_days(self) -> float | None:
-        return CATEGORY_HALF_LIFE_DAYS.get(self.category)
+        return half_life_for(self.category, mode_of(self.user_id))
 
     def decayed_confidence(self, *, now: datetime, floor: float) -> float:
         """Confidence after exponential decay since last reinforcement.

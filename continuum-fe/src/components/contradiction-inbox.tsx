@@ -10,7 +10,7 @@ import { describeEscalation, findEscalation } from '@/lib/escalation'
 import { CATEGORY_LABEL } from '@/lib/memory-style'
 import { SHARED_SPACE, type ConflictPair, type Memory, type TeamDecision } from '@/lib/types'
 import { type Resource, useResource } from '@/hooks/use-resource'
-import type { ConflictListResponse } from '@/lib/types'
+import type { ConflictListResponse, Mode } from '@/lib/types'
 
 /**
  * The contradiction inbox.
@@ -30,25 +30,33 @@ export function ContradictionInbox({
   onResolved,
   onSelect,
   isAdmin = false,
+  mode = 'workspace',
 }: {
   resource: Resource<ConflictListResponse>
   onResolved: () => void
   onSelect: (id: string) => void
   isAdmin?: boolean
+  /** Personal has no team: its evidence and rules are yours alone. */
+  mode?: Mode
 }) {
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [scope, setScope] = useState<EvidenceScope>('mine')
   // Refetched whenever the conflict list reloads — i.e. after any decision,
   // whether made here or in the chat.
-  const evidence = useResource(() => api.feedbackEvidence(scope), [resource.data, scope])
+  const evidenceScope = mode === 'workspace' ? scope : 'mine'
+  const evidence = useResource(
+    () => api.feedbackEvidence(evidenceScope),
+    [resource.data, evidenceScope],
+  )
   const learning = (
     <LearningPanel
       evidence={evidence}
-      scope={scope}
-      onScope={setScope}
+      scope={mode === 'workspace' ? scope : 'mine'}
+      onScope={mode === 'workspace' ? setScope : undefined}
       isAdmin={isAdmin}
       version={resource.data}
+      mode={mode}
     />
   )
 

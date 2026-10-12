@@ -21,4 +21,4 @@ async def sweep(
     request: DecaySweepRequest, principal: CurrentUser, decay: DecayDep
 ) -> DecayReport:
     """Apply confidence decay to your own memories. Set `dry_run` to preview."""
-    return await decay.sweep(user_id=principal.user_id, dry_run=request.dry_run)
+    return await decay.sweep(user_id=principal.owner, dry_run=request.dry_run)

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from continuum.db.models import ApiKeyRow, SessionRow, UserRow
 from continuum.models.auth import ApiKey, User, VoicePreferences
+from continuum.models.memory import Mode
 
 
 class DuplicateRecord(Exception):
@@ -33,6 +34,7 @@ def _user(row: UserRow) -> User:
         is_admin=row.is_admin,
         disabled=row.disabled,
         created_at=row.created_at,
+        default_mode=Mode(row.default_mode or Mode.WORKSPACE),
     )
 
 
@@ -45,6 +47,7 @@ def _key(row: ApiKeyRow) -> ApiKey:
         created_at=row.created_at,
         last_used_at=row.last_used_at,
         revoked_at=row.revoked_at,
+        mode=Mode(row.mode or Mode.WORKSPACE),
     )
 
 
@@ -95,6 +98,7 @@ class AuthDB:
                         is_admin=user.is_admin,
                         disabled=user.disabled,
                         created_at=user.created_at,
+                        default_mode=user.default_mode.value,
                     )
                 )
         except IntegrityError as exc:
@@ -146,6 +150,12 @@ class AuthDB:
                 update(UserRow)
                 .where(UserRow.id == user_id)
                 .values(tts_voice=prefs.voice, tts_speed=prefs.speed)
+            )
+
+    async def set_default_mode(self, user_id: str, mode: Mode) -> None:
+        async with self.sessions.begin() as s:
+            await s.execute(
+                update(UserRow).where(UserRow.id == user_id).values(default_mode=mode.value)
             )
 
     async def set_password_hash(self, user_id: str, password_hash: str) -> None:
@@ -212,6 +222,7 @@ class AuthDB:
                         prefix=key.prefix,
                         key_hash=key_hash,
                         created_at=key.created_at,
+                        mode=key.mode.value,
                     )
                 )
         except IntegrityError as exc:

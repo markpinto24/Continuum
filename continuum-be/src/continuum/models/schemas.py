@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from continuum.models.feedback import RejectReason, ResolutionLabel
-from continuum.models.memory import Memory, MemoryCategory, MemoryStatus
+from continuum.models.memory import Memory, MemoryCategory, MemoryStatus, Mode
 
 
 class ClientBody(BaseModel):
@@ -58,10 +58,20 @@ class _IngestFields(BaseModel):
         "own graph. Everyone on the instance can then read it.",
     )
 
-    def as_transcript(self) -> str:
+    def as_transcript(self, *, label_lone_turn: bool = True) -> str:
+        """The text the extractor reads.
+
+        `label_lone_turn=False` passes a single user message as its bare words.
+        Measured three times per corpus (FINDINGS §11): the "user:" label costs
+        the Personal extractor (25 → 23-24 of 31 facts; "user: hello my name is
+        mark" extracted nothing, three times in three) and helps the Work one
+        (10 → 13 of 14). So it is a per-mode choice, not a cleanup.
+        """
         if self.text:
             return self.text.strip()
         if self.messages:
+            if not label_lone_turn and len(self.messages) == 1 and self.messages[0].role == "user":
+                return self.messages[0].content.strip()
             return "\n".join(f"{m.role}: {m.content}" for m in self.messages).strip()
         return ""
 
@@ -457,6 +467,11 @@ class SetupRequest(ClientBody):
             "before authentication existed; otherwise a random id is assigned."
         ),
     )
+    default_mode: Mode | None = Field(
+        default=None,
+        description="What Continuum is mainly for. Omitted: Personal, or Workspace when "
+        "adopting an existing user id.",
+    )
 
 
 class LoginRequest(ClientBody):
@@ -469,6 +484,14 @@ class Me(BaseModel):
     email: str
     is_admin: bool
     via: Literal["session", "api_key"]
+    mode: Mode = Field(default=Mode.WORKSPACE, description="The graph this request used.")
+    default_mode: Mode = Field(
+        default=Mode.WORKSPACE, description="The mode the UI opens in for this account."
+    )
+
+
+class ModeUpdate(ClientBody):
+    default_mode: Mode
 
 
 class PasswordChangeRequest(ClientBody):
@@ -478,6 +501,10 @@ class PasswordChangeRequest(ClientBody):
 
 class ApiKeyCreateRequest(ClientBody):
     name: str = Field(..., description="What this key is for, e.g. 'laptop agent'.")
+    mode: Mode = Field(
+        default=Mode.WORKSPACE,
+        description="The one mode the key may read and write. It can never switch.",
+    )
 
 
 class ApiKeySummary(BaseModel):
@@ -487,6 +514,7 @@ class ApiKeySummary(BaseModel):
     created_at: datetime
     last_used_at: datetime | None = None
     revoked_at: datetime | None = None
+    mode: Mode = Mode.WORKSPACE
 
 
 class ApiKeyCreated(BaseModel):

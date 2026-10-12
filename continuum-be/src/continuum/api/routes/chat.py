@@ -19,6 +19,7 @@ from continuum.api.deps import (
     SettingsDep,
     limit_llm_requests,
 )
+from continuum.models.memory import Mode
 from continuum.models.schemas import ChatBody, ChatContext, ChatContextRequest, ChatRequest
 from continuum.services.chat import ChatService
 
@@ -66,9 +67,14 @@ async def chat(
         )
     request = ChatRequest(
         **body.model_dump(),
-        user_id=principal.user_id,
+        user_id=principal.owner,
         author_email=principal.email,
     )
+    if request.share and principal.mode is Mode.PERSONAL:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Personal memories cannot be shared. Switch to Work to share with the team.",
+        )
     if request.share and not settings.shared_space_enabled:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -93,6 +99,6 @@ async def chat_context(
     needs to score retrieval on its own rather than through the answer.
     """
     return await retrieval.retrieve(
-        user_id=principal.user_id, query=request.query, limit=request.limit,
+        user_id=principal.owner, query=request.query, limit=request.limit,
         as_of=request.as_of,
     )

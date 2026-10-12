@@ -34,7 +34,7 @@ from continuum.clients.llm import LLMClient
 from continuum.config import Settings, get_settings
 from continuum.core import logger as clog
 from continuum.core.logger import get_logger
-from continuum.models.memory import SHARED_SPACE, Memory
+from continuum.models.memory import SHARED_SPACE, Memory, Mode, mode_of
 from continuum.models.schemas import (
     ChatContext,
     ChatDone,
@@ -53,10 +53,19 @@ log = get_logger(__name__)
 _CITATION = re.compile(r"\[(\d{1,2})\]")
 
 
-CHAT_SYSTEM_PROMPT = """You are Continuum, an assistant with long-term memory of \
-this person's work.
+# Each mode opens differently; everything after the opening — memory is
+# evidence, cite it, never resolve a dispute — is the same in both.
+_WORK_OPENING = """You are Continuum, an assistant with long-term memory of \
+this person's work."""
 
-Below is MEMORY: durable facts recorded from their own notes and conversations,
+_PERSONAL_OPENING = """You are Continuum, a personal assistant with long-term \
+memory of this person's life — the people in it, their routines, health, \
+preferences, plans and what they are working towards. Be warm and practical, \
+like a thoughtful friend who remembers. On health, say what is recorded and \
+cite it; do not diagnose or advise on treatment, and suggest asking a \
+professional when a decision depends on it."""
+
+_SHARED_RULES = """Below is MEMORY: durable facts recorded from their own notes and conversations,
 each with a confidence score and the date it was last confirmed.
 
 How to use it:
@@ -80,6 +89,13 @@ other and nobody has decided which one holds. When a disputed memory is relevant
 
 Format with Markdown where it helps: fenced code blocks tagged with their
 language (```python), lists for steps, **bold** sparingly. Be concise."""
+
+CHAT_SYSTEM_PROMPT = f"{_WORK_OPENING}\n\n{_SHARED_RULES}"
+PERSONAL_SYSTEM_PROMPT = f"{_PERSONAL_OPENING}\n\n{_SHARED_RULES}"
+
+
+def system_prompt_for(mode: Mode) -> str:
+    return PERSONAL_SYSTEM_PROMPT if mode is Mode.PERSONAL else CHAT_SYSTEM_PROMPT
 
 
 class ChatService:
@@ -165,7 +181,10 @@ class ChatService:
     ) -> list[dict[str, str]]:
         history = request.messages[-self.settings.chat_max_history :]
         return [
-            {"role": "system", "content": build_system_prompt(context)},
+            {
+                "role": "system",
+                "content": build_system_prompt(context, mode=mode_of(request.user_id)),
+            },
             *(
                 {"role": m.role, "content": m.content}
                 for m in history
@@ -204,9 +223,10 @@ class ChatService:
 # --- Pure prompt rendering ---------------------------------------------------
 
 
-def build_system_prompt(context: ChatContext) -> str:
+def build_system_prompt(context: ChatContext, *, mode: Mode = Mode.WORKSPACE) -> str:
     """Render the memory block. Pure, so the disputed-memory wording is testable."""
     numbering = _numbering(context)
+    opening = system_prompt_for(mode)
     when = (
         f"\n\nAS OF {context.as_of.date()}: the person is asking about the past. MEMORY "
         "below is what was believed on that date — some of it has changed since. "
@@ -217,7 +237,7 @@ def build_system_prompt(context: ChatContext) -> str:
 
     if not numbering:
         return (
-            f"{CHAT_SYSTEM_PROMPT}{when}\n\n"
+            f"{opening}{when}\n\n"
             "MEMORY: nothing recorded is relevant to this question. Say so rather "
             "than guessing at what they might have told you before."
         )
@@ -226,7 +246,7 @@ def build_system_prompt(context: ChatContext) -> str:
         memory.id for group in context.disagreements for memory in group.memories
     }
 
-    lines = [CHAT_SYSTEM_PROMPT + when, "", "MEMORY"]
+    lines = [opening + when, "", "MEMORY"]
     for index, memory in numbering.items():
         marker = " [DISPUTED]" if memory.id in disputed_ids else ""
         if memory.kind == "summary":

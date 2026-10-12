@@ -37,7 +37,9 @@ from continuum.models.memory import (
     ExtractedFact,
     Memory,
     MemoryCategory,
+    Mode,
     comparable_categories,
+    mode_of,
 )
 from continuum.services.memory_store import MemoryStore
 
@@ -256,6 +258,21 @@ class ResolutionService:
         }
 
         if relation == Verdict.DUPLICATE:
+            # DUPLICATE discards the incoming fact, so the duplicate guard reads
+            # the judge's verdict too: two statements that each name someone the
+            # other does not are a swap, not a restatement. The judge called
+            # "Sam is the user's partner" a duplicate of "Priya is the user's
+            # partner" — "a different name for the same relationship" — at 0.93.
+            if swapped_names(fact.content, candidate.content):
+                return Resolution(
+                    Verdict.CONFLICT,
+                    target=candidate,
+                    reason=f"{reason} (each names someone the other does not — escalated)",
+                    judge_confidence=confidence,
+                    escalated_from=Verdict.DUPLICATE,
+                    forced_escalation=True,
+                    **provenance,
+                )
             return Resolution(
                 Verdict.DUPLICATE,
                 target=candidate,
@@ -265,6 +282,19 @@ class ResolutionService:
             )
 
         if relation == Verdict.SUPERSEDES:
+            # Health is never changed silently, however sure the judge is: a
+            # wrong edit to an allergy or a medication is the worst belief loss
+            # there is. Policy, like the role rule — so it is no gate evidence.
+            if is_health_statement(fact, candidate):
+                return Resolution(
+                    Verdict.CONFLICT,
+                    target=candidate,
+                    reason=f"{reason} (a health fact only changes with your say-so — escalated)",
+                    judge_confidence=confidence,
+                    escalated_from=Verdict.SUPERSEDES,
+                    forced_escalation=True,
+                    **provenance,
+                )
             if (
                 self.settings.person_supersede_requires_change_language
                 and is_role_statement(fact, candidate)
@@ -326,6 +356,25 @@ class ResolutionService:
                 target=candidate,
                 reason=reason,
                 judge_confidence=confidence,
+                **provenance,
+            )
+
+        # A one-at-a-time relationship (a partner, a home, a job) held by two
+        # different names is not two independent facts. Stored side by side, the
+        # graph would silently hold two homes; nothing is retired by asking.
+        if holds_one_at_a_time(fact, candidate) and swapped_names(
+            fact.content, candidate.content
+        ):
+            return Resolution(
+                Verdict.CONFLICT,
+                target=candidate,
+                reason=(
+                    f"{reason} (one {candidate.subject} at a time, and these name two — "
+                    "escalated)"
+                ),
+                judge_confidence=confidence,
+                escalated_from=Verdict.INDEPENDENT,
+                forced_escalation=True,
                 **provenance,
             )
 
@@ -599,6 +648,8 @@ _TRANSITIONS = frozenset(
         "took", "taken", "takes", "moved", "left", "leaves", "stepped", "handed",
         "handover", "succeeded", "succeeds", "successor", "previously", "formerly",
         "former", "new", "stopped", "stops", "ended", "transferred",
+        # Life changes say so in their own words.
+        "broke", "divorced", "separated", "split", "ex", "relocated", "quit",
     }
 )
 
@@ -616,6 +667,41 @@ _ROLES = frozenset(
     }
 )
 
+# In a Personal graph, relationships and homes behave like roles: a second
+# partner, flatmate or employer named without "broke up" / "moved" may be a
+# mistake, a past state, or both true — a person decides (requirements §4.3).
+_RELATIONSHIPS = frozenset(
+    {
+        "dating", "married", "wife", "husband", "partner", "girlfriend", "boyfriend",
+        "fiance", "fiancee", "fiancé", "fiancée", "engaged", "spouse", "lives", "roommate",
+        "flatmate", "works", "employer", "employed",
+    }
+)
+
+# Words that make a statement about health, whatever category it was filed under
+# (the extractor files a medication as `fact` or even `preference`).
+_HEALTH = frozenset(
+    {
+        "allergic", "allergy", "allergies", "intolerant", "intolerance", "medication",
+        "medications", "medicine", "prescribed", "prescription", "dose", "dosage", "mg",
+        "diagnosed", "diagnosis", "condition", "chronic", "asthma", "diabetes", "diabetic",
+        "insulin", "inhaler", "blood", "vaccine", "vaccinated", "surgery", "therapy",
+        "symptoms", "supplement", "supplements", "vitamin", "pills", "tablets", "migraine",
+        "migraines", "anxiety", "depression", "pregnant", "injury", "injured",
+    }
+)
+
+
+def is_health_statement(fact: ExtractedFact, existing: Memory) -> bool:
+    """Is this pair about someone's health? The category on either side, or — in a
+    Personal graph — the words. Workspace text uses "condition", "therapy" or
+    "dose" in other senses, and its behaviour must not change."""
+    if MemoryCategory.HEALTH in {fact.category, existing.category}:
+        return True
+    if mode_of(existing.user_id) is not Mode.PERSONAL:
+        return False
+    return any(token in _HEALTH for token in _tokens(f"{fact.content} {existing.content}"))
+
 
 def is_role_statement(fact: ExtractedFact, existing: Memory) -> bool:
     """Is this pair about who holds a role — whatever category it was filed under?
@@ -628,11 +714,53 @@ def is_role_statement(fact: ExtractedFact, existing: Memory) -> bool:
     """
     if MemoryCategory.PERSON in {fact.category, existing.category}:
         return True
-    return _describes_a_role(fact.content) and _describes_a_role(existing.content)
+    roles = _ROLES | _RELATIONSHIPS if mode_of(existing.user_id) is Mode.PERSONAL else _ROLES
+    return _describes_a_role(fact.content, roles) and _describes_a_role(existing.content, roles)
 
 
-def _describes_a_role(text: str) -> bool:
-    return any(token in _ROLES for token in _tokens(text))
+def _describes_a_role(text: str, roles: frozenset[str] = _ROLES) -> bool:
+    return any(token in roles for token in _tokens(text))
+
+
+# Subjects the Personal extractor gives a relationship the user has one of at a
+# time (services/extraction.py), so that a new partner, home or job meets the old.
+SINGLE_HOLDER_SUBJECTS = frozenset({"partner", "home", "job"})
+
+
+def holds_one_at_a_time(fact: ExtractedFact, existing: Memory) -> bool:
+    return (
+        mode_of(existing.user_id) is Mode.PERSONAL
+        and fact.subject is not None
+        and fact.subject == existing.subject
+        and fact.subject in SINGLE_HOLDER_SUBJECTS
+    )
+
+
+def swapped_names(new: str, old: str) -> bool:
+    """Does each statement name someone or something the other does not?
+
+    Narrower than `material_difference` on purpose. That one guards the cheap
+    duplicate shortcut, where over-eagerness costs one judge call; this one
+    overrides the judge, where it costs a person's time. One name added ("lives
+    in Kothrud, Pune") is detail; a name on each side ("Sam" for "Priya") is a
+    swap.
+    """
+    new_tokens, old_tokens = _tokens(new), _tokens(old)
+
+    def names(own: dict[str, str], other: dict[str, str]) -> set[str]:
+        return {norm for norm, original in own.items() if norm not in other
+                and _is_name(norm, original)}
+
+    return bool(names(new_tokens, old_tokens)) and bool(names(old_tokens, new_tokens))
+
+
+def _is_name(norm: str, original: str) -> bool:
+    return (
+        original[:1].isupper()
+        and norm not in _CAPITALISED_NOISE
+        and norm not in _CALENDAR
+        and not any(ch.isdigit() for ch in norm)
+    )
 
 
 def states_a_change(text: str) -> bool:

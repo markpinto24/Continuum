@@ -446,3 +446,22 @@ async def test_a_question_about_the_past_says_so_and_is_never_remembered(setting
     assert "AS OF 2026-03-15" in llm.system_prompt
     assert events[0].data["as_of"].startswith("2026-03-15")
     assert ingest.requests == [] and events[-1].data["remembered"] is None
+
+
+# --- Each mode's assistant ----------------------------------------------------------
+
+
+async def test_personal_mode_gets_the_personal_assistant_and_work_keeps_its_own(settings):
+    personal_llm, work_llm = StubLLM(["ok"]), StubLLM(["ok"])
+    personal = ChatRequest(user_id="mark:personal", messages=[Message(role="user", content="hi")])
+    work = ChatRequest(user_id="mark", messages=[Message(role="user", content="hi")])
+    await collect(build(ChatContext(query="hi"), personal_llm, settings), personal)
+    await collect(build(ChatContext(query="hi"), work_llm, settings), work)
+
+    assert "personal assistant" in personal_llm.system_prompt
+    assert "do not diagnose" in personal_llm.system_prompt
+    assert "memory of this person's work" in work_llm.system_prompt
+    assert "personal assistant" not in work_llm.system_prompt
+    # The dispute rules are identical in both.
+    for llm in (personal_llm, work_llm):
+        assert "Do NOT pick the newer one" in llm.system_prompt

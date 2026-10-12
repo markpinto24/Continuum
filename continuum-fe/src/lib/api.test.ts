@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, api, onUnauthorized, streamChat } from './api'
+import { ApiError, api, onUnauthorized, setMode, streamChat } from './api'
 
 function respond(status: number, body: unknown = {}) {
   const fetchMock = vi.fn(() =>
@@ -15,7 +15,10 @@ function respond(status: number, body: unknown = {}) {
   return fetchMock
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  setMode(null)
+})
 
 describe('api client', () => {
   it('sends the browser header and the cookie on every request', async () => {
@@ -69,5 +72,44 @@ describe('api client', () => {
     await expect(streamChat({ messages: [{ role: 'user', content: 'hi' }] }, {})).rejects.toThrow()
     expect(lapsed).toHaveBeenCalledOnce()
     stop()
+  })
+})
+
+describe('the mode', () => {
+  it('names the graph on every request once the app has picked one', async () => {
+    const fetchMock = respond(200, { nodes: [], edges: [] })
+    await api.graph()
+    setMode('personal')
+    await api.graph()
+
+    const sent = fetchMock.mock.calls.map(
+      (call) => ((call as unknown as [string, RequestInit])[1].headers as Record<string, string>)['x-continuum-mode'],
+    )
+    expect(sent).toEqual([undefined, 'personal'])
+  })
+
+  it('puts it in the query of a download link, which cannot carry a header', () => {
+    setMode('personal')
+    expect(api.memoryExportUrl()).toMatch(/\/memories\/export\?mode=personal$/)
+    expect(api.feedbackExportUrlFor('extraction')).toContain('kind=extraction')
+    expect(api.feedbackExportUrlFor('extraction')).toContain('mode=personal')
+  })
+
+  it('keeps health out of an export unless the person opts in', () => {
+    setMode('personal')
+    expect(api.feedbackExportUrl()).not.toContain('include_sensitive')
+    expect(api.feedbackExportUrl({ sensitive: true })).toContain('include_sensitive=true')
+  })
+
+  it('creates a key for one mode, and sets the default only through its own call', async () => {
+    const fetchMock = respond(201, { key: {}, secret: 'ck_x' })
+    await api.createApiKey('life agent', 'personal')
+    await api.setDefaultMode('personal')
+
+    const [[, create], [url, patch]] = fetchMock.mock.calls as unknown as [string, RequestInit][]
+    expect(JSON.parse(create.body as string)).toEqual({ name: 'life agent', mode: 'personal' })
+    expect(url).toContain('/auth/mode')
+    expect(patch.method).toBe('PATCH')
+    expect(JSON.parse(patch.body as string)).toEqual({ default_mode: 'personal' })
   })
 })

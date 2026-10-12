@@ -551,6 +551,89 @@ nothing; subjects are a safety net for a weaker model. The extraction prompt was
 **not** changed: §7 showed every edit costs a 7B extractor category accuracy, and
 there is no measured harm here to pay for.
 
+## 11. Personal mode: what the first run found
+
+Same judge (qwen2.5:7b), same embedder (bge-m3, calibrated bands), 2026-10-10.
+Two new corpora, every case labelled before it was first run:
+`extraction-personal.yaml` (20 cases, 22 facts, 5 forbidden statements) and
+`resolution-personal.yaml` (23 cases + 6 held-out written to test the Personal
+rules + 4 held-out written after the first run to test the guard below). Cases
+run in a Personal graph (`eval:personal`), so the owner turns the rules on
+exactly as in the API.
+
+**Extraction**, three runs each side, personal corpus:
+
+| | Work prompt (before) | Personal prompt (after) |
+| --- | --- | --- |
+| precision | 85.7% ×3 | 72.2 / 76.5 / 88.2% |
+| recall | 54.5% ×3 | 59.1 / 59.1 / 68.2% |
+| F1 | 0.67 ×3 | 0.65 / 0.67 / 0.77 |
+| category | 41.7% | 92.3 / 84.6 / 86.7% |
+| subject | 0.0% | 30.8 / 30.8 / 40.0% |
+| forbidden | 20% | 0% ×3 |
+
+The Work prompt filed an allergy as a preference — it would have decayed away
+in months — and recorded the job's database migration as a life fact. The
+Personal prompt fixes the category, which is what decay and the health rule key
+on. Subjects are still weak: the extractor often answers `self` where the label
+names the other entity (`penicillin`, `gym`). `self` still compares like with
+like, so it costs judge calls rather than beliefs. Not tuned further: §7 is why.
+The Work prompt is byte-identical; its corpus is unaffected by construction.
+
+**Resolution**, two passes, 33 cases: **belief loss 0%, stale belief 0%,
+merge loss 0%** — the success bar. Escalation 66.7–69.7%; retire recall
+16.7–25%.
+
+1. **The judge folded a new partner into the old one.** "Sam is the user's
+   partner" against "Priya is the user's partner": *duplicate*, 0.93, "a
+   different name for the same relationship". DUPLICATE discards the new fact
+   — merge loss 3.5%. The duplicate guard only read the cosine shortcut, never
+   the judge. Now a judge DUPLICATE where each statement names something the
+   other lacks (`swapped_names`) escalates. It is narrower than
+   `material_difference` on purpose, because it overrides the judge: one name
+   added ("Kothrud, Pune") is detail; one name for another is a swap.
+2. **Two homes were "independent".** "Lives in Bangalore" against "lives in
+   Pune", independent at 1.00 — both stored, no edge, the graph silently
+   holding two homes. For the one-at-a-time subjects the Personal extractor
+   uses (`partner`, `home`, `job`), two different names are now a conflict.
+
+Held-out cases for both, written before the change: 3 of 4 pass both passes;
+the fourth (`home-neighbourhood-added`, labelled store) escalated on the judge's
+own *conflict* — the guard did not fire. The guard fired on exactly three cases,
+never on a cost case, and never on the Work corpus. Two Work passes: 0% on all
+three safety metrics, accuracy 80.0% and 76.4% against the `c55-families`
+baseline's 80.0%. Every case that moved was the judge changing its own relation
+with no rule involved — pass 2 called two shared-reviewer cases *independent*
+(stored side by side; labelled escalate), the run-to-run noise the two-pass rule
+exists for. Runs kept: `baselines/bgem3-qwen7b-personal-c33-pass{1,2}.json`,
+`baselines/bgem3-qwen7b-c55-modes-pass{1,2}.json`.
+
+**Found in use (2026-10-12): a self-introduction recorded nothing.** "hello
+my name is mark" stored no memory, and "my age is 22 and i am a male i do weight
+lifting and i am an software engineer" stored one. Two causes, measured apart:
+
+- The prompt never said that facts about the user themselves are memory. Three
+  cases added and labelled first (one held out); the old prompt missed all of
+  them, 3 runs in 3. One rule added (no category named): recall 48–52% → 77–81%,
+  F1 0.60–0.63 → 0.77–0.81, every self fact found in every run; the cost is
+  precision 79–83% → 76–81% (extra true details such as "lives in a flat near
+  the river").
+- A chat turn reaches the extractor as `user: …`. "user: hello my name is mark"
+  extracted nothing 3 times in 3; the bare words, once each time. Over whole
+  corpora, three runs each: Personal 25/31 bare vs 23–24 labelled, Work **10/14
+  bare vs 13/14 labelled**. So a lone user turn goes in bare in Personal only;
+  Work keeps the label.
+
+**Still open: the judge over-escalates life changes.** "Budget is now 10000",
+"no longer vegetarian", "lowered the reading goal to 12", "broke up … now Sam"
+— each *conflict* at ≈1.00, with reasons like "part of the original may still
+hold". The same judge retires 63–68% of the Work corpus's reversals. Safe —
+every one goes to the inbox — but it is the cost of Personal mode today, and
+the decisions people make there are exactly the labelled evidence a judge
+prompt change would need. Of the two cases labelled against the rules,
+`blood-orange-preference` shows the word rule's cost ("blood" is a health
+word); `second-flatmate` passed, stored free by the subject filter.
+
 ---
 
 ## What this changes

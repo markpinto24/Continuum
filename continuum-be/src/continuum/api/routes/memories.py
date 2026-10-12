@@ -16,11 +16,9 @@ from continuum.api.deps import (
 )
 from continuum.models.auth import Principal
 from continuum.models.memory import (
-    SHARED_SPACE,
     Memory,
     MemoryCategory,
     MemoryStatus,
-    visible_owners,
 )
 from continuum.models.schemas import (
     GraphEdge,
@@ -51,7 +49,7 @@ async def _owned(memories: MemoryStoreDep, memory_id: str, principal: Principal)
     memory = await memories.get(memory_id)
     # Your own memories, and the shared space's — every member may read and
     # confirm team knowledge. Anyone else's private memory does not exist here.
-    if not memory or memory.user_id not in (principal.user_id, SHARED_SPACE):
+    if not memory or memory.user_id not in principal.owners():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
     return memory
 
@@ -62,7 +60,7 @@ def _may_correct(memory: Memory, principal: Principal) -> None:
     Reading and confirming team knowledge is every member's; retiring or
     erasing it is not.
     """
-    if memory.user_id == principal.user_id:
+    if memory.user_id == principal.owner:
         return
     if memory.is_shared and (principal.is_admin or memory.shared_by == principal.user_id):
         return
@@ -79,16 +77,18 @@ async def export_memories(principal: CurrentUser, memories: MemoryStoreDep) -> J
     Your own memories only; the team space belongs to everyone (an admin backs it
     up with scripts/backup.py).
     """
-    items = await memories.list_all(user_id=principal.user_id, limit=100_000)
+    items = await memories.list_all(user_id=principal.owner, limit=100_000)
     export = MemoryExport(
-        exported_at=datetime.now(UTC), user_id=principal.user_id, total=len(items),
+        exported_at=datetime.now(UTC), user_id=principal.owner, total=len(items),
         memories=items,
     )
     stamp = export.exported_at.strftime("%Y%m%d")
     return JSONResponse(
         export.model_dump(mode="json"),
         headers={
-            "Content-Disposition": f'attachment; filename="continuum-memories-{stamp}.json"',
+            "Content-Disposition": (
+                f'attachment; filename="continuum-{principal.mode.value}-memories-{stamp}.json"'
+            ),
             "Cache-Control": "no-store",
         },
     )
@@ -108,7 +108,7 @@ async def refresh_summaries(
     """
     if not settings.summaries_enabled:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Summaries are turned off.")
-    return SummaryRefreshResponse(written=await summaries.refresh(principal.user_id, budget=5))
+    return SummaryRefreshResponse(written=await summaries.refresh(principal.owner, budget=5))
 
 
 @router.post(
@@ -122,7 +122,7 @@ async def search_memories(
 ) -> MemorySearchResponse:
     """Semantic search over your memories and the shared space."""
     results = await memories.search(
-        user_id=visible_owners(principal.user_id, shared=settings.shared_space_enabled),
+        user_id=principal.owners(shared=settings.shared_space_enabled),
         query=request.query,
         limit=request.limit,
         statuses=request.statuses,
@@ -145,7 +145,7 @@ async def list_memories(
 ) -> MemoryListResponse:
     """List memories. This is what the graph view will read from."""
     items = await memories.list_all(
-        user_id=visible_owners(principal.user_id, shared=settings.shared_space_enabled),
+        user_id=principal.owners(shared=settings.shared_space_enabled),
         limit=limit,
         statuses=status_filter,
         categories=category,
@@ -180,7 +180,7 @@ async def memory_graph(
         MemoryStatus.SUPERSEDED,
     ]
     items = await memories.list_all(
-        user_id=visible_owners(principal.user_id, shared=settings.shared_space_enabled),
+        user_id=principal.owners(shared=settings.shared_space_enabled),
         limit=limit if not as_of else 100_000,
         statuses=statuses,
     )
@@ -278,7 +278,11 @@ async def reject_memory(
     _may_correct(memory, principal)
     try:
         memory, restored = await corrections.reject(
-            memory, user_id=principal.user_id, reason=body.reason, note=body.note
+            memory,
+            user_id=principal.user_id,
+            graph_owner=principal.owner,
+            reason=body.reason,
+            note=body.note,
         )
     except CorrectionError as exc:
         raise HTTPException(exc.status, detail=str(exc)) from exc
@@ -316,7 +320,7 @@ async def share_memory(
     Your private copy is retired by an edge to the shared one, never deleted.
     """
     memory = await _owned(memories, memory_id, principal)
-    if memory.user_id != principal.user_id:
+    if memory.user_id != principal.owner:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="That memory is already shared.")
     try:
         return await sharing.share(memory, author=principal.user_id, author_email=principal.email)

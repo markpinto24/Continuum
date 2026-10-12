@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { STATUS_COLOR, nodeVolume } from './memory-style'
+import { CATEGORY_LABEL, STATUS_COLOR, halfLifeDays, modeOf, nodeVolume } from './memory-style'
 import type { MemoryStatus } from './types'
 
 describe('nodeVolume', () => {
@@ -34,5 +34,21 @@ describe('STATUS_COLOR', () => {
   it('gives contradicted its own colour, distinct from active', () => {
     // The disputed state is the only one that should pull the eye.
     expect(STATUS_COLOR.contradicted).not.toBe(STATUS_COLOR.active)
+  })
+})
+
+describe('Personal mode', () => {
+  it('reads the mode from the owner id', () => {
+    expect(modeOf('mark:personal')).toBe('personal')
+    expect(modeOf('mark')).toBe('workspace')
+    expect(modeOf('_shared')).toBe('workspace')
+  })
+
+  it('keeps life facts longer, and health never fades', () => {
+    expect(halfLifeDays('person', 'personal')).toBe(730)
+    expect(halfLifeDays('person', 'workspace')).toBe(365)
+    expect(halfLifeDays('health', 'personal')).toBeNull()
+    expect(halfLifeDays('routine', 'personal')).toBe(45)
+    expect(CATEGORY_LABEL.goal).toBe('Goal')
   })
 })

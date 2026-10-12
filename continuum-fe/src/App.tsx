@@ -1,4 +1,4 @@
-import { AudioLines, Inbox, MessageSquare, Network, PanelRightClose, Sparkles } from 'lucide-react'
+import { AudioLines, Heart, Inbox, MessageSquare, Network, PanelRightClose, Sparkles, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AccountDialog } from '@/components/account-dialog'
@@ -16,9 +16,10 @@ import { Tooltip, TooltipProvider } from '@/components/ui/tooltip'
 import { useResizablePanel } from '@/hooks/use-resizable-panel'
 import { usePanelOpen } from '@/hooks/use-panel-open'
 import { cn } from '@/lib/utils'
+import { useMode } from '@/hooks/use-mode'
 import { useResource } from '@/hooks/use-resource'
-import { ApiError, api, onUnauthorized } from '@/lib/api'
-import type { GraphResponse, Me, MemoryStatus } from '@/lib/types'
+import { ApiError, api, onUnauthorized, setMode } from '@/lib/api'
+import type { GraphResponse, Me, MemoryStatus, Mode } from '@/lib/types'
 
 const EMPTY_GRAPH: GraphResponse = { nodes: [], edges: [] }
 /** Gap between the floating sidebar and the window edges, in pixels. */
@@ -65,7 +66,15 @@ export default function App() {
 
   // A session that lapses mid-use (expiry, sign-out in another tab, account
   // disabled) lands here from whichever request noticed first.
-  useEffect(() => onUnauthorized(() => setSession({ state: 'signed-out' })), [])
+  // Signed out, there is no mode until the next account says where it opens.
+  // Cleared here, not on unmount: StrictMode's rehearsal unmount would clear it
+  // between the first render and the requests that need it.
+  const toSignedOut = useCallback(() => {
+    setMode(null)
+    setSession({ state: 'signed-out' })
+  }, [])
+
+  useEffect(() => onUnauthorized(toSignedOut), [toSignedOut])
 
   const signedIn = useCallback((me: Me) => {
     try {
@@ -81,9 +90,9 @@ export default function App() {
     try {
       await api.logout()
     } finally {
-      setSession({ state: 'signed-out' })
+      toSignedOut()
     }
-  }, [])
+  }, [toSignedOut])
 
   switch (session.state) {
     case 'loading':
@@ -112,8 +121,18 @@ export default function App() {
     case 'signed-out':
       return <AuthScreen mode="login" onSignedIn={signedIn} />
     case 'signed-in':
-      return <Workspace key={session.me.user_id} me={session.me} onSignOut={signOut} />
+      return <Signedin key={session.me.user_id} me={session.me} onSignOut={signOut} />
   }
+}
+
+/**
+ * One workspace per mode, keyed on it: switching unmounts the other mode's
+ * graph, chat and Lumen entirely, so no conversation, selection or request can
+ * carry across (requirements.md §7).
+ */
+function Signedin({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  const [mode, setMode] = useMode(me)
+  return <Workspace key={mode} me={me} mode={mode} onMode={setMode} onSignOut={onSignOut} />
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
@@ -124,7 +143,17 @@ function Centered({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+function Workspace({
+  me,
+  mode,
+  onMode,
+  onSignOut,
+}: {
+  me: Me
+  mode: Mode
+  onMode: (mode: Mode) => void
+  onSignOut: () => void
+}) {
   const [includeArchived, setIncludeArchived] = useState(false)
   /** A past day, or null: the graph and the chat both look back to it. */
   const [asOfDay, setAsOfDay] = useState<string | null>(null)
@@ -196,6 +225,8 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           refreshing={graph.loading}
           asOf={asOfDay}
           onAsOf={setAsOfDay}
+          mode={mode}
+          onMode={onMode}
         />
 
         {/* The graph fills everything; the sidebar floats over it as glass. */}
@@ -216,6 +247,7 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   rightInset={covered}
+                  mode={mode}
                 />
                 {data.nodes.length > 0 && <GraphLegend counts={counts} />}
                 {!graph.loading && data.nodes.length === 0 && (
@@ -231,10 +263,15 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                       <p className="mt-1.5 text-sm leading-relaxed text-muted">
                         {asOfDay
                           ? 'No memory had been recorded by that day.'
-                          : 'Tell Continuum about your work in the chat — decisions, people, constraints. Each fact becomes a node here.'}
+                          : mode === 'personal'
+                            ? 'Tell me about your life in the chat — people, routines, what you’re working towards. Each fact becomes a node here, private to you.'
+                            : 'Tell Continuum about your work in the chat — decisions, people, constraints. Each fact becomes a node here.'}
                       </p>
                     </div>
                   </div>
+                )}
+                {mode === 'workspace' && me.default_mode === 'workspace' && !asOfDay && (
+                  <PersonalHint inset={covered} onTry={() => onMode('personal')} />
                 )}
                 {asOfDay && (
                   <p
@@ -311,6 +348,7 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                   controlRef={chat}
                   onLumenAvailable={setLumenAvailable}
                   me={me}
+                  mode={mode}
                   asOf={asOf}
                   voiceSettings={voiceSettings.data}
                   openDisputes={conflicts.data?.total ?? null}
@@ -325,6 +363,7 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                   onResolved={graph.refresh}
                   onSelect={inspect}
                   isAdmin={me.is_admin}
+                  mode={mode}
                 />
               </TabsContent>
 
@@ -380,9 +419,65 @@ function Workspace({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           open={accountOpen}
           onOpenChange={setAccountOpen}
           voiceSettings={voiceSettings}
+          mode={mode}
         />
       </div>
     </TooltipProvider>
+  )
+}
+
+const HINT_KEY = 'continuum.personal_hint_seen'
+
+function readHintSeen(): boolean {
+  try {
+    return localStorage.getItem(HINT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Accounts from before Personal mode stay on Work (requirements.md §10.5) and
+ * hear about Personal once. Dismissed or tried, it never comes back.
+ */
+function PersonalHint({ inset, onTry }: { inset: number; onTry: () => void }) {
+  const [seen, setSeen] = useState(readHintSeen)
+  if (seen) return null
+  const done = () => {
+    setSeen(true)
+    try {
+      localStorage.setItem(HINT_KEY, '1')
+    } catch {
+      // A private window: the hint may come back next time. Harmless.
+    }
+  }
+  return (
+    <div
+      role="note"
+      className="glass absolute top-4 flex -translate-x-1/2 items-center gap-2 rounded-full py-1.5 pr-1.5 pl-3.5 text-xs text-muted animate-fade-up"
+      style={{ left: `calc((100% - ${inset}px) / 2)` }}
+    >
+      <Heart className="size-3.5 text-rose-300" />
+      New: a separate, private memory for your life.
+      <button
+        type="button"
+        onClick={() => {
+          done()
+          onTry()
+        }}
+        className="rounded-full px-2 py-0.5 font-medium text-rose-200 hover:bg-white/10"
+      >
+        Try Personal
+      </button>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        onClick={done}
+        className="rounded-full p-1 hover:bg-white/10"
+      >
+        <X className="size-3" />
+      </button>
+    </div>
   )
 }
 

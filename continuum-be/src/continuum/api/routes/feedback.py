@@ -29,7 +29,7 @@ from continuum.models.feedback import (
     ResolutionRule,
     RuleList,
 )
-from continuum.models.memory import SHARED_SPACE, visible_owners
+from continuum.models.memory import SENSITIVE_CATEGORIES, SHARED_SPACE, Mode
 from continuum.models.schemas import ClientBody, LabelListResponse
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
@@ -40,7 +40,7 @@ async def list_labels(
     principal: CurrentUser, feedback: FeedbackDep, limit: int = Query(200, ge=1, le=1000)
 ) -> LabelListResponse:
     """Your decisions, newest first, each with what the resolver had thought."""
-    labels = await feedback.labels(principal.user_id, limit=limit)
+    labels = await feedback.labels(principal.user_id, limit=limit, owners=principal.owners())
     return LabelListResponse(total=len(labels), labels=labels)
 
 
@@ -54,7 +54,9 @@ async def evidence(
     decisions, or from everyone's (`scope=team`) — the gate is one setting for
     the whole instance, so pooled evidence reaches a verdict sooner. Only counts
     leave the labels; nobody's content does."""
-    return await feedback.evidence(principal.user_id, team=scope == "team")
+    return await feedback.evidence(
+        principal.user_id, team=scope == "team", owners=principal.owners()
+    )
 
 
 @router.get("/calibration", response_model=CalibrationReport)
@@ -72,7 +74,7 @@ class RuleBody(ClientBody):
 
 
 def _rule_owners(principal: CurrentUser, settings: SettingsDep) -> list[str]:
-    return visible_owners(principal.user_id, shared=settings.shared_space_enabled)
+    return principal.owners(shared=settings.shared_space_enabled)
 
 
 @router.get("/rules", response_model=RuleList)
@@ -95,13 +97,13 @@ async def approve_rule(
     member's resolver does, so it takes an admin.
     """
     if body.scope == "team":
-        if not settings.shared_space_enabled:
+        if not settings.shared_space_enabled or principal.mode is Mode.PERSONAL:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "There is no team space.")
         if not principal.is_admin:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, "Only an admin can add a rule for the team graph."
             )
-    owner = SHARED_SPACE if body.scope == "team" else principal.user_id
+    owner = SHARED_SPACE if body.scope == "team" else principal.owner
     return await feedback.approve_rule(
         owner=owner, subject=body.subject.strip(), approved_by=principal.user_id
     )
@@ -112,8 +114,8 @@ async def revoke_rule(
     rule_id: str, principal: SessionUser, feedback: FeedbackDep, settings: SettingsDep
 ) -> Response:
     """Revoke a rule. Kept in the table with its revocation time, not deleted."""
-    owners = [principal.user_id]
-    if principal.is_admin and settings.shared_space_enabled:
+    owners = [principal.owner]
+    if principal.is_admin and settings.shared_space_enabled and principal.mode is Mode.WORKSPACE:
         owners.append(SHARED_SPACE)
     try:
         await feedback.revoke_rule(rule_id, owners=owners)
@@ -129,6 +131,9 @@ async def export(
     memories: MemoryStoreDep,
     settings: SettingsDep,
     kind: Literal["resolution", "extraction", "retrieval"] = "resolution",
+    include_sensitive: bool = Query(
+        False, description="Also export health facts. Off unless you ask: they are private."
+    ),
 ) -> PlainTextResponse:
     """What you taught Continuum, as evaluation cases.
 
@@ -137,17 +142,33 @@ async def export(
     retrieval: memories you said should have come up, for `--retrieval`.
     """
     if kind == "extraction":
-        body, name = await feedback.extraction_yaml(principal.user_id), "extraction"
+        body, name = (
+            await feedback.extraction_yaml(
+                principal.user_id, owners=principal.owners(), sensitive=include_sensitive
+            ),
+            "extraction",
+        )
     elif kind == "retrieval":
         owners = set(_rule_owners(principal, settings))
-        answers = await feedback.learning.answers(principal.user_id) if feedback.learning else []
+        answers = await feedback.answers(principal.user_id, owners=principal.owners())
         ids = sorted({mid for a in answers for mid in a.missing_ids})
         lookup = {
-            mid: m for mid, m in (await memories.resolve_ids(ids)).items() if m.user_id in owners
+            mid: m
+            for mid, m in (await memories.resolve_ids(ids)).items()
+            if m.user_id in owners
+            and (include_sensitive or m.category not in SENSITIVE_CATEGORIES)
         }
-        body, name = await feedback.retrieval_yaml(principal.user_id, lookup), "retrieval"
+        body, name = (
+            await feedback.retrieval_yaml(principal.user_id, lookup, owners=principal.owners()),
+            "retrieval",
+        )
     else:
-        body, name = await feedback.export_yaml(principal.user_id), "cases"
+        body, name = (
+            await feedback.export_yaml(
+                principal.user_id, owners=principal.owners(), sensitive=include_sensitive
+            ),
+            "cases",
+        )
     return PlainTextResponse(
         body,
         media_type="application/yaml",
@@ -190,6 +211,7 @@ async def rate_answer(
     item = AnswerFeedback(
         id=uuid.uuid4().hex,
         user_id=principal.user_id,
+        graph_owner=principal.owner,
         created_at=datetime.now(UTC),
         query=body.query,
         answer=body.answer,
@@ -206,4 +228,4 @@ async def rate_answer(
 @router.get("/summary", response_model=FeedbackSummary)
 async def summary(principal: CurrentUser, feedback: FeedbackDep) -> FeedbackSummary:
     """Everything you have taught Continuum, in counts."""
-    return await feedback.summary(principal.user_id)
+    return await feedback.summary(principal.user_id, owners=principal.owners())

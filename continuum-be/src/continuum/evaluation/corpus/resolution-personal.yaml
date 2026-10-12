@@ -1,0 +1,569 @@
+# Labelled contradiction corpus — Personal mode (requirements.md §8.2).
+#
+# Run in a Personal graph (owner "eval:personal"), so the Personal rules apply:
+# health always asks, and a single-holder relationship (partner, home, job)
+# changes only when the new statement says the old one ended.
+#
+# Same labelling principle as resolution.yaml: the incoming fact is always the
+# later one, so a plain stated reversal IS a supersede. What earns an escalation
+# is partial overlap, a change with no sign the old belief ended, or health —
+# where a silent change is the most expensive mistake this system can make.
+#
+# Every case, including the held-out set, was written and labelled before this
+# corpus was first run. Cases tagged `held-out-personal` were written to test
+# the Personal rules, and two of them (`expected-cost`) are labelled AGAINST a
+# rule, so what the rule costs shows up in the numbers instead of being hidden.
+
+# =============================================================================
+# retire — a stated change
+# =============================================================================
+
+- id: partner-breakup-stated
+  why: >
+    The new statement says the old relationship ended and names who replaced
+    it. One partner at a time, the change is explicit: retiring is correct and
+    asking would waste the person's time.
+  existing:
+    content: Priya is the user's partner
+    category: person
+    subject: partner
+    age_days: 400
+  incoming:
+    content: The user and Priya broke up, and the user's partner is now Sam
+    category: person
+    subject: partner
+  expect: retire
+  tags: [relationship, stated-change]
+
+- id: moved-home-stated
+  why: >
+    "Has moved ... now lives" says the old home stopped being home.
+  existing:
+    content: The user lives in Pune
+    category: fact
+    subject: home
+    age_days: 300
+  incoming:
+    content: The user has moved to Bangalore and now lives there
+    category: fact
+    subject: home
+  expect: retire
+  tags: [relationship, stated-change, places]
+
+- id: job-change-stated
+  why: >
+    Leaving one employer for another, stated outright.
+  existing:
+    content: The user works at Initech as a backend engineer
+    category: fact
+    subject: job
+    age_days: 500
+  incoming:
+    content: The user left Initech and now works at Globex
+    category: fact
+    subject: job
+  expect: retire
+  tags: [relationship, stated-change]
+
+- id: gym-routine-change
+  why: >
+    A schedule moved, with "instead of" naming the old slot. A routine is the
+    user's current habit; the old one no longer holds.
+  existing:
+    content: The user goes to the gym on weekday mornings around 7
+    category: routine
+    subject: gym
+    age_days: 90
+  incoming:
+    content: The user now goes to the gym in the evenings after work instead of mornings
+    category: routine
+    subject: gym
+  expect: retire
+  tags: [routine, stated-change]
+
+- id: coffee-to-tea
+  why: >
+    A preference flip with the old position named in the new statement.
+  existing:
+    content: The user drinks coffee every morning and loves it
+    category: preference
+    subject: self
+    age_days: 120
+  incoming:
+    content: The user has switched from coffee to green tea completely
+    category: preference
+    subject: self
+  expect: retire
+  tags: [preference, stated-change]
+
+- id: no-longer-vegetarian
+  why: >
+    "No longer" retires the old diet. Diet here is a choice, not a medical
+    restriction, so no health rule applies.
+  existing:
+    content: The user is vegetarian
+    category: preference
+    subject: self
+    age_days: 700
+  incoming:
+    content: The user is no longer vegetarian and eats fish now
+    category: preference
+    subject: self
+  expect: retire
+  tags: [preference, stated-change]
+
+- id: budget-raised
+  why: >
+    One limit replaced by another, "now" marking the change. Two caps on the
+    same budget cannot both hold.
+  existing:
+    content: The user's monthly eating-out budget is under 8000 rupees
+    category: constraint
+    subject: eating-out
+    age_days: 60
+  incoming:
+    content: The user's monthly eating-out budget is now 10000 rupees
+    category: constraint
+    subject: eating-out
+  expect: retire
+  tags: [constraint, numbers, stated-change]
+
+- id: reading-goal-lowered
+  why: >
+    A revised target replaces the old one for the same year.
+  existing:
+    content: The user wants to read 20 books this year
+    category: goal
+    subject: reading
+    age_days: 100
+  incoming:
+    content: The user has lowered the reading goal to 12 books this year
+    category: goal
+    subject: reading
+  expect: retire
+  tags: [goal, numbers, stated-change]
+
+- id: friend-relocated
+  why: >
+    Where a friend lives, changed and said so. Rohan himself is untouched; only
+    the city moves.
+  existing:
+    content: Rohan lives in Mumbai
+    category: fact
+    subject: rohan
+    age_days: 200
+  incoming:
+    content: Rohan relocated to Delhi last month
+    category: fact
+    subject: rohan
+  expect: retire
+  tags: [relationships, stated-change, places]
+
+# =============================================================================
+# escalate — health, or a change nobody said happened
+# =============================================================================
+
+- id: partner-unstated
+  why: >
+    A different partner, with nothing saying the first relationship ended. The
+    extractor may have misread who is who, or the user may be naming someone
+    else. Retiring "Priya is the user's partner" on that would erase a true and
+    important belief without a word: the person decides.
+  existing:
+    content: Priya is the user's partner
+    category: person
+    subject: partner
+    age_days: 400
+  incoming:
+    content: Sam is the user's partner
+    category: person
+    subject: partner
+  expect: escalate
+  tags: [relationship, unstated-change]
+
+- id: home-unstated
+  why: >
+    A second city with no sign of a move. People keep two homes, or mention
+    where they are staying; only the person knows which.
+  existing:
+    content: The user lives in Pune
+    category: fact
+    subject: home
+    age_days: 300
+  incoming:
+    content: The user lives in Bangalore
+    category: fact
+    subject: home
+  expect: escalate
+  tags: [relationship, unstated-change, places]
+
+- id: job-unstated
+  why: >
+    A second employer with no sign the first ended — a side job and a main job
+    both hold. Ask.
+  existing:
+    content: The user works at Initech as a backend engineer
+    category: fact
+    subject: job
+    age_days: 500
+  incoming:
+    content: The user works at Globex
+    category: fact
+    subject: job
+  expect: escalate
+  tags: [relationship, unstated-change]
+
+- id: allergy-cleared
+  why: >
+    Even a clearly stated health change asks. If the extractor or judge is
+    wrong, a silently retired allergy is the costliest mistake in the system.
+  existing:
+    content: The user is allergic to penicillin
+    category: health
+    subject: penicillin
+    age_days: 365
+  incoming:
+    content: The user is no longer allergic to penicillin after an allergy test
+    category: health
+    subject: penicillin
+  expect: escalate
+  tags: [health, stated-change]
+
+- id: dose-changed
+  why: >
+    A dose changed. One number is exactly what an extraction gets wrong, and a
+    wrong dose is dangerous: health asks.
+  existing:
+    content: The user takes 1000 IU of vitamin D every morning
+    category: health
+    subject: vitamin-d
+    age_days: 120
+  incoming:
+    content: The user now takes 2000 IU of vitamin D every morning
+    category: health
+    subject: vitamin-d
+  expect: escalate
+  tags: [health, numbers]
+
+- id: health-filed-as-fact
+  why: >
+    The extractor files a medication as a fact as often as health. The rule
+    must read the words, or this pair is retired silently.
+  existing:
+    content: The user takes 10 mg of cetirizine every day
+    category: fact
+    subject: cetirizine
+    age_days: 90
+  incoming:
+    content: The user now takes 20 mg of cetirizine every day
+    category: fact
+    subject: cetirizine
+  expect: escalate
+  tags: [health, health-as-fact, numbers]
+
+- id: pet-diet-lifted
+  why: >
+    A pet's medical diet is health too. The incoming side is filed as a fact,
+    but the existing one is health, which is enough.
+  existing:
+    content: Miso needs a special kidney diet
+    category: health
+    subject: miso
+    age_days: 200
+  incoming:
+    content: Miso can eat regular cat food again
+    category: fact
+    subject: miso
+  expect: escalate
+  tags: [health, pets, cross-category]
+
+# =============================================================================
+# reinforce — already known
+# =============================================================================
+
+- id: birthday-reworded
+  why: >
+    The same date, reworded. Storing it twice would split one belief's evidence.
+  existing:
+    content: The user's mom's birthday is on 4 June
+    category: fact
+    subject: mom
+    age_days: 200
+  incoming:
+    content: Mom's birthday is June 4th
+    category: fact
+    subject: mom
+  expect: reinforce
+  tags: [duplicate, dates]
+
+- id: allergy-repeated
+  why: >
+    A health fact said again. Confirming it is safe: nothing is retired, and
+    the allergy gains evidence.
+  existing:
+    content: The user is allergic to penicillin
+    category: health
+    subject: penicillin
+    age_days: 365
+  incoming:
+    content: The user has a penicillin allergy
+    category: health
+    subject: penicillin
+  expect: reinforce
+  tags: [duplicate, health]
+
+# =============================================================================
+# store — compatible, or history
+# =============================================================================
+
+- id: brother-and-his-work
+  why: >
+    Two compatible facts about one person: who he is to the user, and what he
+    does. Neither replaces the other.
+  existing:
+    content: Chris is the user's brother
+    category: person
+    subject: chris
+    age_days: 300
+  incoming:
+    content: Chris works as an ethical hacker
+    category: fact
+    subject: chris
+  expect: store
+  tags: [relationships, compatible, cross-category]
+
+- id: friend-and-profession
+  why: >
+    How the user knows Rohan and what Rohan does for a living are separate
+    facts about one person.
+  existing:
+    content: Rohan is the user's oldest friend from school
+    category: person
+    subject: rohan
+    age_days: 500
+  incoming:
+    content: Rohan is a doctor
+    category: fact
+    subject: rohan
+  expect: store
+  tags: [relationships, compatible, cross-category]
+
+- id: second-half-marathon
+  why: >
+    Two races both happened. An event is history: a later time never retires
+    an earlier one.
+  existing:
+    content: The user ran a first half marathon in 2 hours 5 minutes
+    category: event
+    subject: half-marathon
+    age_days: 365
+  incoming:
+    content: The user ran a half marathon in 1 hour 58 minutes
+    category: event
+    subject: half-marathon
+  expect: store
+  tags: [event, numbers]
+
+- id: wedding-then-separation
+  why: >
+    A wedding happened even if the marriage later ended. The event stays true;
+    only a belief about the present could change.
+  existing:
+    content: Ana married Leo on 3 March
+    category: event
+    subject: ana
+    age_days: 900
+  incoming:
+    content: Ana and Leo have separated
+    category: fact
+    subject: ana
+  expect: store
+  tags: [event, relationships]
+
+- id: two-gym-routines
+  why: >
+    A second habit at the same place. Both repeat; neither replaces the other.
+  existing:
+    content: The user goes to the gym on weekday mornings around 7
+    category: routine
+    subject: gym
+    age_days: 90
+  incoming:
+    content: The user does a yoga class at the gym on Sundays
+    category: routine
+    subject: gym
+  expect: store
+  tags: [routine, compatible]
+
+# =============================================================================
+# held-out — written before the first run to test the Personal rules
+# =============================================================================
+
+- id: ex-partner-now
+  why: >
+    "Ex" and "split" say the relationship ended. The rule must let a stated
+    breakup through, not ask about it.
+  existing:
+    content: Priya is the user's partner
+    category: person
+    subject: partner
+    age_days: 400
+  incoming:
+    content: Priya is the user's ex now; they split up in August
+    category: person
+    subject: partner
+  expect: retire
+  tags: [held-out-personal, relationship, stated-change]
+
+- id: sister-got-married
+  why: >
+    Single then married: "got married" is a change, and the incoming statement
+    is the later one. Nothing of the old belief survives.
+  existing:
+    content: Ana is single
+    category: fact
+    subject: ana
+    age_days: 700
+  incoming:
+    content: Ana got married to Leo
+    category: fact
+    subject: ana
+  expect: retire
+  tags: [held-out-personal, relationships, stated-change]
+
+- id: migraines-stopped-words-only
+  why: >
+    A condition said to have stopped, filed as a fact with no health category
+    on either side. Only the words can catch it, and health must ask.
+  existing:
+    content: The user gets migraines most weeks
+    category: fact
+    subject: migraines
+    age_days: 180
+  incoming:
+    content: The user's migraines have stopped since changing medication
+    category: fact
+    subject: migraines
+  expect: escalate
+  tags: [held-out-personal, health, health-as-fact]
+
+- id: dog-walk-added
+  why: >
+    An extra walk, said with "also". Both routines hold.
+  existing:
+    content: The user walks the dog every evening
+    category: routine
+    subject: dog
+    age_days: 60
+  incoming:
+    content: The user also walks the dog in the mornings at weekends
+    category: routine
+    subject: dog
+  expect: store
+  tags: [held-out-personal, routine, compatible]
+
+- id: second-flatmate
+  why: >
+    Labelled against the relationship rule. Two flatmates is ordinary, and
+    "also" says so: the right action is to store. The rule sees a shared role
+    with no stated change and will ask — the safe direction, but a cost, and
+    this case keeps it visible.
+  existing:
+    content: Arjun is the user's flatmate
+    category: person
+    subject: arjun
+    age_days: 200
+  incoming:
+    content: Neha is also the user's flatmate
+    category: person
+    subject: neha
+  expect: store
+  tags: [held-out-personal, relationships, expected-cost]
+
+- id: blood-orange-preference
+  why: >
+    Labelled against the health word rule. "Blood" is a health word, but this
+    is a juice preference flipped with "no longer": the right action is to
+    retire. The rule will ask instead — the safe direction, and this case
+    keeps the cost of matching on words visible.
+  existing:
+    content: The user likes blood orange juice with breakfast
+    category: preference
+    subject: juice
+    age_days: 100
+  incoming:
+    content: The user no longer likes blood orange juice and drinks apple juice instead
+    category: preference
+    subject: juice
+  expect: retire
+  tags: [held-out-personal, preference, expected-cost]
+
+# =============================================================================
+# held-out — written after the first run, BEFORE the name-swap guard existed,
+# to test it on cases that did not inspire it
+# =============================================================================
+
+- id: husband-renamed
+  why: >
+    A different name for a one-at-a-time relationship, with nothing saying the
+    first ended. Whatever the judge calls it, folding it in as a duplicate would
+    discard the new name, and retiring would erase the old: ask.
+  existing:
+    content: Leo is the user's husband
+    category: person
+    subject: partner
+    age_days: 900
+  incoming:
+    content: Arun is the user's husband
+    category: person
+    subject: partner
+  expect: escalate
+  tags: [held-out-guard, relationship, unstated-change]
+
+- id: home-second-city
+  why: >
+    A second city for home, with no move stated. Both "independent" (two homes,
+    silently) and a retire are wrong without the person's word.
+  existing:
+    content: The user lives in Lisbon
+    category: fact
+    subject: home
+    age_days: 400
+  incoming:
+    content: The user lives in Porto
+    category: fact
+    subject: home
+  expect: escalate
+  tags: [held-out-guard, relationship, unstated-change, places]
+
+- id: job-reworded
+  why: >
+    The same job said another way: same employer, same title. The guard must
+    not fire when no name was swapped.
+  existing:
+    content: The user works at Initech as a backend engineer
+    category: fact
+    subject: job
+    age_days: 300
+  incoming:
+    content: The user is a backend engineer at Initech
+    category: fact
+    subject: job
+  expect: reinforce
+  tags: [held-out-guard, duplicate, cost-of-change]
+
+- id: home-neighbourhood-added
+  why: >
+    A neighbourhood added to the same city. Pune is on both sides, so nothing
+    was swapped; the old belief still holds and the detail is new. Store.
+  existing:
+    content: The user lives in Pune
+    category: fact
+    subject: home
+    age_days: 300
+  incoming:
+    content: The user lives in Kothrud, a neighbourhood of Pune
+    category: fact
+    subject: home
+  expect: store
+  tags: [held-out-guard, compatible, cost-of-change]

@@ -1,8 +1,12 @@
 # Requirements — Personal mode (general life memory)
 
-Status: **planned, not started.** This is the plan to implement later. Read
-`CLAUDE.md` first; everything here must fit its four commitments and its
-"things that look like improvements but are not".
+Status: **built (Phase 15, 2026-10-10)** on the defaults in §10: strictly
+separate modes, one Lumen, finance later, "Personal / Work", existing accounts
+stay on Work with a one-time hint. Phases A–G are done; results are in
+`continuum-be/src/continuum/evaluation/FINDINGS.md` §11. Open: the judge
+escalates most stated life changes (safe, but costly), and Personal subjects are
+often `self`. Read `CLAUDE.md` first; everything here must fit its four
+commitments and its "things that look like improvements but are not".
 
 ---
 
@@ -14,7 +18,7 @@ time.
 
 | Mode | What it remembers | Status |
 | --- | --- | --- |
-| **Personal** (new, the default for new accounts) | Your life: people and relationships, health, routines, preferences, goals, places, important dates, plans | To build |
+| **Personal** (new, the default for new accounts) | Your life: people and relationships, health, routines, preferences, goals, places, important dates, plans | Built |
 | **Workspace** (today's Continuum) | Your work: projects, decisions, clients, constraints, ownership, deadlines | Built |
 
 The belief-graph machinery is the same in both modes: supersede edges, disputes

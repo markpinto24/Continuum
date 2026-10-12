@@ -10,7 +10,7 @@
  * only one that wants a decision from you.
  */
 
-import type { MemoryCategory, MemoryStatus } from './types'
+import type { MemoryCategory, MemoryStatus, Mode } from './types'
 
 export const STATUS_COLOR: Record<MemoryStatus, string> = {
   active: '#34d399', // emerald — trusted, in retrieval
@@ -53,6 +53,9 @@ export const CATEGORY_LABEL: Record<MemoryCategory, string> = {
   event: 'Event',
   person: 'Person',
   constraint: 'Constraint',
+  health: 'Health',
+  routine: 'Routine',
+  goal: 'Goal',
 }
 
 /**
@@ -80,7 +83,37 @@ export const CATEGORY_HALF_LIFE_DAYS: Record<MemoryCategory, number | null> = {
   decision: 180,
   person: 365,
   event: null, // history is not a belief that can weaken
+  health: null,
+  routine: 45,
+  goal: 120,
 }
+
+/**
+ * Personal mode keeps life facts longer (PERSONAL_HALF_LIFE_DAYS): a sister is
+ * a sister in two years. Health never fades — only a person changes it.
+ */
+export const PERSONAL_HALF_LIFE_DAYS: Record<MemoryCategory, number | null> = {
+  constraint: 60,
+  preference: 180,
+  fact: 240,
+  decision: 180,
+  person: 730,
+  event: null,
+  health: null,
+  routine: 45,
+  goal: 120,
+}
+
+export function halfLifeDays(category: MemoryCategory, mode: Mode): number | null {
+  return (mode === 'personal' ? PERSONAL_HALF_LIFE_DAYS : CATEGORY_HALF_LIFE_DAYS)[category]
+}
+
+/** The graph a memory lives in, read from its owner id ("mark:personal"). */
+export function modeOf(owner: string): Mode {
+  return owner.endsWith(':personal') ? 'personal' : 'workspace'
+}
+
+export const MODE_LABEL: Record<Mode, string> = { personal: 'Personal', workspace: 'Work' }
 
 /** The ring around a summary node, and its badge in the DOM. */
 export const SUMMARY_COLOR = '#c4b5fd'

@@ -10,7 +10,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
  * sentence by sentence -> commands heard WHILE it speaks -> transcript in chat.
  */
 
-const ME = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const }
+const ME = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const, mode: 'workspace' as const, default_mode: 'workspace' as const }
 const VOICE = { voice: 'en_GB-alan-medium', speed: 1.25, default_voice: 'en_US-lessac-medium', voices: [] }
 
 const api = vi.hoisted(() => ({

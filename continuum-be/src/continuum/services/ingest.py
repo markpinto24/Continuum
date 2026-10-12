@@ -27,6 +27,8 @@ from continuum.models.memory import (
     ExtractedFact,
     Memory,
     MemoryStatus,
+    Mode,
+    mode_of,
 )
 from continuum.models.schemas import IngestRequest, IngestResponse, ResolutionRecord
 from continuum.services.extraction import FactExtractor
@@ -60,8 +62,11 @@ class IngestService:
         source_id = request.source_id or str(uuid.uuid4())
         clog.bind(source_id=source_id, user_id=request.user_id)
 
-        transcript = request.as_transcript()
-        facts = await self.extractor.extract(transcript)
+        mode = mode_of(request.user_id)
+        # The graph's mode picks the prompt — life facts in Personal, work in
+        # Workspace — and whether a lone chat turn keeps its "user:" label.
+        transcript = request.as_transcript(label_lone_turn=mode is Mode.WORKSPACE)
+        facts = await self.extractor.extract(transcript, mode=mode)
         if not facts:
             log.info("ingest.no_facts")
             return IngestResponse(source_id=source_id, extracted=0)
@@ -126,6 +131,8 @@ class IngestService:
             self.settings.team_cross_check
             and self.settings.shared_space_enabled
             and user_id != SHARED_SPACE
+            # Personal graphs have no team to disagree with.
+            and mode_of(user_id) is Mode.WORKSPACE
         )
         team_rules: set[str] | None = None
         team_conflicts: list[str] = []

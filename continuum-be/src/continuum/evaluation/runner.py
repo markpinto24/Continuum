@@ -35,7 +35,12 @@ EVAL_USER = "eval"
 
 
 class ResolutionRunner:
-    def __init__(self, llm: LLMClient, settings: Settings | None = None) -> None:
+    def __init__(
+        self, llm: LLMClient, settings: Settings | None = None, *, owner: str = EVAL_USER
+    ) -> None:
+        # The graph the cases run in. A Personal owner ("eval:personal") turns on
+        # the Personal-mode rules, which read the mode from the owner id.
+        self.owner = owner
         self.llm = llm
         self.settings = settings or get_settings()
 
@@ -60,7 +65,7 @@ class ResolutionRunner:
             memories = MemoryStore(store, self.llm, self.settings)
             resolver = ResolutionService(memories, self.llm, self.settings)
 
-            existing = _seed_memory(case)
+            existing = _seed_memory(case, self.owner)
             await memories.add(existing)
 
             fact = ExtractedFact(
@@ -73,7 +78,7 @@ class ResolutionRunner:
             vector = await self.llm.embed_one(
                 MemoryStore.embedding_text(
                     Memory(
-                        user_id=EVAL_USER,
+                        user_id=self.owner,
                         content=fact.content,
                         category=fact.category,
                         subject=fact.subject,
@@ -81,7 +86,7 @@ class ResolutionRunner:
                 )
             )
             neighbours = await memories.search_by_vector(
-                user_id=EVAL_USER,
+                user_id=self.owner,
                 vector=vector,
                 limit=self.settings.resolution_candidate_limit,
                 statuses=[MemoryStatus.ACTIVE, MemoryStatus.CONTRADICTED],
@@ -104,11 +109,11 @@ class ResolutionRunner:
         return store
 
 
-def _seed_memory(case: ResolutionCase) -> Memory:
+def _seed_memory(case: ResolutionCase, owner: str) -> Memory:
     """Build the existing belief, backdated so the judge sees a real recorded date."""
     recorded = datetime.now(UTC) - timedelta(days=case.existing.age_days)
     return Memory(
-        user_id=EVAL_USER,
+        user_id=owner,
         content=case.existing.content,
         category=case.existing.category,
         subject=case.existing.subject,

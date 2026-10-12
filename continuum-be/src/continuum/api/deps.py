@@ -16,6 +16,7 @@ from continuum.clients.qdrant import QdrantStore
 from continuum.config import Settings, get_settings
 from continuum.core import logger as clog
 from continuum.models.auth import Principal
+from continuum.models.memory import Mode
 from continuum.services.auth import AuthService
 from continuum.services.chat import ChatService
 from continuum.services.corrections import CorrectionService
@@ -178,9 +179,48 @@ async def get_principal(
             raise _unauthorized("Your session has expired. Sign in again.")
         require_browser_header(request, settings)
 
-    clog.bind(user_id=principal.user_id)
+    principal = _apply_mode(principal, _requested_mode(request))
+    clog.bind(user_id=principal.user_id, mode=principal.mode.value)
     request.state.principal = principal
     return principal
+
+
+# The web UI names the mode it is showing on every request. It only ever picks
+# between the caller's OWN graphs — identity still comes from the credential.
+MODE_HEADER = "x-continuum-mode"
+# A download link cannot carry a header, so a GET may name the mode in the query
+# instead. Reads only: a write always names it in the header, where a forged
+# cross-site form cannot put it.
+MODE_QUERY = "mode"
+
+
+def _requested_mode(request: Request) -> str | None:
+    header = request.headers.get(MODE_HEADER)
+    query = request.query_params.get(MODE_QUERY) if request.method == "GET" else None
+    if header and query and header.strip().lower() != query.strip().lower():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="The mode header and ?mode= disagree."
+        )
+    return header or query
+
+
+def _apply_mode(principal: Principal, requested: str | None) -> Principal:
+    if requested is None or requested == "":
+        return principal
+    try:
+        mode = Mode(requested.strip().lower())
+    except ValueError:
+        # Refused, never defaulted: a typo must not quietly write to the wrong graph.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown mode {requested!r}. Use 'personal' or 'workspace'.",
+        ) from None
+    if principal.via == "api_key" and mode is not principal.mode:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=f"This API key is for {principal.mode.value} memory only.",
+        )
+    return principal.model_copy(update={"mode": mode})
 
 
 CurrentUser = Annotated[Principal, Depends(get_principal)]

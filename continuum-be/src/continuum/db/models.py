@@ -73,6 +73,9 @@ class UserRow(Base):
     # Spoken-answer preferences. Null = the server default (TTS_VOICE, natural pace).
     tts_voice: Mapped[str | None] = mapped_column(String(64), nullable=True)
     tts_speed: Mapped[float | None] = mapped_column(nullable=True)
+    # The mode the UI opens in. The server default is for rows that existed
+    # before modes (they keep Workspace); new accounts are given one explicitly.
+    default_mode: Mapped[str] = mapped_column(String(16), server_default="workspace")
 
 
 class SessionRow(Base):
@@ -97,6 +100,8 @@ class ApiKeyRow(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # The one mode this key may read and write. Keys from before modes are work keys.
+    mode: Mapped[str] = mapped_column(String(16), server_default="workspace")
 
     __table_args__ = (Index("ix_api_keys_user_created", "user_id", "created_at"),)
 
@@ -143,7 +148,7 @@ class ResolutionLabelRow(Base):
     expected_action: Mapped[str] = mapped_column(String(16))  # retire | escalate | store
     # Whose graph the pair lived in: the decider's own, or the shared space. A
     # rule learned from these decisions applies to that graph only.
-    graph_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    graph_owner: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     __table_args__ = (Index("ix_resolution_labels_user_created", "user_id", "created_at"),)
 
@@ -160,6 +165,9 @@ class ExtractionFeedbackRow(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # Which graph it was about (a mode's owner id). Null on rows from before modes,
+    # which were all Workspace.
+    graph_owner: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     memory_id: Mapped[str] = mapped_column(String(64))
     content: Mapped[str] = mapped_column(Text)
@@ -183,6 +191,9 @@ class AnswerFeedbackRow(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # Which graph it was about (a mode's owner id). Null on rows from before modes,
+    # which were all Workspace.
+    graph_owner: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     query: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)

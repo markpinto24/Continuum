@@ -1,0 +1,321 @@
+# Labelled extraction corpus — Personal mode (requirements.md §4.2, §8).
+#
+# Written and labelled BEFORE the personal prompt existed, so the prompt is
+# measured against these cases, not shaped around them.
+#
+# Subjects in Personal mode are the entity a fact is about OTHER than the user:
+# a person, place, thing or activity ("mom", "gym", "penicillin"). A statement
+# purely about the user, with no other entity, uses "self". A relationship the
+# user has one of at a time uses its role — "partner", "home", "job" — so a new
+# partner, home or job meets the old one. That is what lets the resolver, whose
+# subject filter compares slugs exactly, see a change at all.
+# (Role subjects were added before any run of this corpus was scored.)
+#
+# Matching is token overlap (see evaluation/extraction.py): labels are worded
+# the way a good extraction would phrase them, not as the only acceptable text.
+
+- id: life-family
+  why: >
+    The base case for personal memory: relationships, each its own memory, with
+    the other person as the subject. Joined into one memory, a later change to
+    one sibling would be unsupersedable without the other.
+  text: >
+    My brother Chris is an ethical hacker, and my sister Ana just moved to
+    Lisbon for a teaching job.
+  expect:
+    - content: Chris is the user's brother and an ethical hacker
+      category: person
+      subject: chris
+    - content: Ana is the user's sister
+      category: person
+      subject: ana
+    - content: Ana lives in Lisbon
+      category: fact
+      subject: ana
+  tags: [baseline, relationships]
+
+- id: allergy-is-health
+  why: >
+    An allergy filed as a preference would decay away in months. It must be
+    health — the category that never fades and never changes silently.
+  text: >
+    I'm allergic to penicillin, found out the hard way last year.
+  expect:
+    - content: The user is allergic to penicillin
+      category: health
+      subject: penicillin
+  tags: [health]
+
+- id: medication-routine
+  why: >
+    A daily medication is health, not a routine: the health rule must guard it.
+  text: >
+    I take 1000 IU of vitamin D every morning, my doctor asked me to.
+  expect:
+    - content: The user takes 1000 IU of vitamin D every morning
+      category: health
+      subject: vitamin-d
+  tags: [health, numbers]
+
+- id: gym-routine
+  why: >
+    A schedule that repeats is a routine, which fades fast if nobody confirms it.
+  text: >
+    I hit the gym on weekday mornings before work, usually around 7.
+  expect:
+    - content: The user goes to the gym on weekday mornings around 7
+      category: routine
+      subject: gym
+  tags: [routine]
+
+- id: goal-stated
+  why: >
+    A stated aim with a target is a goal.
+  text: >
+    This year I want to read 20 books. I'm on book 6 now.
+  expect:
+    - content: The user wants to read 20 books this year
+      category: goal
+      subject: reading
+  tags: [goal]
+
+- id: maybe-is-nothing
+  why: >
+    Thinking aloud is not a decision or a goal. Recording it creates a belief
+    nobody holds.
+  text: >
+    Maybe I'll learn Spanish someday, not sure. Or Japanese. Who knows.
+  expect: []
+  forbid:
+    - The user decided to learn Spanish
+    - The user wants to learn Spanish
+  tags: [empty-is-correct, precision]
+
+- id: birthday-is-a-fact
+  why: >
+    A recurring date is a stable fact with the date kept in the text — not an
+    event (it did not happen once) and not lost by dropping the date.
+  text: >
+    Mom's birthday is on the 4th of June, I always forget.
+  expect:
+    - content: The user's mom's birthday is on 4 June
+      category: fact
+      subject: mom
+  tags: [dates]
+
+- id: diet-preference
+  why: >
+    Being vegetarian is a lasting preference, and the reason is worth keeping.
+  text: >
+    I've been vegetarian for five years now, mostly for ethical reasons.
+  expect:
+    - content: The user is vegetarian for ethical reasons
+      category: preference
+      subject: self
+  tags: [preference, reason-preservation]
+
+- id: home-city
+  why: >
+    Where the user lives is a stable fact about home — the subject the resolver
+    needs if they move.
+  text: >
+    We live in Pune, in a flat near the river. Been here three years.
+  expect:
+    - content: The user lives in Pune
+      category: fact
+      subject: home
+  tags: [places]
+
+- id: a-question
+  why: >
+    A question is not a belief (Mem0 recorded one as a fact in the Phase 5
+    benchmark).
+  text: >
+    Do you think I should get a dog? What breeds are good for flats?
+  expect: []
+  forbid:
+    - The user wants to get a dog
+    - The user decided to get a dog
+  tags: [empty-is-correct, precision]
+
+- id: chatter
+  why: >
+    Nothing durable at all.
+  text: >
+    Thanks, that helps a lot! Talk later, have a nice evening.
+  expect: []
+  tags: [empty-is-correct, precision]
+
+- id: transient-errand
+  why: >
+    One-off logistics are not memory, even in a personal assistant.
+  text: >
+    I need to pick up groceries after 6 and my dentist appointment got moved to
+    Friday.
+  expect: []
+  tags: [empty-is-correct, transient]
+
+- id: mixed-work-and-life
+  why: >
+    In Personal mode, job details belong to work memory. Where the user works is
+    a personal fact; the project and its database are not.
+  text: >
+    I work at Initech as a backend engineer. Today we finally moved the billing
+    service to Postgres. Also, my partner Priya and I are going hiking on Sunday.
+  expect:
+    - content: The user works at Initech as a backend engineer
+      category: fact
+      subject: job
+    - content: Priya is the user's partner
+      category: person
+      subject: partner
+  forbid:
+    - The billing service moved to Postgres
+  tags: [mixed, precision]
+
+- id: change-of-mind
+  why: >
+    A stated change records the new position (the resolver compares it with
+    the old one).
+  text: >
+    I used to drink coffee every day but I've switched to green tea completely.
+  expect:
+    - content: The user has switched from coffee to green tea
+      category: preference
+      subject: self
+  tags: [change]
+
+- id: condition-and-inhaler
+  why: >
+    A condition and its treatment are two health facts, each guarded separately.
+  text: >
+    I have mild asthma, so I carry an inhaler when I run.
+  expect:
+    - content: The user has mild asthma
+      category: health
+      subject: asthma
+    - content: The user carries an inhaler when running
+      category: health
+      subject: inhaler
+  tags: [health]
+
+- id: friend-and-place
+  why: >
+    A friend's role and where they live are separate facts about one person.
+  text: >
+    Rohan is my oldest friend from school; he's a doctor in Mumbai now.
+  expect:
+    - content: Rohan is the user's oldest friend from school
+      category: person
+      subject: rohan
+    - content: Rohan is a doctor in Mumbai
+      category: fact
+      subject: rohan
+  tags: [relationships]
+
+- id: travel-preference
+  why: >
+    A travel habit with a reason is a preference.
+  text: >
+    I always book a window seat on flights because I like to sleep against the
+    wall.
+  expect:
+    - content: The user prefers window seats on flights to sleep against the wall
+      category: preference
+      subject: flights
+  tags: [preference, reason-preservation]
+
+- id: past-event
+  why: >
+    Something that happened once is an event, with its date.
+  text: >
+    I ran my first half marathon on 12 October in 2 hours 5 minutes.
+  expect:
+    - content: The user ran a first half marathon on 12 October in 2 hours 5 minutes
+      category: event
+      subject: half-marathon
+  tags: [event, numbers]
+
+- id: budget-limit
+  why: >
+    A self-imposed spending limit is a constraint, which fades fast.
+  text: >
+    I'm keeping my monthly eating-out budget under 8000 rupees.
+  expect:
+    - content: The user's monthly eating-out budget is under 8000 rupees
+      category: constraint
+      subject: eating-out
+  tags: [constraint, numbers]
+
+- id: pet
+  why: >
+    A pet is a relationship too, with its own subject.
+  text: >
+    Our cat Miso is twelve and needs a special kidney diet.
+  expect:
+    - content: Miso is the user's cat and is twelve years old
+      category: person
+      subject: miso
+    - content: Miso needs a special kidney diet
+      category: health
+      subject: miso
+  tags: [relationships, health]
+
+# --- Found in use, 2026-10-12: a self-introduction recorded nothing ---------------
+# Written and labelled before the prompt was changed. Live, "hello my name is
+# mark" extracted nothing, and a four-fact self-introduction extracted one.
+
+- id: self-name
+  why: >
+    The user's own name is the first thing a personal assistant should know. A
+    greeting around it does not make it a pleasantry.
+  text: >
+    hello my name is mark
+  expect:
+    - content: The user's name is Mark
+      category: fact
+      subject: self
+  tags: [self, found-in-use]
+
+- id: self-profile-run-on
+  why: >
+    Four facts about the user in one lowercase run-on sentence, as people type
+    in chat. Each is its own memory; joined, a later change to one (a new job)
+    could not supersede it without the others.
+  text: >
+    my age is 22 and i am a male i do weight lifting and i am an software engineer
+  expect:
+    - content: The user is 22 years old
+      category: fact
+      subject: self
+    - content: The user is male
+      category: fact
+      subject: self
+    - content: The user does weightlifting
+      category: preference
+      subject: weightlifting
+    - content: The user is a software engineer
+      category: fact
+      subject: job
+  tags: [self, found-in-use, one-fact-per-memory]
+
+- id: self-intro-held-out
+  why: >
+    Held out from the case that prompted the change: a different shape of
+    self-introduction. Where someone is from is not where they live now.
+  text: >
+    I'm Priya, 34, a nurse, originally from Kochi.
+  expect:
+    - content: The user's name is Priya
+      category: fact
+      subject: self
+    - content: The user is 34 years old
+      category: fact
+      subject: self
+    - content: The user is a nurse
+      category: fact
+      subject: job
+    - content: The user is originally from Kochi
+      category: fact
+      subject: kochi
+  tags: [self, held-out]

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
+import type { Mode } from './lib/types'
 
 /**
  * Shell smoke test. The WebGL scene cannot render under jsdom, so
@@ -50,12 +51,21 @@ const auth = vi.hoisted(() => {
       super(message)
     }
   }
-  const me = { user_id: 'mark', email: 'mark@example.com', is_admin: true, via: 'session' as const }
+  const me = {
+    user_id: 'mark',
+    email: 'mark@example.com',
+    is_admin: true,
+    via: 'session' as const,
+    mode: 'workspace' as Mode,
+    default_mode: 'workspace' as Mode,
+  }
   return {
     ApiError,
     me,
     state: { needsSetup: false, signedIn: true },
     listener: null as null | (() => void),
+    /** Every mode the app named for its requests, in order. */
+    modes: [] as (string | null)[],
     login: vi.fn(() => Promise.resolve(me)),
     setup: vi.fn(() => Promise.resolve(me)),
   }
@@ -63,6 +73,9 @@ const auth = vi.hoisted(() => {
 
 vi.mock('@/lib/api', () => ({
   ApiError: auth.ApiError,
+  setMode: (mode: string | null) => {
+    auth.modes.push(mode)
+  },
   onUnauthorized: (listener: () => void) => {
     auth.listener = listener
     return () => {}
@@ -104,6 +117,7 @@ beforeEach(() => {
   auth.state.signedIn = true
   auth.login.mockClear()
   auth.setup.mockClear()
+  auth.modes.length = 0
   localStorage.clear()
 })
 
@@ -232,5 +246,65 @@ describe('the side panel', () => {
     expect(screen.getByRole('navigation', { name: 'Open the panel' })).toBeDefined()
     await userEvent.keyboard('{Control>}\\{/Control}')
     expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull()
+  })
+})
+
+describe('the two modes', () => {
+  it('opens where the account says, and names that graph before the first request', async () => {
+    auth.me.default_mode = 'personal'
+    try {
+      render(<App />)
+      await waitFor(() => expect(screen.getByTestId('graph').textContent).toBe('2 nodes'))
+      expect(auth.modes[0]).toBe('personal')
+      expect(screen.getByRole('radio', { name: 'Personal' }).getAttribute('aria-checked')).toBe('true')
+      expect(screen.getByText(/What’s on your mind\?/)).toBeDefined()
+      expect(document.documentElement.dataset.mode).toBe('personal')
+    } finally {
+      auth.me.default_mode = 'workspace'
+    }
+  })
+
+  it('switches everything together, with a fresh conversation, and remembers the choice', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/What are you working on\?/)).toBeDefined())
+    expect(screen.getByRole('button', { name: 'Share what I say with the team' })).toBeDefined()
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Personal' }))
+
+    await waitFor(() => expect(screen.getByText(/What’s on your mind\?/)).toBeDefined())
+    expect(screen.queryByText(/What are you working on\?/)).toBeNull() // no history carried across
+    expect(screen.queryByRole('button', { name: 'Share what I say with the team' })).toBeNull()
+    expect(auth.modes.at(-1)).toBe('personal')
+    expect(localStorage.getItem('continuum.mode.mark')).toBe('personal')
+  })
+
+  it('asks a new instance what it is for, and opens there', async () => {
+    auth.state.needsSetup = true
+    auth.state.signedIn = false
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Both' })).toBeDefined())
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Work' }))
+    await userEvent.type(screen.getByLabelText('Email'), 'mark@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'correct horse battery staple')
+    await userEvent.type(screen.getByLabelText('Confirm password'), 'correct horse battery staple')
+    await userEvent.click(screen.getByRole('button', { name: 'Create account' }))
+
+    await waitFor(() => expect(auth.setup).toHaveBeenCalled())
+    expect(auth.setup.mock.calls[0]).toEqual([
+      'mark@example.com', 'correct horse battery staple', undefined, 'workspace',
+    ])
+  })
+})
+
+describe('the Personal hint for existing Work accounts', () => {
+  it('shows once, and trying it switches and never shows again', async () => {
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Try Personal' }))
+    await waitFor(() => expect(screen.getByText(/What’s on your mind\?/)).toBeDefined())
+    expect(localStorage.getItem('continuum.personal_hint_seen')).toBe('1')
+    await userEvent.click(screen.getByRole('radio', { name: 'Work' }))
+    await waitFor(() => expect(screen.getByText(/What are you working on\?/)).toBeDefined())
+    expect(screen.queryByRole('button', { name: 'Try Personal' })).toBeNull()
   })
 })

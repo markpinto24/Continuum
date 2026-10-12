@@ -48,6 +48,7 @@ import {
   type Disagreement,
   type Me,
   type Memory,
+  type Mode,
   type VoiceSettings,
 } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -89,6 +90,7 @@ export interface ChatControl {
 
 export function ChatPanel({
   me,
+  mode = 'workspace',
   openDisputes,
   voiceSettings = null,
   onGraphChanged,
@@ -98,6 +100,8 @@ export function ChatPanel({
   onLumenAvailable,
 }: {
   me: Me
+  /** The graph this conversation reads and writes. Each mode has its own chat. */
+  mode?: Mode
   /** Lets the collapsed sidebar rail start Lumen. */
   controlRef?: Ref<ChatControl>
   /** Whether the server offers voice — so a Lumen button elsewhere can hide. */
@@ -116,14 +120,16 @@ export function ChatPanel({
   const [turns, setTurns] = useState<Turn[]>([{ role: 'assistant', content: '', kind: 'greeting' }])
   const turnsRef = useRef(turns)
   turnsRef.current = turns
-  const greetingText = greeting({ userId: me.user_id, openDisputes })
+  const greetingText = greeting({ userId: me.user_id, openDisputes, mode })
   const greetingRef = useRef(greetingText)
   greetingRef.current = greetingText
   const [draft, setDraft] = useState('')
   // What you say is remembered in your own graph unless this is on: then it
   // becomes team knowledge, signed with your email. Off at the start of every
   // session — sharing is always a choice, never a leftover.
-  const [shareTurns, setShareTurns] = useState(false)
+  // Personal memory is never shared, so there the toggle does not exist.
+  const [shareChoice, setShareTurns] = useState(false)
+  const shareTurns = mode === 'workspace' && shareChoice
   const shareRef = useRef(shareTurns)
   shareRef.current = shareTurns
   const asOfRef = useRef(asOf)
@@ -377,7 +383,12 @@ export function ChatPanel({
       greetedAloud.current = true
       await autopilot.hold(async () => {
         setPilotStage('greeting')
-        const text = greeting({ userId: me.user_id, openDisputes, speaker: ASSISTANT_NAME })
+        const text = greeting({
+          userId: me.user_id,
+          openDisputes,
+          mode,
+          speaker: ASSISTANT_NAME,
+        })
         sayingRef.current = text
         const speech = reader.stream('greeting')
         speech.push(text)
@@ -387,7 +398,7 @@ export function ChatPanel({
       })
     }
     return true
-  }, [autopilot, dictation, me.user_id, openDisputes, reader])
+  }, [autopilot, dictation, me.user_id, mode, openDisputes, reader])
 
   useImperativeHandle(controlRef, () => ({ startLumen: startAutopilot }), [startAutopilot])
   useEffect(() => {
@@ -499,33 +510,26 @@ export function ChatPanel({
               }
             }}
             rows={2}
-            placeholder={asOf ? 'Ask about that day…' : 'Ask, or tell it something about your work…'}
+            placeholder={
+              asOf
+                ? 'Ask about that day…'
+                : mode === 'personal'
+                  ? 'Ask, or tell me something about your life…'
+                  : 'Ask, or tell it something about your work…'
+            }
             className="scrollbar-slim block max-h-40 min-h-[3.25rem] w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted/60"
           />
           <div className="flex items-center gap-1 px-2 pb-2">
-            <Tooltip
-              label={
-                shareTurns
-                  ? 'Sharing: what you say here is remembered as team knowledge, signed by you'
-                  : 'Private: what you say is remembered in your own graph. Click to share with the team'
-              }
-            >
-              <button
-                type="button"
-                aria-label="Share what I say with the team"
-                aria-pressed={shareTurns}
-                onClick={() => setShareTurns((on) => !on)}
-                className={cn(
-                  'flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors',
-                  shareTurns
-                    ? 'bg-sky-400/15 text-sky-200'
-                    : 'text-muted hover:bg-surface-raised hover:text-foreground',
-                )}
-              >
-                {shareTurns ? <Users className="size-3.5" /> : <Lock className="size-3.5" />}
-                {shareTurns ? 'Team' : 'Private'}
-              </button>
-            </Tooltip>
+            {mode === 'personal' ? (
+              <Tooltip label="Personal memory stays yours: it is never shared with the team">
+                <span className="flex h-7 items-center gap-1.5 px-2 text-xs text-muted">
+                  <Lock className="size-3.5" />
+                  Only you
+                </span>
+              </Tooltip>
+            ) : (
+              <ShareToggle on={shareTurns} onToggle={() => setShareTurns((on) => !on)} />
+            )}
 
             <span className="ml-auto" />
 
@@ -601,7 +605,9 @@ export function ChatPanel({
             ? `Asking about ${new Date(asOf).toLocaleDateString()}: answers use what was believed then, and nothing you say now is remembered.`
             : shareTurns
               ? 'Sharing on: what you say is remembered as team knowledge, visible to everyone here.'
-              : 'Every message is remembered privately — it confirms what it repeats and records what is new.'}
+              : mode === 'personal'
+                ? 'Every message is remembered in your personal memory — only you can see it.'
+                : 'Every message is remembered privately — it confirms what it repeats and records what is new.'}
         </p>
       </form>
     </div>
@@ -941,5 +947,34 @@ function DisagreementBanner({
         {error && <span className="text-[11px] text-danger">{error}</span>}
       </div>
     </div>
+  )
+}
+
+/** Private or Team, for what you say in Work mode. Off at the start of every session. */
+function ShareToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <Tooltip
+      label={
+        on
+          ? 'Sharing: what you say here is remembered as team knowledge, signed by you'
+          : 'Private: what you say is remembered in your own graph. Click to share with the team'
+      }
+    >
+      <button
+        type="button"
+        aria-label="Share what I say with the team"
+        aria-pressed={on}
+        onClick={onToggle}
+        className={cn(
+          'flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors',
+          on
+            ? 'bg-sky-400/15 text-sky-200'
+            : 'text-muted hover:bg-surface-raised hover:text-foreground',
+        )}
+      >
+        {on ? <Users className="size-3.5" /> : <Lock className="size-3.5" />}
+        {on ? 'Team' : 'Private'}
+      </button>
+    </Tooltip>
   )
 }

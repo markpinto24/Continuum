@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from continuum.config import Settings
 from continuum.core.logger import get_logger
-from continuum.models.memory import SHARED_SPACE, ExtractedFact, Memory, MemoryStatus
+from continuum.models.memory import SHARED_SPACE, ExtractedFact, Memory, MemoryStatus, Mode, mode_of
 from continuum.models.schemas import ShareResponse
 from continuum.services.ingest import IngestService
 from continuum.services.memory_store import MemoryStore
@@ -44,6 +44,10 @@ class SharingService:
             raise SharingDisabled("The shared team space is turned off on this server.")
         if memory.is_shared:
             raise SharingError("That memory is already in the shared space.")
+        if mode_of(memory.user_id) is Mode.PERSONAL:
+            raise SharingError(
+                "Personal memories are never shared. Only Work memories can join the team."
+            )
         if memory.kind == "summary":
             raise SharingError(
                 "A summary cannot be shared. Share the memories it was written from."

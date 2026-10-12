@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from continuum.api.deps import CurrentUser, IngestDep, SettingsDep, limit_llm_requests
-from continuum.models.memory import SHARED_SPACE
+from continuum.models.memory import SHARED_SPACE, Mode
 from continuum.models.schemas import IngestBody, IngestRequest, IngestResponse
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -36,6 +36,12 @@ async def ingest(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"Input is over the {settings.max_input_chars}-character limit. Split it.",
         )
+    if body.share and principal.mode is Mode.PERSONAL:
+        # There is no team space in Personal mode: life memory is never shared.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Personal memories cannot be shared. Switch to Work to share with the team.",
+        )
     if body.share and not settings.shared_space_enabled:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -51,5 +57,5 @@ async def ingest(
             author_email=principal.email,
         )
     else:
-        request = IngestRequest(**fields, user_id=principal.user_id)
+        request = IngestRequest(**fields, user_id=principal.owner)
     return await service.ingest(request)

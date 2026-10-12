@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { api } from '@/lib/api'
 import { PASSWORD_MIN_LENGTH, newPasswordFeedback } from '@/lib/password'
-import type { Me } from '@/lib/types'
+import type { Me, Mode } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 /**
  * Before authentication existed the UI kept a free-text user id here and sent it
@@ -47,6 +48,8 @@ export function AuthScreen({
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [userId, setUserId] = useState(legacyUserId)
+  // A graph from before accounts is work memory, so adopting one opens in Work.
+  const [use, setUse] = useState<Use>(() => (legacyUserId() ? 'work' : 'personal'))
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -63,7 +66,7 @@ export function AuthScreen({
     setError(null)
     try {
       const me = setup
-        ? await api.setup(email, password, userId.trim() || undefined)
+        ? await api.setup(email, password, userId.trim() || undefined, USE_MODE[use])
         : await api.login(email, password)
       onSignedIn(me)
     } catch (err) {
@@ -95,7 +98,7 @@ export function AuthScreen({
         <CardDescription>
           {setup
             ? 'The first account is the admin, and can add everyone else.'
-            : 'Your work memory — what you decided, and why it changed.'}
+            : 'Your memory — what is true in your life and work, and why it changed.'}
         </CardDescription>
       </CardHeader>
 
@@ -128,6 +131,31 @@ export function AuthScreen({
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                 />
+              </Field>
+              <Field
+                label="What will you use Continuum for?"
+                hint={USES.find((u) => u.value === use)?.hint}
+              >
+                <div role="radiogroup" aria-label="Use" className="grid grid-cols-3 gap-1.5">
+                  {USES.map(({ value, label, hint }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={use === value}
+                      title={hint}
+                      onClick={() => setUse(value)}
+                      className={cn(
+                        'rounded-lg border px-2 py-2 text-xs font-medium transition-colors',
+                        use === value
+                          ? 'border-accent/50 bg-accent/10 text-foreground'
+                          : 'border-border text-muted hover:text-foreground',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </Field>
               <Field
                 label="Keep memories stored under (optional)"
@@ -166,6 +194,21 @@ export function AuthScreen({
     </Shell>
   )
 }
+
+type Use = 'personal' | 'work' | 'both'
+
+const USES: { value: Use; label: string; hint: string }[] = [
+  { value: 'personal', label: 'Personal', hint: 'Your life: people, health, routines, goals.' },
+  { value: 'work', label: 'Work', hint: 'Your work: decisions, owners, constraints, a team.' },
+  {
+    value: 'both',
+    label: 'Both',
+    hint: 'Two separate memories that never mix. Opens in Personal; switch in the header.',
+  },
+]
+
+/** Where the account opens. "Both" opens in Personal: an assistant for your life first. */
+const USE_MODE: Record<Use, Mode> = { personal: 'personal', work: 'workspace', both: 'personal' }
 
 /** The sign-in page: one calm card over a slow constellation of beliefs. */
 function Shell({ children }: { children: React.ReactNode }) {

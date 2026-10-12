@@ -15,6 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from continuum.models.memory import Mode, graph_owner, visible_owners
+
 # A memory owner id travels in Qdrant payloads, logs and filenames — keep it to
 # characters that are safe in all three.
 USER_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
@@ -35,6 +37,9 @@ class User(BaseModel):
     is_admin: bool = False
     disabled: bool = False
     created_at: datetime
+    # Which mode the UI opens in. Personal for new accounts; Workspace for any
+    # that existed before modes, so nobody's graph seems to vanish on upgrade.
+    default_mode: Mode = Mode.PERSONAL
 
 
 class VoicePreferences(BaseModel):
@@ -55,6 +60,9 @@ class ApiKey(BaseModel):
     created_at: datetime
     last_used_at: datetime | None = None
     revoked_at: datetime | None = None
+    # A key reads and writes one mode's graph only, and never switches: a work
+    # agent's key cannot reach personal memory.
+    mode: Mode = Mode.WORKSPACE
 
 
 class Principal(BaseModel):
@@ -68,3 +76,17 @@ class Principal(BaseModel):
     api_key_id: str | None = Field(
         default=None, description="Set when authenticated by an API key."
     )
+    mode: Mode = Field(
+        default=Mode.WORKSPACE,
+        description="The graph in use: the key's mode, or the one the web UI chose.",
+    )
+
+    @property
+    def owner(self) -> str:
+        """The graph this request reads from and writes to."""
+        return graph_owner(self.user_id, self.mode)
+
+    def owners(self, *, shared: bool = True) -> list[str]:
+        """Every graph this request may read: its own, and the team space in
+        Workspace mode only."""
+        return visible_owners(self.owner, shared=shared)

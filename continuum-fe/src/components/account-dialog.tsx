@@ -1,5 +1,6 @@
 import {
   Check,
+  Compass,
   Copy,
   Database,
   Download,
@@ -24,7 +25,9 @@ import { VoiceSettingsPanel } from '@/components/voice-settings'
 import { type Resource, useResource } from '@/hooks/use-resource'
 import { api } from '@/lib/api'
 import { PASSWORD_MIN_LENGTH, newPasswordFeedback } from '@/lib/password'
-import type { ApiKeyCreated, Me, VoiceSettings } from '@/lib/types'
+import { MODE_LABEL } from '@/lib/memory-style'
+import type { ApiKeyCreated, Me, Mode, VoiceSettings } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 /**
  * Where an agent should point: the API itself on :8000, not this dev server —
@@ -39,11 +42,14 @@ export function AccountDialog({
   open,
   onOpenChange,
   voiceSettings,
+  mode = 'workspace',
 }: {
   me: Me
   open: boolean
   onOpenChange: (open: boolean) => void
   voiceSettings: Resource<VoiceSettings>
+  /** The mode on screen: new keys default to it, and the export downloads it. */
+  mode?: Mode
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -63,6 +69,10 @@ export function AccountDialog({
               <TabsTrigger className="h-9 flex-none justify-start px-3" value="voice">
                 <Volume2 className="size-3.5" />
                 Voice
+              </TabsTrigger>
+              <TabsTrigger className="h-9 flex-none justify-start px-3" value="modes">
+                <Compass className="size-3.5" />
+                Modes
               </TabsTrigger>
               <TabsTrigger className="h-9 flex-none justify-start px-3" value="keys">
                 <KeyRound className="size-3.5" />
@@ -88,14 +98,17 @@ export function AccountDialog({
             <TabsContent value="voice">
               <VoiceSettingsPanel settings={voiceSettings} onSaved={voiceSettings.refresh} />
             </TabsContent>
+            <TabsContent value="modes">
+              <ModeSettings initial={me.default_mode} />
+            </TabsContent>
             <TabsContent value="keys">
-              <ApiKeys />
+              <ApiKeys mode={mode} />
             </TabsContent>
             <TabsContent value="password">
               <PasswordForm />
             </TabsContent>
             <TabsContent value="data">
-              <YourData isAdmin={me.is_admin} />
+              <YourData isAdmin={me.is_admin} mode={mode} />
             </TabsContent>
             {me.is_admin && (
               <TabsContent value="users">
@@ -109,9 +122,76 @@ export function AccountDialog({
   )
 }
 
+// --- Modes --------------------------------------------------------------------
+
+const MODE_BLURB: Record<Mode, string> = {
+  personal:
+    'Your life: family and friends, health, routines, goals, home. Private to you — never shared with the team.',
+  workspace:
+    'Your work: decisions, owners, constraints, deadlines — and the team’s shared space.',
+}
+
+/** Where the account opens. The header switches for now; this is the default. */
+function ModeSettings({ initial }: { initial: Mode }) {
+  const [current, setCurrent] = useState<Mode>(initial)
+  const [busy, setBusy] = useState<Mode | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const choose = async (next: Mode) => {
+    if (next === current) return
+    setBusy(next)
+    setError(null)
+    try {
+      setCurrent((await api.setDefaultMode(next)).default_mode)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 text-xs leading-relaxed text-muted">
+      <p>
+        <span className="text-foreground">Continuum keeps two separate memories.</span> Nothing
+        crosses between them: a fact told in one is never found, compared or answered from in
+        the other. Switch any time with Personal | Work in the header — this browser remembers
+        your last choice. This sets where you open everywhere else.
+      </p>
+      <div role="radiogroup" aria-label="Open in" className="grid grid-cols-2 gap-2">
+        {(['personal', 'workspace'] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={current === value}
+            disabled={busy !== null}
+            onClick={() => void choose(value)}
+            className={cn(
+              // A button centres its content; these cards read top-down.
+              'flex flex-col justify-start rounded-lg border p-3 text-left transition-colors',
+              current === value
+                ? 'border-accent/50 bg-accent/10'
+                : 'border-border hover:border-border hover:bg-surface-raised',
+            )}
+          >
+            <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+              {busy === value && <Loader2 className="size-3.5 animate-spin" />}
+              {MODE_LABEL[value]}
+              {current === value && <Check className="ml-auto size-3.5 text-accent" />}
+            </span>
+            <span className="mt-1 block text-[11px] leading-relaxed">{MODE_BLURB[value]}</span>
+          </button>
+        ))}
+      </div>
+      {error && <p className="text-danger">{error}</p>}
+    </div>
+  )
+}
+
 // --- Your data ----------------------------------------------------------------
 
-function YourData({ isAdmin }: { isAdmin: boolean }) {
+function YourData({ isAdmin, mode }: { isAdmin: boolean; mode: Mode }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
 
@@ -137,13 +217,17 @@ function YourData({ isAdmin }: { isAdmin: boolean }) {
       <section className="space-y-1.5">
         <p className="font-medium text-foreground">Download your memories</p>
         <p>
-          Your whole graph as JSON: every memory in every state, with the edges that say what
-          replaced what. The team space is not included — it belongs to everyone.
+          Your {MODE_LABEL[mode]} graph as JSON: every memory in every state, with the edges
+          that say what replaced what.{' '}
+          {mode === 'personal'
+            ? 'It includes health — keep the file somewhere private.'
+            : 'The team space is not included — it belongs to everyone.'}{' '}
+          Switch modes in the header to download the other one.
         </p>
         <Button asChild size="sm" variant="secondary">
-          <a href={api.memoryExportUrl} download>
+          <a href={api.memoryExportUrl()} download>
             <Download />
-            Download my memories
+            Download my {MODE_LABEL[mode]} memories
           </a>
         </Button>
       </section>
@@ -166,7 +250,9 @@ function YourData({ isAdmin }: { isAdmin: boolean }) {
         <section className="space-y-1.5">
           <p className="font-medium text-foreground">Backups (admin)</p>
           <p>
-            Everyone&apos;s memories and accounts, from <code className="text-accent">continuum-be/</code>:
+            Everyone&apos;s memories — Personal and Work — and accounts, from{' '}
+            <code className="text-accent">continuum-be/</code>. A backup holds health facts too:
+            store it like a medical record.
           </p>
           <pre className="overflow-x-auto rounded bg-surface-raised px-2 py-1.5 font-mono text-[11px] text-foreground">
             uv run python scripts/backup.py{'\n'}uv run python scripts/restore.py backups/&lt;stamp&gt; --yes
@@ -179,9 +265,11 @@ function YourData({ isAdmin }: { isAdmin: boolean }) {
 
 // --- API keys -----------------------------------------------------------------
 
-function ApiKeys() {
+function ApiKeys({ mode }: { mode: Mode }) {
   const keys = useResource(() => api.apiKeys(), [])
   const [name, setName] = useState('')
+  // A key belongs to one mode for life: an agent for your work never reads your life.
+  const [keyMode, setKeyMode] = useState<Mode>(mode)
   const [created, setCreated] = useState<ApiKeyCreated | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -189,7 +277,7 @@ function ApiKeys() {
     event.preventDefault()
     setError(null)
     try {
-      setCreated(await api.createApiKey(name))
+      setCreated(await api.createApiKey(name, keyMode))
       setName('')
       keys.refresh()
     } catch (err) {
@@ -217,6 +305,11 @@ function ApiKeys() {
           A key can never create other keys, change your password or manage users — so a leaked
           key is never a takeover, and revoking it stops it at once.
         </p>
+        <p>
+          Each key reads and writes <span className="text-foreground">one</span> memory —
+          Personal or Work — and can never switch. Give a work agent a Work key, and your
+          personal life stays out of its reach.
+        </p>
       </div>
 
       <form onSubmit={create} className="flex gap-2">
@@ -227,6 +320,15 @@ function ApiKeys() {
           aria-label="Key name"
           required
         />
+        <select
+          value={keyMode}
+          onChange={(e) => setKeyMode(e.target.value as Mode)}
+          aria-label="Key mode"
+          className="h-8 rounded-md border border-border bg-surface px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        >
+          <option value="workspace">Work memory</option>
+          <option value="personal">Personal memory</option>
+        </select>
         <Button type="submit" size="sm" className="h-8">
           <Plus />
           Create
@@ -245,6 +347,7 @@ function ApiKeys() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="truncate font-medium">{key.name}</span>
+                <Badge>{MODE_LABEL[key.mode]}</Badge>
                 {key.revoked_at && <Badge>revoked</Badge>}
               </div>
               <div className="mt-0.5 text-[11px] text-muted tabular-nums">

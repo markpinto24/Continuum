@@ -1,9 +1,9 @@
-import { Archive, History, LogOut, RefreshCw, Settings, X } from 'lucide-react'
+import { Archive, Briefcase, Heart, History, LogOut, RefreshCw, Settings, X } from 'lucide-react'
 
 import { Wordmark } from '@/components/brand'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
-import type { HealthResponse, Me } from '@/lib/types'
+import type { HealthResponse, Me, Mode } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 /**
@@ -23,6 +23,8 @@ export function AppHeader({
   refreshing,
   asOf,
   onAsOf,
+  mode,
+  onMode,
 }: {
   me: Me
   onAccount: () => void
@@ -37,11 +39,16 @@ export function AppHeader({
   /** A past day (YYYY-MM-DD) to view beliefs as they stood, or null for now. */
   asOf: string | null
   onAsOf: (day: string | null) => void
+  /** Personal or Work: which of your two graphs everything below shows. */
+  mode: Mode
+  onMode: (mode: Mode) => void
 }) {
   const today = localDay(new Date())
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border/60 px-4">
       <Wordmark />
+
+      <ModeSwitch mode={mode} onMode={onMode} />
 
       <span className="hidden items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-[11px] text-muted tabular-nums md:flex">
         <HealthDot health={health} />
@@ -134,6 +141,58 @@ export function AppHeader({
         </Tooltip>
       </div>
     </header>
+  )
+}
+
+const MODES: { value: Mode; label: string; icon: typeof Heart; hint: string }[] = [
+  {
+    value: 'personal',
+    label: 'Personal',
+    icon: Heart,
+    hint: 'Your life: people, health, routines, goals. Private to you — never shared.',
+  },
+  {
+    value: 'workspace',
+    label: 'Work',
+    icon: Briefcase,
+    hint: 'Your work: decisions, owners, constraints — and the team’s shared space.',
+  },
+]
+
+/**
+ * A segmented control. Two separate graphs, not a filter: switching changes the
+ * graph, chat, inbox and Lumen together, and nothing crosses between them.
+ */
+function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (mode: Mode) => void }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Mode"
+      className="flex items-center gap-0.5 rounded-xl bg-surface p-0.5 ring-1 ring-border/60"
+    >
+      {MODES.map(({ value, label, icon: Icon, hint }) => {
+        const active = value === mode
+        return (
+          <Tooltip key={value} label={hint}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => !active && onMode(value)}
+              className={cn(
+                'flex h-7 items-center gap-1.5 rounded-[0.6rem] px-2.5 text-xs font-medium transition-all',
+                active
+                  ? 'bg-accent/15 text-accent shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--color-accent)_35%,transparent)]'
+                  : 'text-muted hover:text-foreground',
+              )}
+            >
+              <Icon className="size-3.5" />
+              {label}
+            </button>
+          </Tooltip>
+        )
+      })}
+    </div>
   )
 }
 

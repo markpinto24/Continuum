@@ -17,11 +17,12 @@ import { Separator } from '@/components/ui/separator'
 import { useResource } from '@/hooks/use-resource'
 import { api } from '@/lib/api'
 import {
-  CATEGORY_HALF_LIFE_DAYS,
   CATEGORY_LABEL,
   STATUS_CLASS,
   STATUS_LABEL,
   clamp01,
+  halfLifeDays,
+  modeOf,
 } from '@/lib/memory-style'
 import { SHARED_SPACE, type Memory, type RejectReason, type ShareResponse } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -142,13 +143,16 @@ export function MemoryDetail({
   if (resource.error) return <EmptyPanel title="Could not load" body={resource.error} />
   if (!memory) return null
 
-  const halfLife = CATEGORY_HALF_LIFE_DAYS[memory.category]
+  const personal = modeOf(memory.user_id) === 'personal'
+  const halfLife = halfLifeDays(memory.category, personal ? 'personal' : 'workspace')
   const forgotten = memory.redacted_at !== null
   const summary = memory.kind === 'summary'
+  // Either of your own graphs: Work is your id, Personal is your id + ":personal".
+  const ownGraph = memory.user_id === userId || memory.user_id === `${userId}:personal`
   const mayCorrect =
     !forgotten &&
     (userId === undefined ||
-      memory.user_id === userId ||
+      ownGraph ||
       (memory.user_id === SHARED_SPACE && (isAdmin || memory.shared_by === userId)))
 
   return (
@@ -217,6 +221,12 @@ export function MemoryDetail({
         <Stat label="Reinforced" value={`${memory.reinforcement_count}x`} />
         <Stat label="Half-life" value={halfLife === null ? 'never decays' : `${halfLife}d`} />
       </dl>
+      {memory.category === 'health' && (
+        <p className="mt-3 rounded-md bg-surface-raised/60 px-3 py-2 text-[11px] leading-relaxed text-muted">
+          Health is handled with extra care: it never fades, it never changes without asking
+          you, and it stays out of summaries, logs and exports.
+        </p>
+      )}
 
       <EdgeList
         title="Replaced"
@@ -274,7 +284,8 @@ export function MemoryDetail({
             Restore
           </Button>
         )}
-        {memory.user_id !== SHARED_SPACE && memory.status === 'active' && !summary && (
+        {/* Personal memory is never shared — not even by choice (requirements.md §5). */}
+        {memory.user_id !== SHARED_SPACE && !personal && memory.status === 'active' && !summary && (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => void share()}>
             <Users />
             Share with team

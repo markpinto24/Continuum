@@ -94,7 +94,7 @@ not let us do something.
 Continuum/                            ← git root
 ├── README.md                         the project story; links to each side
 ├── CLAUDE.md                         this file — the engineering brief
-├── requirements.md                   planned: Personal (life) mode beside Workspace
+├── requirements.md                   Personal (life) mode beside Workspace — the plan, now built
 ├── .env.example                      template for continuum-be/.env (uv run)
 ├── .gitignore                        covers both projects
 ├── .github/workflows/
@@ -167,7 +167,7 @@ Continuum/                            ← git root
 │   │   │   ├── calibrate.py          ★ derive both cosine bands for a model
 │   │   │   ├── types.py              Action vocabulary, corpus + outcome models
 │   │   │   ├── corpus.py             strict loading; rejects unlabelled cases
-│   │   │   ├── corpus/*.yaml         ★ the labelled data
+│   │   │   ├── corpus/*.yaml         ★ the labelled data (+ *-personal.yaml)
 │   │   │   ├── runner.py             executes cases against the REAL resolver
 │   │   │   ├── metrics.py            ★ pure scoring, replay, sweep, recommend
 │   │   │   ├── extraction.py         token matching + the Mem0 baseline
@@ -197,6 +197,9 @@ Continuum/                            ← git root
 │       ├── test_team_check.py        ★ private vs team, never touching the team
 │       ├── test_summaries.py         derived, never a neighbour, forgotten with sources
 │       ├── test_recheck.py           backfill: dry run writes nothing; never merges
+│       ├── test_modes.py             ★ two graphs per person: header, keys, by id, resolver
+│       ├── test_personal_model.py    ★ health, relationships, name swaps, Personal decay
+│       ├── test_personal_privacy.py  health never logged, never exported by default
 │       └── test_ingest_pipeline.py   end-to-end vs in-memory Qdrant
 └── continuum-fe/                     ← the belief graph UI
     ├── package.json · yarn.lock      yarn 1; `resolutions` pins one vite
@@ -212,7 +215,8 @@ Continuum/                            ← git root
         │   ├── greeting.ts           the session's opening line
         │   └── memory-style.ts       ★ colour/size vocabulary, shared canvas+DOM
         ├── hooks/                    use-resource, use-recorder, use-dictation,
-        │                             use-voice, use-autopilot ★, use-element-size
+        │                             use-voice, use-autopilot ★, use-element-size,
+        │                             use-mode ★ (Personal | Work, set before any fetch)
         ├── components/
         │   ├── brand.tsx             the mark + wordmark (currentColor)
         │   ├── auth-screen.tsx       sign-in + first-run admin setup
@@ -287,6 +291,14 @@ that touches memories takes `principal: CurrentUser` and passes
   in `db/models.py`), not Qdrant: they need unique constraints and an atomic
   "create only if no account exists". Nothing replayable is stored — argon2id for
   passwords, SHA-256 for 256-bit tokens.
+- **Mode picks one of the person's OWN graphs, never another person's.** The
+  web UI names it on every request (`x-continuum-mode`; `?mode=` on a GET, for
+  download links). An API key carries its mode for life (`api_keys.mode`); a
+  header asking for the other one is a 403, an unknown mode a 400 — never a
+  default. Routes use `principal.owner` / `principal.owners()`, not `user_id`, for
+  anything that reads or writes memories; labels and rules stay keyed on the
+  person. Where an account opens is `users.default_mode` (`PATCH /auth/mode`,
+  session only: a key cannot move it).
 - **"Only the first" needs the table lock.** At READ COMMITTED, two racing setups
   both see an empty `users` table; without `LOCK TABLE` in `insert_user`, eight
   concurrent setups created 6-8 admins. SQLite hid this — it has one writer —
@@ -338,6 +350,18 @@ that touches memories takes `principal: CurrentUser` and passes
 | `shared_by` / `shared_by_email` | On a memory in the shared space (`user_id == "_shared"`): who put it there |
 | `shared_as` | On a private memory that was shared: the shared memory that now carries it. Retired by that edge, never deleted |
 
+**Each person has two graphs.** Workspace is owned by the account id
+(unchanged, so every memory stored before modes stays put); Personal by
+`{id}:personal` — a `:` no account id can contain. `graph_owner()` builds it,
+`mode_of()` reads it back, and everything that differs per mode keys on the
+owner: decay (`PERSONAL_HALF_LIFE_DAYS` — a sister is a sister in two years;
+health never fades), the health and relationship rules, the chat prompt, the
+extraction prompt. `visible_owners()` gives a Personal graph only itself: it
+never sees `_shared`, and a Personal memory cannot be shared. Personal adds three
+categories — `health` (never decays, never changes silently, out of summaries,
+logs and default exports), `routine` (45 d) and `goal` (120 d); a Workspace
+extraction that names one is filed as `fact`.
+
 **The shared team space is just another graph**, owned by `SHARED_SPACE =
 "_shared"` — an id no account can take (account ids start with a letter or
 digit). Resolution, disputes, decay and labels therefore work on it unchanged.
@@ -377,12 +401,16 @@ ingest (note / transcript)
    └─ score ≥ conflict band, same kind . judge (LLM call, reason first)
          (one candidate: the same named subject first, then the closest)
          ├─ duplicate ................... reinforce
+         │     └─ each side names someone the other does not → CONFLICT ★
          ├─ supersedes, p ≥ 0.80 ........ SUPERSEDES   → write edges, retire old
-         │     └─ a role (owns, maintains, reviews, leads…) and the new
-         │        statement never says the old holder stopped → CONFLICT ★
+         │     ├─ health on either side (category; words in Personal) → CONFLICT ★
+         │     └─ a role (owns, maintains, reviews, leads… and in Personal
+         │        partner, lives, works…) and the new statement never says the
+         │        old holder stopped → CONFLICT ★
          ├─ supersedes, p < 0.80 ........ CONFLICT     → escalate to human ★
          ├─ conflict .................... CONFLICT     → escalate to human
          └─ independent ................. store, no edges
+               └─ Personal partner/home/job subject, two different names → CONFLICT ★
 ```
 
 **The bands belong to the embedding model** — bge-m3: duplicate 0.86, conflict
@@ -399,6 +427,13 @@ without logprobs.
 the incoming fact.** Embeddings are measurably blind to exactly the changes that
 make a contradiction — one number, one name — so near-identical scores are not
 trusted when the words say otherwise.
+
+**The same guard reads the judge's DUPLICATE.** In the first Personal run the
+judge folded "Sam is the user's partner" into "Priya is the user's partner" —
+"a different name for the same relationship" — at 0.93. `swapped_names` is
+narrower than `material_difference` on purpose: it overrides the judge, so it
+fires only when each statement names something the other lacks ("lives in
+Kothrud, Pune" adds detail; "Sam" for "Priya" is a swap).
 
 **`auto_supersede_confidence` (default 0.80) is the single most consequential
 setting in the project.** Raise it and you escalate more; lower it and you
@@ -631,6 +666,54 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
 - API keys panel now says what a key is for, in plain words
 
+### ✅ Phase 15 — Personal mode: a memory for your life (done, this release)
+
+Continuum is a personal assistant first, with Work as the second mode — built
+from `requirements.md`, on its defaults for §10 (strictly separate modes, one
+Lumen, finance later, "Personal / Work", existing accounts stay on Work with a
+one-time hint).
+
+- **Two graphs per person, never mixed.** Personal is owned by
+  `{id}:personal`; Work keeps the account id, so nothing stored before moved.
+  The mode is a header the UI sends (`?mode=` on download links), or the key's
+  own mode — a Work key asking for Personal is a 403, a typo a 400. A memory of
+  the other mode is a 404 by id; Personal never reads `_shared` and cannot share.
+  Migration 0005: `users.default_mode`, `api_keys.mode`, `graph_owner` on the
+  feedback tables (labels, rejections, answers are counted per graph)
+- **Personal memory model.** `health` (never decays; any supersede is a forced
+  conflict, on the category or — in Personal only — the words), `routine` (45 d),
+  `goal` (120 d); people kept 730 d. Relationship words (partner, lives,
+  works…) join the role rule in Personal, with life's own change words
+  (broke up, divorced, relocated, quit…). Health is out of summaries, logs and
+  exports unless the person ticks the box
+- **The name-swap guard** (found by the first Personal run): the judge called
+  a new partner a duplicate of the old one at 0.93, discarding the new fact. A
+  judge DUPLICATE where each side names someone the other lacks now escalates,
+  in both modes; in Personal, a partner/home/job named two ways is not
+  "independent" either
+- **Extraction:** a Personal prompt (9 categories, the subject is the entity
+  other than the user, "partner"/"home"/"job" for one-at-a-time relationships,
+  job details left to work memory). Work extraction is unchanged and coerces any
+  Personal-only category to `fact`
+- **The assistant:** a warm Personal system prompt (no diagnosis or treatment
+  advice), a greeting per mode, "Only you" in place of the share toggle
+- **Interface:** Personal | Work in the header (remembered per browser, the
+  account's default on first load), one workspace per mode keyed on it, a rose
+  accent and warm sky for Personal, the first-run "What will you use Continuum
+  for?", Settings → Modes, a mode per API key, per-mode export with a health
+  opt-in, a per-kind explanation of every forced escalation
+- **Measured** — see FINDINGS §11. Extraction (3 runs each, Personal corpus,
+  20 cases): category 41.7% → 84.6–92.3%, subject 0% → 30.8–40.0%, forbidden
+  20% → 0%, F1 0.67 → 0.65–0.77. Resolution (33 cases, two passes): belief loss
+  0%, merge loss 0% (3.5% before the guard), stale 0%. The cost: escalation
+  ~68% — the judge calls most stated life changes "conflict". Work corpus, two
+  passes: 0% loss, accuracy 80.0% / 76.4% vs the baseline's 80.0%, the guard
+  never fired, the moved cases were judge noise
+- Verified in a real browser on a throwaway instance (SQLite accounts,
+  in-memory Qdrant, real Ollama): first-run "Both" opens Personal; life and work
+  notes land in their own graphs; a stated allergy change went to the Personal
+  inbox and nowhere else; a Personal key read 5 memories and was refused Work
+
 ### ✅ Phase 14 — The interface, redesigned (done, this release)
 - **Inter and JetBrains Mono, bundled** (`@fontsource-variable/*`, no Google
   request). The UI asked for `system-ui`, which on this machine resolved to a
@@ -675,8 +758,7 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   with the panel left collapsed; if Lumen cannot start, the chat opens to say
   why); remembered per browser. It is hidden with
   `inert`, never unmounted, so the conversation and Lumen keep running
-- **Next: Personal mode.** Continuum becomes a personal assistant first, with
-  Workspace as the second mode — planned in `requirements.md`, not built
+- **Next: Personal mode** — built in Phase 15
 - **Edge count fixed.** "2 edges" with one visible: settling a dispute cleared
   the winner's conflict edge but not the loser's, so a stale dispute sat under
   the new arrow. The resolve route now clears both sides, the graph draws a
@@ -875,6 +957,16 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
 - **Lumen's motion goes to the DOM, not state.** The waveform and core update
   every frame from `levelRef`; routing that through React would re-render the
   overlay 60 times a second.
+- **The mode is set before the first fetch.** `useMode` calls `setMode()` in
+  its state initialiser and in its setter, never in an effect: children fetch in
+  their effects, which run before the parent's. It is cleared on sign-out, not on
+  unmount — StrictMode's rehearsal unmount would clear it between the first
+  render and the requests that need it.
+- **One workspace per mode, keyed on it.** Switching unmounts the other mode's
+  graph, chat and Lumen, so no conversation, selection or in-flight answer
+  carries across. The Personal accent is `:root[data-mode='personal']`
+  overriding `--color-accent`; the sky tints per mode in `belief-graph.tsx`.
+  Status colours never change with the mode.
 - **Exactly one copy of three.js.** `3d-force-graph` needs `three >= 0.179`;
   pinning the direct dependency below that made the package manager install a
   second copy, and the renderer threw `intersectsFrustum is not a function` every
@@ -942,7 +1034,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 402 tests, no services needed
+uv run pytest                          # 457 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -959,6 +1051,10 @@ uv run python scripts/run_eval.py --replay eval-run.json
 uv run python scripts/run_eval.py --record run.json --add-cases continuum-cases.yaml
 uv run python scripts/run_eval.py --extraction --add-extraction continuum-extraction.yaml
 uv run python scripts/run_eval.py --retrieval continuum-retrieval.yaml   # live graph
+# Personal mode: its own corpora, run in a Personal graph ("eval:personal")
+uv run python scripts/run_eval.py --personal --record personal-run.json
+uv run python scripts/run_eval.py --extraction --personal              # personal prompt
+uv run python scripts/run_eval.py --extraction --personal --prompt workspace   # baseline
 
 uv run python scripts/backup.py                       # -> backups/<UTC stamp>/
 uv run python scripts/restore.py backups/<stamp> --yes   # replaces current data
@@ -1096,6 +1192,34 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
 - **Ingesting the assistant's reply along with the user's turn.** The reply is
   assembled from memory, so it would re-enter the graph as independent evidence
   for what it was derived from.
+- **Mixing the modes "to be helpful"** — retrieving a work fact in Personal,
+  judging a life fact against a work belief, or letting Personal read `_shared`.
+  The modes are separate graphs precisely so that neither can leak into, or
+  overrule, the other. A person who wants something in both says it in both.
+- **Defaulting an unknown or missing-on-a-key mode.** A typo in
+  `x-continuum-mode` must be a 400, and a Work key asking for Personal a 403 —
+  never a quiet write to the other graph.
+- **Sharing a Personal memory, even by choice.** Personal has no team; the
+  share route, the chat toggle and the ingest flag all refuse it.
+- **Letting health supersede silently because the judge is sure.** It is
+  forced to a conflict on the category, and in Personal on the words too (the
+  extractor files "takes 10 mg of cetirizine" as `fact`). Health stays out of
+  summaries and exports unless the person opts in, and is never logged.
+- **Using Personal's health words in Workspace.** "Condition", "therapy" and
+  "dose" mean other things in a contract or a migration; the word rule reads
+  the owner's mode first.
+- **Trusting a judge DUPLICATE when the names were swapped.** DUPLICATE
+  discards the new fact; "a different name for the same relationship" is the
+  judge being confidently wrong in exactly the way the duplicate guard exists
+  for. `swapped_names` is deliberately narrower than `material_difference`.
+- **"Tidying" the transcript format into one rule for both modes.** A lone
+  chat turn goes to the extractor bare in Personal and as `user: …` in Work,
+  because that is what each extractor measured better at (FINDINGS §11: the
+  label lost "hello my name is mark" entirely in Personal, and gained 3 of 14
+  facts in Work).
+- **Claiming in the UI that Personal data "never leaves this machine".** It
+  goes wherever `LLM_BASE_URL` points, and that can be Groq. Say what is true:
+  never shared with the team.
 - **Logging with `print` or `logging.getLogger()`.** Use
   `core.logger.get_logger(__name__)`. A plain stdlib logger rejects kwargs, and
   its records skip nothing — but a `print` skips the redaction entirely. Request id and user id are bound by

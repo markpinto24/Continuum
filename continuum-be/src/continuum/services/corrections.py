@@ -62,7 +62,13 @@ class CorrectionService:
         return released
 
     async def reject(
-        self, memory: Memory, *, user_id: str, reason: RejectReason, note: str | None = None
+        self,
+        memory: Memory,
+        *,
+        user_id: str,
+        reason: RejectReason,
+        note: str | None = None,
+        graph_owner: str | None = None,
     ) -> tuple[Memory, list[str]]:
         """Archive a misreading; restore anything it had retired. Returns the
         memory and the ids brought back."""
@@ -91,6 +97,7 @@ class CorrectionService:
                     ExtractionFeedback(
                         id=uuid.uuid4().hex,
                         user_id=user_id,
+                        graph_owner=graph_owner or memory.user_id,
                         created_at=datetime.now(UTC),
                         memory_id=memory.id,
                         content=memory.content,

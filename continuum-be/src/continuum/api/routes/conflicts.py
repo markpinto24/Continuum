@@ -15,7 +15,7 @@ from continuum.api.deps import (
     SettingsDep,
     SharingDep,
 )
-from continuum.models.memory import SHARED_SPACE, visible_owners
+from continuum.models.memory import SHARED_SPACE
 from continuum.models.schemas import (
     ConflictListResponse,
     ConflictPair,
@@ -38,7 +38,7 @@ async def list_conflicts(
 ) -> ConflictListResponse:
     """Unresolved disagreements awaiting a human decision."""
     # Yours, and the shared space's: any member may settle team knowledge.
-    owners = visible_owners(principal.user_id, shared=settings.shared_space_enabled)
+    owners = principal.owners(shared=settings.shared_space_enabled)
     flagged = await memories.list_conflicts(user_id=owners, limit=limit)
 
     referenced = {cid for m in flagged for cid in m.conflicts_with + m.team_conflicts_with}
@@ -55,7 +55,7 @@ async def list_conflicts(
     for memory in flagged:
         # Your belief against the team's: its own entry, settled differently.
         team = [lookup[cid] for cid in memory.team_conflicts_with if cid in lookup]
-        if team and memory.user_id == principal.user_id:
+        if team and memory.user_id == principal.owner:
             pairs.append(ConflictPair(memory=memory, conflicting=team, team=True))
         # Conflicts are symmetric; show each disagreement once.
         if memory.id in seen:
@@ -84,7 +84,7 @@ async def resolve_conflict(
     losers are marked superseded by the winner — an edge, never a delete, so the
     decision stays auditable and reversible.
     """
-    owners = visible_owners(principal.user_id, shared=settings.shared_space_enabled)
+    owners = principal.owners(shared=settings.shared_space_enabled)
     winner = await memories.get(request.winner_id)
     if not winner or winner.user_id not in owners:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Winner memory not found")
@@ -142,7 +142,7 @@ async def resolve_team_conflict(
     resolver — or the team, if it is unsure — decides.
     """
     memory = await memories.get(request.memory_id)
-    if not memory or memory.user_id != principal.user_id:
+    if not memory or memory.user_id != principal.owner:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Memory not found")
     team = await memories.get(request.shared_id)
     if (

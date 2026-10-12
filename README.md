@@ -1,10 +1,19 @@
 # Continuum
 
-**Long-term work memory for AI agents — that remembers why it changed its mind.**
+**Long-term memory for your life and your work — that remembers why it changed its mind.**
 
-Continuum ingests notes and conversations, extracts durable facts about someone's
-work (decisions, preferences, constraints, people, events), and maintains them as
-a **belief graph** that can be queried, audited and corrected over time.
+Continuum ingests notes and conversations, extracts durable facts, and maintains
+them as a **belief graph** that can be queried, audited and corrected over time.
+It works in two modes, two separate graphs that never mix:
+
+- **Personal** — your life: people and relationships, health, routines, goals,
+  home and important dates. Private to you; health never changes without asking
+  you and never fades.
+- **Work** — decisions, preferences, constraints, owners and events, with a
+  shared team space.
+
+Switch between them with **Personal | Work** in the header. Each API key belongs
+to one of them for life.
 
 ---
 

@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from continuum.clients.llm import LLMClient
 from continuum.config import Settings
 from continuum.core.logger import get_logger
-from continuum.models.memory import Memory, MemoryCategory, MemoryStatus
+from continuum.models.memory import SENSITIVE_CATEGORIES, Memory, MemoryCategory, MemoryStatus
 from continuum.services.memory_store import MemoryStore
 
 log = get_logger(__name__)
@@ -63,7 +63,8 @@ class SummaryService:
                 continue
             if memory.kind == "summary":
                 current[memory.subject] = memory
-            else:
+            elif memory.category not in SENSITIVE_CATEGORIES:
+                # A summary copies words around; health stays in its own memories.
                 groups[memory.subject].append(memory)
 
         written: list[Memory] = []

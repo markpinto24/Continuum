@@ -24,7 +24,7 @@ import contextlib
 from continuum.clients.llm import LLMClient
 from continuum.config import Settings
 from continuum.core.logger import get_logger
-from continuum.models.memory import ExtractedFact, MemoryCategory
+from continuum.models.memory import ExtractedFact, MemoryCategory, Mode
 from continuum.services.subjects import clean_subject
 
 log = get_logger(__name__)
@@ -82,27 +82,104 @@ Respond with JSON only, in exactly this shape:
                "subject": "...", "source_excerpt": "..."}]}"""
 
 
+PERSONAL_EXTRACTION_PROMPT = """You extract durable personal memories from text.
+
+You are building the long-term memory of one person's life: the people in it,
+their health, routines, preferences, goals, home and important dates. Capture
+only what will still be worth knowing weeks from now. Ignore pleasantries,
+questions, and anything transient.
+
+"Transient" means one-off logistics and moments: errands, an appointment being
+booked or moved, what someone is doing today or this weekend, a passing mood.
+Never record these.
+
+For each memory, choose exactly one category:
+- person     : who someone is to the user — family, partner, friend, pet
+- fact       : a stable state of the user's life (home, job, possessions, dates)
+- preference : what the user likes, dislikes or habitually chooses
+- health     : an allergy, condition, medication, supplement, diet the body needs
+- routine    : something the user does on a repeating schedule
+- goal       : an aim the user has stated, ideally with its target
+- decision   : a choice the user has definitely made
+- constraint : a limit the user keeps, such as a budget
+- event      : something that happened once, at a point in time
+
+Rules:
+- Write each memory as a standalone third-person statement. Lines starting
+  "user:" are the person whose memory this is: write their "I", "my" and "we"
+  as "The user ...". Resolve other pronouns to names where the text makes them
+  unambiguous.
+- One fact per memory. Never join two ideas with "and".
+- Preserve the REASON when one is given.
+- Anything about the body or medicine is health, never a preference, even
+  when it is phrased as a habit.
+- A recurring date, such as a birthday or an anniversary, is a stable fact:
+  keep the date in the statement.
+- What the user says about themselves is memory, not a pleasantry: their
+  name, age, gender, where they are from, what they do for a living, and the
+  activities they do. Record each as its own memory, even inside a greeting or
+  one run-on sentence. Their name and age are about the user alone.
+- Musing ("maybe", "someday", "thinking about", "not sure") is not a decision
+  or a goal. Record nothing for it unless an aim is clearly stated.
+- Details of the user's job — projects, systems, colleagues' tasks — belong to
+  their separate work memory. Leave them out. Where the user works, and their
+  job title, are personal facts.
+- Set `subject` to a short normalised slug for the main entity the memory is
+  about OTHER than the user: a person, pet, place, thing or activity (e.g.
+  "mom", "chris", "gym", "penicillin"). Use "self" only when the statement is
+  about the user alone with no other entity.
+- For a relationship the user has only one of at a time, use the role as the
+  subject, not the name: "partner" for a partner or spouse, "home" for where
+  they live, "job" for where they work. A new partner, home or job must meet
+  the old one.
+- Set `source_excerpt` to the shortest verbatim span from the input that
+  supports the memory.
+- Record what the text asserts NOW. If it states a change, record the new
+  position.
+- If there is nothing durable to remember, return an empty list. An empty list
+  is a correct and common answer.
+
+Respond with JSON only, in exactly this shape:
+{"memories": [{"content": "...", "category": "...",
+               "subject": "...", "source_excerpt": "..."}]}"""
+
+# Categories only Personal mode extracts. A Workspace extraction that names one
+# is filed as a plain fact: work memory has no health or routines to guard.
+_PERSONAL_ONLY = {MemoryCategory.HEALTH, MemoryCategory.ROUTINE, MemoryCategory.GOAL}
+
+
+def prompt_for(mode: Mode) -> str:
+    return PERSONAL_EXTRACTION_PROMPT if mode is Mode.PERSONAL else EXTRACTION_SYSTEM_PROMPT
+
+
 class FactExtractor:
-    """Native extractor — the default."""
+    """Native extractor — the default. One prompt per mode."""
 
     def __init__(self, llm: LLMClient) -> None:
         self.llm = llm
 
-    async def extract(self, transcript: str) -> list[ExtractedFact]:
+    async def extract(
+        self, transcript: str, *, mode: Mode = Mode.WORKSPACE
+    ) -> list[ExtractedFact]:
         text = transcript.strip()
         if not text:
             return []
 
         try:
             payload = await self.llm.complete_json(
-                system=EXTRACTION_SYSTEM_PROMPT,
+                system=prompt_for(mode),
                 user=f"Input:\n---\n{text}\n---",
             )
         except Exception as exc:  # noqa: BLE001
             log.error("extraction.failed", error=str(exc))
             return []
 
-        return _coerce_facts(payload)
+        facts = _coerce_facts(payload)
+        if mode is Mode.WORKSPACE:
+            for fact in facts:
+                if fact.category in _PERSONAL_ONLY:
+                    fact.category = MemoryCategory.FACT
+        return facts
 
 
 def _coerce_facts(payload: object) -> list[ExtractedFact]:

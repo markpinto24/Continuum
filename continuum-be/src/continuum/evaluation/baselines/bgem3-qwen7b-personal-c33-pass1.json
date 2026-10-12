@@ -1,0 +1,616 @@
+[
+  {
+    "case_id": "partner-breakup-stated",
+    "expect": "retire",
+    "tags": [
+      "relationship",
+      "stated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.968900935746009,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7844354380531635,
+    "gate": 0.8,
+    "reason": "The new statement indicates that the relationship status has changed from being partners with Priya to being partners with Sam."
+  },
+  {
+    "case_id": "moved-home-stated",
+    "expect": "retire",
+    "tags": [
+      "relationship",
+      "stated-change",
+      "places"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9835800745540376,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.777215644260705,
+    "gate": 0.8,
+    "reason": "The NEW statement updates the location of the user from Pune to Bangalore."
+  },
+  {
+    "case_id": "job-change-stated",
+    "expect": "retire",
+    "tags": [
+      "relationship",
+      "stated-change"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999911266162,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.756487156047035,
+    "gate": 0.8,
+    "reason": "The NEW statement provides new information about the user's employment status, superseding the EXISTING memory."
+  },
+  {
+    "case_id": "gym-routine-change",
+    "expect": "retire",
+    "tags": [
+      "routine",
+      "stated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.6440173344851786,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7527808019549473,
+    "gate": 0.8,
+    "reason": "The new information changes the time and frequency of the gym visits."
+  },
+  {
+    "case_id": "coffee-to-tea",
+    "expect": "retire",
+    "tags": [
+      "preference",
+      "stated-change"
+    ],
+    "verdict": "supersedes",
+    "action": "retire",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9996276047798449,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.7344374575975496,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the existing preference from coffee to green tea."
+  },
+  {
+    "case_id": "no-longer-vegetarian",
+    "expect": "retire",
+    "tags": [
+      "preference",
+      "stated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999990745593221,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.8326644213316944,
+    "gate": 0.8,
+    "reason": "The NEW statement provides a new dietary preference that conflicts with the EXISTING one."
+  },
+  {
+    "case_id": "budget-raised",
+    "expect": "retire",
+    "tags": [
+      "constraint",
+      "numbers",
+      "stated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9967758876820739,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.9005939679743631,
+    "gate": 0.8,
+    "reason": "The NEW statement increases the user's monthly eating-out budget from 8000 rupees to 10000 rupees, which is a change but not a replacement of the original constraint. [scored 0.901 against an existing memory, but 10000, 8000, now differ]"
+  },
+  {
+    "case_id": "reading-goal-lowered",
+    "expect": "retire",
+    "tags": [
+      "goal",
+      "numbers",
+      "stated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999998741815882,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7813501898802878,
+    "gate": 0.8,
+    "reason": "The NEW statement sets a lower target than the EXISTING one, so they conflict on the specific number of books but both can still be true as they refer to different times or contexts."
+  },
+  {
+    "case_id": "friend-relocated",
+    "expect": "retire",
+    "tags": [
+      "relationships",
+      "stated-change",
+      "places"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9985764032245776,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7347826551502753,
+    "gate": 0.8,
+    "reason": "The NEW statement provides new information about Rohan's current location, contradicting the EXISTING memory."
+  },
+  {
+    "case_id": "partner-unstated",
+    "expect": "escalate",
+    "tags": [
+      "relationship",
+      "unstated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "duplicate",
+    "judge_confidence": 0.9254824800899581,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.7673080183284776,
+    "gate": 0.8,
+    "reason": "The NEW statement provides a different name for the same relationship. (each names someone the other does not \u2014 escalated)"
+  },
+  {
+    "case_id": "home-unstated",
+    "expect": "escalate",
+    "tags": [
+      "relationship",
+      "unstated-change",
+      "places"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9999965903410295,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.8345174737348023,
+    "gate": 0.8,
+    "reason": "The NEW statement provides information about a different city than the EXISTING one. (one home at a time, and these name two \u2014 escalated)"
+  },
+  {
+    "case_id": "job-unstated",
+    "expect": "escalate",
+    "tags": [
+      "relationship",
+      "unstated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9909836240367891,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.6849243093144821,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the company name from Initech to Globex. (a new name for a role that is often shared, and nothing says the earlier person stopped \u2014 escalated)"
+  },
+  {
+    "case_id": "allergy-cleared",
+    "expect": "escalate",
+    "tags": [
+      "health",
+      "stated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9963067867220113,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": true,
+    "similarity": 0.7389514670985631,
+    "gate": 0.8,
+    "reason": "The new information updates the existing allergy status. (a health fact only changes with your say-so \u2014 escalated)"
+  },
+  {
+    "case_id": "dose-changed",
+    "expect": "escalate",
+    "tags": [
+      "health",
+      "numbers"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9999999930170975,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.9463747852096709,
+    "gate": 0.8,
+    "reason": "The NEW statement provides updated information about the amount of vitamin D taken by the user, replacing the previous value. (a health fact only changes with your say-so \u2014 escalated) [scored 0.946 against an existing memory, but 1000, 2000, now differ]"
+  },
+  {
+    "case_id": "health-filed-as-fact",
+    "expect": "escalate",
+    "tags": [
+      "health",
+      "health-as-fact",
+      "numbers"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9994690038332674,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.904558126548308,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the dosage from 10 mg to 20 mg, which directly contradicts the EXISTING memory. (a health fact only changes with your say-so \u2014 escalated) [scored 0.905 against an existing memory, but 10, 20, now differ]"
+  },
+  {
+    "case_id": "pet-diet-lifted",
+    "expect": "escalate",
+    "tags": [
+      "health",
+      "pets",
+      "cross-category"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999851817056201,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.6582843747545999,
+    "gate": 0.8,
+    "reason": "The NEW statement contradicts the EXISTING one by allowing regular cat food instead of a special kidney diet."
+  },
+  {
+    "case_id": "birthday-reworded",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "dates"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": "duplicate",
+    "judge_confidence": 0.9999792658168923,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.9332732710786779,
+    "gate": 0.8,
+    "reason": "The NEW statement rephrases the EXISTING memory without changing the date or subject. [scored 0.933 against an existing memory, but 4, 4th differ]"
+  },
+  {
+    "case_id": "allergy-repeated",
+    "expect": "reinforce",
+    "tags": [
+      "duplicate",
+      "health"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.9664386164659449,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.966)"
+  },
+  {
+    "case_id": "brother-and-his-work",
+    "expect": "store",
+    "tags": [
+      "relationships",
+      "compatible",
+      "cross-category"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.88470669382325,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.68677083878588,
+    "gate": 0.8,
+    "reason": "The NEW statement provides additional information about Chris that was not in the EXISTING memory."
+  },
+  {
+    "case_id": "friend-and-profession",
+    "expect": "store",
+    "tags": [
+      "relationships",
+      "compatible",
+      "cross-category"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.5265302307020604,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.667885042407759,
+    "gate": 0.8,
+    "reason": "The NEW statement provides new information about Rohan\u2019s profession that was not in the EXISTING memory."
+  },
+  {
+    "case_id": "second-half-marathon",
+    "expect": "store",
+    "tags": [
+      "event",
+      "numbers"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.9257717184912778,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band [scored 0.926 against an existing memory, but 1, 2, 5, 58, hour, hours differ]"
+  },
+  {
+    "case_id": "wedding-then-separation",
+    "expect": "store",
+    "tags": [
+      "event",
+      "relationships"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.7351532536959141,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "two-gym-routines",
+    "expect": "store",
+    "tags": [
+      "routine",
+      "compatible"
+    ],
+    "verdict": "independent",
+    "action": "store",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9999987314249947,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": false,
+    "similarity": 0.8007108052502827,
+    "gate": 0.8,
+    "reason": "The new statement introduces a new activity on a different day than the existing one."
+  },
+  {
+    "case_id": "ex-partner-now",
+    "expect": "retire",
+    "tags": [
+      "held-out-personal",
+      "relationship",
+      "stated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999975023242818,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7848403097600996,
+    "gate": 0.8,
+    "reason": "The NEW statement provides new information about the status of the relationship between the user and Priya, which conflicts with the existing memory."
+  },
+  {
+    "case_id": "sister-got-married",
+    "expect": "retire",
+    "tags": [
+      "held-out-personal",
+      "relationships",
+      "stated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.5447402756335409,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.6483242615105069,
+    "gate": 0.8,
+    "reason": "The NEW statement provides new information about Ana's marital status, contradicting the EXISTING memory."
+  },
+  {
+    "case_id": "migraines-stopped-words-only",
+    "expect": "escalate",
+    "tags": [
+      "held-out-personal",
+      "health",
+      "health-as-fact"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9999982113181191,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.7086185351301086,
+    "gate": 0.8,
+    "reason": "The NEW statement provides new information about the user's current migraine status, which conflicts with the EXISTING memory."
+  },
+  {
+    "case_id": "dog-walk-added",
+    "expect": "store",
+    "tags": [
+      "held-out-personal",
+      "routine",
+      "compatible"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9027841478392656,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.8,
+    "forced_escalation": false,
+    "similarity": 0.8416819632050636,
+    "gate": 0.8,
+    "reason": "The NEW statement provides additional information about when the user walks the dog, which is not contradictory to the EXISTING memory."
+  },
+  {
+    "case_id": "second-flatmate",
+    "expect": "store",
+    "tags": [
+      "held-out-personal",
+      "relationships",
+      "expected-cost"
+    ],
+    "verdict": "new",
+    "action": "store",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.7555311841119938,
+    "gate": 0.8,
+    "reason": "no candidate of a comparable kind in the conflict band"
+  },
+  {
+    "case_id": "blood-orange-preference",
+    "expect": "retire",
+    "tags": [
+      "held-out-personal",
+      "preference",
+      "expected-cost"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "supersedes",
+    "judge_confidence": 0.9933952957209563,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.7118299298725024,
+    "gate": 0.8,
+    "reason": "The NEW statement changes the user's preference from blood orange juice to apple juice. (a health fact only changes with your say-so \u2014 escalated)"
+  },
+  {
+    "case_id": "husband-renamed",
+    "expect": "escalate",
+    "tags": [
+      "held-out-guard",
+      "relationship",
+      "unstated-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "independent",
+    "judge_confidence": 0.9999998467744319,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 1.0,
+    "forced_escalation": true,
+    "similarity": 0.8114015787175619,
+    "gate": 0.8,
+    "reason": "The NEW statement provides information about a different person than the EXISTING one. (one partner at a time, and these name two \u2014 escalated)"
+  },
+  {
+    "case_id": "home-second-city",
+    "expect": "escalate",
+    "tags": [
+      "held-out-guard",
+      "relationship",
+      "unstated-change",
+      "places"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9987856162007014,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.8717903220186136,
+    "gate": 0.8,
+    "reason": "The NEW statement provides a different city for the same subject as the EXISTING memory. [scored 0.872 against an existing memory, but Lisbon, Porto differ]"
+  },
+  {
+    "case_id": "job-reworded",
+    "expect": "reinforce",
+    "tags": [
+      "held-out-guard",
+      "duplicate",
+      "cost-of-change"
+    ],
+    "verdict": "duplicate",
+    "action": "reinforce",
+    "judge_relation": null,
+    "judge_confidence": null,
+    "confidence_source": null,
+    "self_reported_confidence": null,
+    "forced_escalation": false,
+    "similarity": 0.9852229306592025,
+    "gate": 0.8,
+    "reason": "near-identical to existing memory (score 0.985)"
+  },
+  {
+    "case_id": "home-neighbourhood-added",
+    "expect": "store",
+    "tags": [
+      "held-out-guard",
+      "compatible",
+      "cost-of-change"
+    ],
+    "verdict": "conflict",
+    "action": "escalate",
+    "judge_relation": "conflict",
+    "judge_confidence": 0.9975772838053104,
+    "confidence_source": "logprob",
+    "self_reported_confidence": 0.9,
+    "forced_escalation": false,
+    "similarity": 0.854087698102019,
+    "gate": 0.8,
+    "reason": "The NEW statement provides more specific information about the location within Pune."
+  }
+]

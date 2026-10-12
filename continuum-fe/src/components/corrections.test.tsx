@@ -144,7 +144,7 @@ describe('asking about the past', () => {
     render(
       <TooltipProvider>
         <ChatPanel
-          me={{ user_id: 'mark', email: 'm@x.io', is_admin: false, via: 'session' }}
+          me={{ user_id: 'mark', email: 'm@x.io', is_admin: false, via: 'session', mode: 'workspace', default_mode: 'workspace' }}
           openDisputes={0}
           asOf="2026-03-15T23:59:59.000Z"
           onGraphChanged={() => {}}

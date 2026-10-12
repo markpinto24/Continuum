@@ -13,6 +13,7 @@ import type {
   ChatContext,
   ChatDone,
   ChatMessage,
+  Mode,
   ConflictListResponse,
   ConflictResolutionRequest,
   ConflictResolutionResponse,
@@ -63,6 +64,32 @@ export class ApiError extends Error {
  */
 const CLIENT_HEADER = { 'x-continuum-client': 'web' }
 
+/**
+ * The graph the UI is showing — Personal or Workspace — named on every request.
+ * It only picks between the signed-in person's OWN graphs; who they are still
+ * comes from the session cookie. Null until the account says where it opens.
+ */
+let currentMode: Mode | null = null
+
+export function setMode(mode: Mode | null): void {
+  currentMode = mode
+}
+
+export function getMode(): Mode | null {
+  return currentMode
+}
+
+function modeHeader(): Record<string, string> {
+  return currentMode ? { 'x-continuum-mode': currentMode } : {}
+}
+
+/** A download link cannot carry a header, so it names the mode in its query. */
+function withMode(url: string, params: Record<string, string> = {}): string {
+  const query = new URLSearchParams({ ...params, ...(currentMode ? { mode: currentMode } : {}) })
+  const text = query.toString()
+  return text ? `${url}?${text}` : url
+}
+
 // Wrong credentials on these are an answer for the form, not a lapsed session.
 const SIGN_IN_PATHS = new Set(['/auth/login', '/auth/setup', '/auth/password'])
 
@@ -81,7 +108,12 @@ export function onUnauthorized(listener: () => void): () => void {
 }
 
 function headers(init?: RequestInit): HeadersInit {
-  return { 'content-type': 'application/json', ...CLIENT_HEADER, ...init?.headers }
+  return {
+    'content-type': 'application/json',
+    ...CLIENT_HEADER,
+    ...modeHeader(),
+    ...init?.headers,
+  }
 }
 
 async function fail(path: string, response: Response): Promise<never> {
@@ -155,8 +187,8 @@ export const api = {
   /** Erase what a memory says, everywhere it was copied. The one thing that cannot be undone. */
   forgetMemory: (id: string) => request<Memory>(`/memories/${id}/forget`, post()),
 
-  /** A plain link: your whole graph as JSON, downloaded with the session cookie. */
-  memoryExportUrl: `${PREFIX}/memories/export`,
+  /** A plain link: this mode's whole graph as JSON, downloaded with the session cookie. */
+  memoryExportUrl: () => withMode(`${PREFIX}/memories/export`),
 
   refreshSummaries: () => request<{ written: Memory[] }>('/memories/summaries/refresh', post()),
 
@@ -190,8 +222,14 @@ export const api = {
   login: (email: string, password: string) =>
     request<Me>('/auth/login', post({ email, password })),
   /** First admin. `userId` adopts memories stored before sign-in existed. */
-  setup: (email: string, password: string, userId?: string) =>
-    request<Me>('/auth/setup', post({ email, password, user_id: userId || null })),
+  setup: (email: string, password: string, userId?: string, defaultMode?: Mode) =>
+    request<Me>(
+      '/auth/setup',
+      post({ email, password, user_id: userId || null, default_mode: defaultMode ?? null }),
+    ),
+  /** Where the account opens. A person's choice: an API key cannot change it. */
+  setDefaultMode: (mode: Mode) =>
+    request<Me>('/auth/mode', { method: 'PATCH', body: JSON.stringify({ default_mode: mode }) }),
   logout: () => request<void>('/auth/logout', post()),
   voiceSettings: () => request<VoiceSettings>('/auth/preferences'),
   saveVoiceSettings: (choice: { voice?: string | null; speed?: number | null }) =>
@@ -206,7 +244,8 @@ export const api = {
     ),
 
   apiKeys: () => request<{ keys: ApiKeySummary[] }>('/auth/keys'),
-  createApiKey: (name: string) => request<ApiKeyCreated>('/auth/keys', post({ name })),
+  createApiKey: (name: string, mode: Mode = 'workspace') =>
+    request<ApiKeyCreated>('/auth/keys', post({ name, mode })),
   revokeApiKey: (id: string) => request<void>(`/auth/keys/${id}`, { method: 'DELETE' }),
 
   users: () => request<{ users: UserSummary[] }>('/admin/users'),
@@ -219,10 +258,20 @@ export const api = {
 
   feedbackEvidence: (scope: 'mine' | 'team' = 'mine') =>
     request<GateEvidence>(`/feedback/evidence?scope=${scope}`),
-  /** A plain link: the browser downloads it with the session cookie. */
-  feedbackExportUrl: `${PREFIX}/feedback/export`,
-  feedbackExportUrlFor: (kind: 'resolution' | 'extraction' | 'retrieval') =>
-    `${PREFIX}/feedback/export?kind=${kind}`,
+  /**
+   * A plain link: the browser downloads it with the session cookie. Health
+   * decisions stay out unless `sensitive` — an export is a file that travels.
+   */
+  feedbackExportUrl: (opts: { sensitive?: boolean } = {}) =>
+    withMode(`${PREFIX}/feedback/export`, opts.sensitive ? { include_sensitive: 'true' } : {}),
+  feedbackExportUrlFor: (
+    kind: 'resolution' | 'extraction' | 'retrieval',
+    opts: { sensitive?: boolean } = {},
+  ) =>
+    withMode(`${PREFIX}/feedback/export`, {
+      kind,
+      ...(opts.sensitive ? { include_sensitive: 'true' } : {}),
+    }),
   calibration: () => request<CalibrationReport>('/feedback/calibration'),
   rules: () => request<RuleList>('/feedback/rules'),
   approveRule: (subject: string, scope: 'mine' | 'team' = 'mine') =>
@@ -256,7 +305,7 @@ export const api = {
       method: 'POST',
       credentials: 'same-origin',
       // No content-type: the browser sets multipart/form-data with its boundary.
-      headers: CLIENT_HEADER,
+      headers: { ...CLIENT_HEADER, ...modeHeader() },
       body: form,
     })
     if (!response.ok) return fail('/speech/transcribe', response)

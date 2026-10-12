@@ -175,6 +175,7 @@ class RejectReason(StrEnum):
 class ExtractionFeedback(BaseModel):
     id: str
     user_id: str
+    graph_owner: str | None = Field(default=None, description="Which mode's graph.")
     created_at: datetime
     memory_id: str
     content: str
@@ -187,6 +188,7 @@ class ExtractionFeedback(BaseModel):
 class AnswerFeedback(BaseModel):
     id: str
     user_id: str
+    graph_owner: str | None = Field(default=None, description="Which mode's graph.")
     created_at: datetime
     query: str
     answer: str

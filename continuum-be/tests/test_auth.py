@@ -177,8 +177,10 @@ async def test_setup_creates_the_first_admin_once(env):
         body = {"email": "Mark@Example.com", "password": PASSWORD, "user_id": "mark"}
         first = await client.post("/auth/setup", json=body, headers=BROWSER)
         assert first.status_code == 201
+        # Adopting a pre-auth user id adopts a Workspace graph, so it opens there.
         assert first.json() == {
-            "user_id": "mark", "email": "mark@example.com", "is_admin": True, "via": "session"
+            "user_id": "mark", "email": "mark@example.com", "is_admin": True, "via": "session",
+            "mode": "workspace", "default_mode": "workspace",
         }
         cookie = first.headers["set-cookie"].lower()
         assert "httponly" in cookie and "samesite=strict" in cookie
@@ -350,7 +352,8 @@ async def test_api_key_lifecycle(env):
         auth = {"Authorization": f"Bearer {secret}"}
         me = (await agent.get("/auth/me", headers=auth)).json()
         assert me == {
-            "user_id": "mark", "email": "mark@example.com", "is_admin": False, "via": "api_key"
+            "user_id": "mark", "email": "mark@example.com", "is_admin": False, "via": "api_key",
+            "mode": "workspace", "default_mode": "workspace",
         }
 
         assert (await browser.delete(f"/auth/keys/{created['key']['id']}")).status_code == 204
