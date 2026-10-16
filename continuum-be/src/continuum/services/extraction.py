@@ -215,11 +215,24 @@ def _coerce_facts(payload: object) -> list[ExtractedFact]:
                 category=category,
                 subject=_normalise_subject(subject),
                 source_excerpt=str(excerpt).strip() if excerpt else None,
+                tentative=_coerce_tentative(item),
             )
         )
 
     log.info("extraction.completed", count=len(facts))
     return facts
+
+
+def _coerce_tentative(item: dict) -> bool:
+    """Only an explicit "maybe" counts. Anything the model leaves unclear is a
+    plain statement, judged as today — an unknown value must not quietly park a
+    real decision outside the resolver."""
+    value = item.get("tentative", item.get("status"))
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "tentative", "pending", "maybe"}
+    return False
 
 
 def _coerce_category(value: object) -> MemoryCategory:

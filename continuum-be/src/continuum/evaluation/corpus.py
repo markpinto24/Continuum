@@ -18,6 +18,7 @@ RESOLUTION_CORPUS = CORPUS_DIR / "resolution.yaml"
 EXTRACTION_CORPUS = CORPUS_DIR / "extraction.yaml"
 PERSONAL_EXTRACTION_CORPUS = CORPUS_DIR / "extraction-personal.yaml"
 PERSONAL_RESOLUTION_CORPUS = CORPUS_DIR / "resolution-personal.yaml"
+AGREEMENT_EXTRACTION_CORPUS = CORPUS_DIR / "extraction-agreement.yaml"
 
 
 class CorpusError(ValueError):

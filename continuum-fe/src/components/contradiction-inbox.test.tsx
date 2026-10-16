@@ -12,6 +12,9 @@ const resolveTeamConflict = vi.fn()
 const feedbackEvidence = vi.fn()
 const rules = vi.fn()
 const approveRule = vi.fn()
+const pendingMemories = vi.fn(() => Promise.resolve({ total: 0, memories: [] as Memory[] }))
+const confirmPending = vi.fn()
+const declinePending = vi.fn()
 
 vi.mock('@/lib/api', () => ({
   api: {
@@ -23,6 +26,10 @@ vi.mock('@/lib/api', () => ({
     rules: () => rules(),
     approveRule: (...args: unknown[]) => approveRule(...args),
     revokeRule: vi.fn(),
+    pendingMemories: () => pendingMemories(),
+    confirmPending: (...args: unknown[]) => confirmPending(...args),
+    declinePending: (...args: unknown[]) => declinePending(...args),
+    unsurePending: vi.fn(),
     calibration: () =>
       Promise.resolve({ labels: 0, points: [], usable: false, in_use: false, min_labels: 30 }),
     feedbackSummary: () =>
@@ -228,5 +235,31 @@ describe('the learning panel', () => {
     expect(screen.getByText('An admin can apply team rules.')).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: /apply rule/i }))
     expect(approveRule).toHaveBeenCalledWith('rotation', 'mine')
+  })
+})
+
+describe('undecided items', () => {
+  it('lists what you said maybe to, and settles one with a button', async () => {
+    const maybe = makeMemory({
+      id: 'maybe', status: 'pending', content: 'The user is considering a Sunday long run',
+    })
+    pendingMemories.mockResolvedValueOnce({ total: 1, memories: [maybe] })
+    declinePending.mockResolvedValueOnce({ ...maybe, status: 'declined' })
+    const onResolved = vi.fn()
+    render(<ContradictionInbox resource={ONE_DISPUTE} onResolved={onResolved} onSelect={vi.fn()} />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: /Undecided/ }))
+    expect(screen.getByText(/Sunday long run/)).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: 'No' }))
+
+    expect(declinePending).toHaveBeenCalledWith('maybe')
+    expect(await screen.findByText(/will not bring it up again/)).toBeDefined()
+    expect(onResolved).toHaveBeenCalled()
+  })
+
+  it('says what undecided means when there is none', async () => {
+    render(<ContradictionInbox resource={ONE_DISPUTE} onResolved={vi.fn()} onSelect={vi.fn()} />)
+    await userEvent.click(screen.getByRole('tab', { name: /Undecided/ }))
+    expect(screen.getByText(/never treated as true/)).toBeDefined()
   })
 })

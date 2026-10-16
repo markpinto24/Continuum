@@ -1,0 +1,385 @@
+# Labelled agreement corpus — replies to what the assistant suggested
+# (requirements.md Part 2, §15). Both modes.
+#
+# Each case is the assistant's answer (`context`) and the user's reply (`text`).
+# The answer is context only: a choice the user adopts from it is theirs, but
+# anything it says ABOUT the user came from memory, and must never come back as
+# new evidence ("you are 22" re-learned from its own echo).
+#
+# `tentative: true` = said, not decided — stored as pending and asked about.
+# Every case, including the held-out set, was written and labelled before the
+# first run. Two are labelled against a guard (`expected-cost`) so what the
+# guard costs shows up in the numbers.
+#
+# Matching is token overlap, which cannot tell "five days" from "six days";
+# where a number is the point, the `why` says so and the run's output is read.
+
+# =============================================================================
+# Personal
+# =============================================================================
+
+- id: agree-split-clear
+  mode: personal
+  why: >
+    The case that started this (2026-10-12). "Sounds good for now" is a clear
+    yes; "for now" is how people say it, and decay handles a choice that lapses.
+    One memory for the choice, not one per exercise.
+  context: >
+    Here's a push/pull/legs split for 6 days a week, about 2 hours a session.
+    Day 1 Push: bench press, incline dumbbell press, shoulder press, triceps.
+    Day 2 Pull: deadlifts, rows, curls. Day 3 Legs: squats, leg press, calves.
+    Day 4 rest, then repeat push, pull, legs. Does this sound good?
+  text: it sounds good for me for now
+  expect:
+    - content: The user follows a push/pull/legs split six days a week
+      category: routine
+      subject: gym
+  tags: [clear-yes, found-in-use]
+
+- id: agree-with-condition
+  mode: personal
+  why: >
+    A yes with a change. What is adopted is the user's version — five days, not
+    the six proposed. (Token matching cannot see the number; read the output.)
+  context: >
+    I'd suggest a push/pull/legs split, 6 days a week, with one rest day.
+  text: yes, but I'll do it 5 days a week
+  expect:
+    - content: The user follows a push/pull/legs split five days a week
+      category: routine
+      subject: gym
+  tags: [conditional-yes, numbers]
+
+- id: maybe-reply
+  mode: personal
+  why: >
+    "I'll think about it" is not a decision and not nothing: it is pending, to be
+    asked about when running comes up again.
+  context: >
+    To build endurance, you could add a Sunday long run of about 10 km.
+  text: hmm, I'll think about it
+  expect:
+    - content: The user is considering a Sunday long run of 10 km
+      category: routine
+      subject: running
+      tentative: true
+  tags: [maybe]
+
+- id: no-thanks
+  mode: personal
+  why: >
+    A no records nothing from the suggestion.
+  context: >
+    You might find it easier to train if you wake up at 5 am and go before work.
+  text: no thanks
+  expect: []
+  forbid:
+    - The user wakes up at 5 am to train before work
+  tags: ["no", precision]
+
+- id: echo-age
+  mode: personal
+  why: >
+    The answer repeats the user's age from memory. The user adopts the split;
+    the age must not come back as if the user had said it again.
+  context: >
+    Since you're 22 and already lifting regularly, a push/pull/legs split six
+    days a week is a good fit for you.
+  text: ok let's do that
+  expect:
+    - content: The user follows a push/pull/legs split six days a week
+      category: routine
+      subject: gym
+  forbid:
+    - The user is 22 years old
+    - The user lifts regularly
+  tags: [echo, clear-yes]
+
+- id: supplement-yes
+  mode: personal
+  why: >
+    Labelled against the health guard. The user did agree to take creatine, but
+    an "ok" to a suggested supplement is never stored as health: a dose belongs
+    in the user's own words. The cost — a real decision not stored — is visible.
+  context: >
+    You could add 5 g of creatine a day to support strength gains.
+  text: sure, I'll do that
+  expect: []
+  forbid:
+    - The user takes 5 g of creatine daily
+  tags: [health, expected-cost]
+
+- id: thanks-only
+  mode: personal
+  why: >
+    Thanks is not agreement. A recipe the user said thanks for was not adopted.
+  context: >
+    Here's a quick high-protein dinner: grilled chicken, quinoa and roasted
+    broccoli, about 45 g of protein.
+  text: thanks!
+  expect: []
+  forbid:
+    - The user eats grilled chicken with quinoa and broccoli for dinner
+  tags: [chatter, precision]
+
+- id: topic-change
+  mode: personal
+  why: >
+    The reply ignores the suggestion and says something new. Only the user's own
+    words are recorded; nothing from the answer.
+  context: >
+    I'd suggest a push/pull/legs split, 6 days a week.
+  text: by the way, my sister Ana moved to Porto last month
+  expect:
+    - content: Ana lives in Porto
+      category: fact
+      subject: ana
+  forbid:
+    - The user follows a push/pull/legs split
+  tags: [topic-change]
+
+- id: choose-option
+  mode: personal
+  why: >
+    "The second one" means nothing without the answer. With it, the choice is
+    clear.
+  context: >
+    Three options: 1) upper/lower, 4 days a week. 2) push/pull/legs, 6 days a
+    week. 3) full body, 3 days a week.
+  text: let's go with the second one
+  expect:
+    - content: The user follows a push/pull/legs split six days a week
+      category: routine
+      subject: gym
+  tags: [clear-yes, choice]
+
+- id: yes-and-own-fact
+  mode: personal
+  why: >
+    A yes plus something new in the user's own words. Both are recorded; the
+    second needs no answer to make sense.
+  context: >
+    A push/pull/legs split, 6 days a week, would suit your schedule.
+  text: sounds good. I train at Gold's Gym near my place
+  expect:
+    - content: The user follows a push/pull/legs split six days a week
+      category: routine
+      subject: gym
+    - content: The user trains at Gold's Gym near their home
+      category: fact
+      subject: gym
+  tags: [clear-yes, own-words]
+
+- id: plan-maybe-unprompted
+  mode: personal
+  why: >
+    Decided 2026-10-16: an unprompted maybe that is a concrete plan is pending.
+  text: maybe I'll start running on Sundays
+  expect:
+    - content: The user is considering running on Sundays
+      category: routine
+      subject: running
+      tentative: true
+  tags: [maybe, unprompted]
+
+- id: musing-unprompted
+  mode: personal
+  why: >
+    Decided 2026-10-16: idle musing is not a plan and stores nothing, so passing
+    thoughts are never nagged about.
+  text: someday I'd love to see Japan, who knows
+  expect: []
+  forbid:
+    - The user plans to visit Japan
+    - The user is considering visiting Japan
+  tags: [musing, precision]
+
+# =============================================================================
+# Workspace
+# =============================================================================
+
+- id: work-agree-db
+  mode: workspace
+  why: >
+    The work version of a clear yes: the recommendation becomes the decision.
+  context: >
+    For the Atlas event store I'd use Postgres with JSONB rather than MongoDB,
+    since you need transactions across aggregates.
+  text: sounds good, let's go with Postgres
+  expect:
+    - content: Atlas uses Postgres for its event store
+      category: decision
+      subject: atlas
+  tags: [clear-yes, workspace]
+
+- id: work-maybe
+  mode: workspace
+  why: >
+    Not decided — pending, raised when release cadence comes up.
+  context: >
+    You could move the release cadence from weekly to every two weeks.
+  text: I'll think about it
+  expect:
+    - content: The team is considering releasing every two weeks
+      category: decision
+      tentative: true
+  tags: [maybe, workspace]
+
+- id: work-no-own-decision
+  mode: workspace
+  why: >
+    A no that states the user's own decision. The suggestion is not recorded;
+    the decision, in the user's words, is.
+  context: >
+    Consider switching CI from Jenkins to GitHub Actions.
+  text: no, we're staying on Jenkins
+  expect:
+    - content: The team is staying on Jenkins for CI
+      category: decision
+      subject: ci
+  forbid:
+    - The team switched CI to GitHub Actions
+  tags: ["no", own-words, workspace]
+
+- id: work-echo-owner
+  mode: workspace
+  why: >
+    The answer repeats who owns billing (from memory). The user adopts the
+    staging idea; the ownership must not be re-learned from the echo.
+  context: >
+    Since Sara owns the billing service, ask her to review this. I'd also add a
+    staging environment for billing before the launch.
+  text: good idea, let's add staging
+  expect:
+    - content: The billing service will get a staging environment
+      category: decision
+      subject: billing-service
+  forbid:
+    - Sara owns the billing service
+  tags: [echo, clear-yes, workspace]
+
+- id: work-thanks
+  mode: workspace
+  why: >
+    Thanks for an explanation adopts nothing.
+  context: >
+    Event sourcing stores every change as an event, so you can rebuild state at
+    any point in time.
+  text: thanks, that's clear
+  expect: []
+  tags: [chatter, workspace]
+
+# =============================================================================
+# Held-out — written with the rest, before the first run, not looked at while
+# the prompt was written
+# =============================================================================
+
+- id: held-bedtime
+  mode: personal
+  why: >
+    A clear yes in the user's own phrasing, with a time.
+  context: >
+    A steady sleep window of 11 pm to 7 am would help your recovery.
+  text: yes, I'll go to bed at 11 from now on
+  expect:
+    - content: The user goes to bed at 11 pm
+      category: routine
+      subject: sleep
+  tags: [held-out, clear-yes]
+
+- id: held-pottery-maybe
+  mode: personal
+  why: >
+    "Maybe, not sure yet" to a suggestion: pending.
+  context: >
+    You might enjoy a weekly pottery class as something away from screens.
+  text: maybe, not sure yet
+  expect:
+    - content: The user is considering a weekly pottery class
+      category: routine
+      subject: pottery
+      tentative: true
+  tags: [held-out, maybe]
+
+- id: held-health-echo
+  mode: personal
+  why: >
+    The answer repeats a health fact from memory and suggests a medicine. "Ok
+    thanks" adopts nothing — and the allergy must not be re-learned from it.
+  context: >
+    Since you're allergic to penicillin, ask your doctor whether azithromycin is
+    an option for you.
+  text: ok thanks
+  expect: []
+  forbid:
+    - The user is allergic to penicillin
+    - The user will take azithromycin
+  tags: [held-out, health, echo]
+
+- id: held-work-letter
+  mode: workspace
+  why: >
+    A one-letter answer to labelled options.
+  context: >
+    Two options for caching: A) Redis, B) Memcached. Redis gives you
+    persistence and pub/sub.
+  text: A
+  expect:
+    - content: The team chose Redis for caching
+      category: decision
+  tags: [held-out, choice, workspace]
+
+- id: held-passport-cost
+  mode: personal
+  why: >
+    Labelled against the choice-only guard. Adopting "keep your passport in the
+    home safe" is a decision the user made, but a 7B extractor may file it as a
+    fact — and facts are never taken from an agreement. Its cost stays visible.
+  context: >
+    You could keep your passport in the home safe so it's always in one place.
+  text: good idea, I'll do that
+  expect:
+    - content: The user keeps their passport in the home safe
+      category: decision
+      subject: passport
+  tags: [held-out, clear-yes, expected-cost]
+
+- id: held-work-plan-maybe
+  mode: workspace
+  why: >
+    An unprompted work maybe that is a concrete plan: pending.
+  text: we might move standups to 10am, still discussing it
+  expect:
+    - content: The team is considering moving standups to 10am
+      category: decision
+      tentative: true
+  tags: [held-out, maybe, unprompted, workspace]
+
+# =============================================================================
+# Found in the live check (2026-10-16), labelled before the fix was written
+# =============================================================================
+
+- id: work-question-records-no-choice
+  mode: workspace
+  why: >
+    Live: this question was stored as "Chose Postgres over MongoDB", and when the
+    user then agreed, the two raised a dispute about one decision. A question
+    makes no choice. The requirement it states (transactions) is a real fact.
+  text: for the Atlas event store, should we use Postgres or MongoDB? we need transactions
+  expect:
+    - content: The Atlas event store needs transactions
+      category: constraint
+      subject: atlas
+  forbid:
+    - Chose Postgres over MongoDB for the Atlas event store
+  tags: [question, found-in-use, workspace]
+
+- id: personal-question-records-no-choice
+  mode: personal
+  why: >
+    The Personal shape of the same: asking about a change is not making it.
+  text: should I switch to a 5-day split instead?
+  expect: []
+  forbid:
+    - The user switched to a 5-day split
+  tags: [question, found-in-use]

@@ -17,6 +17,9 @@ const api = vi.hoisted(() => ({
   transcribe: vi.fn(),
   synthesize: vi.fn(),
   streamChat: vi.fn(),
+  confirmPending: vi.fn(),
+  declinePending: vi.fn(),
+  unsurePending: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -28,6 +31,9 @@ vi.mock('@/lib/api', () => ({
       }),
     transcribe: api.transcribe,
     synthesize: api.synthesize,
+    confirmPending: api.confirmPending,
+    declinePending: api.declinePending,
+    unsurePending: api.unsurePending,
   },
   streamChat: api.streamChat,
 }))
@@ -266,5 +272,68 @@ describe('Lumen', () => {
     expect(screen.getByText('Lumen was on last time')).toBeDefined()
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled()
     expect(api.synthesize).not.toHaveBeenCalled()
+  })
+})
+
+describe('Lumen asks about what you were still deciding', () => {
+  const question = {
+    kind: 'pending' as const,
+    memory_id: 'run',
+    text: 'You were still deciding on this (12 Oct): The user is considering a Sunday long run',
+    options: [
+      { label: "Yes, I'm going with it", action: 'confirm' as const },
+      { label: 'Still unsure', action: 'unsure' as const },
+      { label: 'No', action: 'decline' as const },
+    ],
+  }
+
+  beforeEach(() => {
+    api.confirmPending.mockReset().mockResolvedValue({
+      source_id: 's', extracted: 1, created: [], duplicates_skipped: 0, reinforced: [],
+      superseded: [], conflicts_raised: [], team_conflicts: [], pending: [], confirmed: ['run'],
+      resolutions: [],
+    })
+    api.declinePending.mockReset()
+    api.streamChat.mockImplementation(async (_body, handlers) => {
+      handlers.onDelta?.('A long run builds endurance. ')
+      handlers.onDone?.({
+        memory_ids: [], cited_ids: [], disagreements: 0, remembered: null, questions: [question],
+      })
+    })
+  })
+
+  it('asks after its answer, and a spoken yes settles it without asking the model', async () => {
+    api.transcribe
+      .mockResolvedValueOnce({ text: 'Should I run more?', language: 'en', duration_seconds: 1 })
+      .mockResolvedValueOnce({ text: 'Yes.', language: 'en', duration_seconds: 1 })
+    await startLumen()
+
+    await say(1)
+    await advance(2400)
+    expect(api.synthesize).toHaveBeenCalledWith('Are you going with it?', expect.anything())
+
+    await say(0.5)
+    await advance(2400)
+
+    expect(api.confirmPending).toHaveBeenCalledWith('run')
+    expect(api.streamChat).toHaveBeenCalledTimes(1) // the yes was an answer, not a question
+    expect(api.synthesize).toHaveBeenCalledWith(
+      'Settled — it is part of your memory now.', expect.anything(),
+    )
+  })
+
+  it('anything else is the next question, and the item stays undecided', async () => {
+    api.transcribe
+      .mockResolvedValueOnce({ text: 'Should I run more?', language: 'en', duration_seconds: 1 })
+      .mockResolvedValueOnce({ text: 'What about swimming?', language: 'en', duration_seconds: 1 })
+    await startLumen()
+    await say(1)
+    await advance(2400)
+    await say(0.5)
+    await advance(2400)
+
+    expect(api.confirmPending).not.toHaveBeenCalled()
+    expect(api.declinePending).not.toHaveBeenCalled()
+    expect(api.streamChat).toHaveBeenCalledTimes(2)
   })
 })

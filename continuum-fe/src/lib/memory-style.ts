@@ -17,6 +17,8 @@ export const STATUS_COLOR: Record<MemoryStatus, string> = {
   contradicted: '#fbbf24', // amber — disputed, awaiting a human
   superseded: '#64748b', // slate — replaced, still queryable
   archived: '#3f3f46', // zinc — decayed out of retrieval, recoverable
+  pending: '#a5b4fc', // pale indigo — said, not decided; a question, not a belief
+  declined: '#52525b', // zinc — said no; kept for the record
 }
 
 export const STATUS_LABEL: Record<MemoryStatus, string> = {
@@ -24,6 +26,8 @@ export const STATUS_LABEL: Record<MemoryStatus, string> = {
   contradicted: 'Disputed',
   superseded: 'Superseded',
   archived: 'Archived',
+  pending: 'Undecided',
+  declined: 'Declined',
 }
 
 export const STATUS_BLURB: Record<MemoryStatus, string> = {
@@ -31,6 +35,8 @@ export const STATUS_BLURB: Record<MemoryStatus, string> = {
   contradicted: 'In unresolved conflict. Still retrieved — the agent surfaces both sides.',
   superseded: 'Replaced by a newer belief. Never deleted; still queryable.',
   archived: 'Decayed below the confidence floor. Out of retrieval, recoverable.',
+  pending: 'You said maybe. Never treated as true — you will be asked when it comes up.',
+  declined: 'You said no. Never raised again; kept so the history makes sense.',
 }
 
 export const EDGE_COLOR = {
@@ -44,6 +50,8 @@ export const STATUS_CLASS: Record<MemoryStatus, string> = {
   contradicted: 'border-amber-500/40 bg-amber-500/15 text-amber-300',
   superseded: 'border-slate-500/30 bg-slate-500/10 text-slate-300',
   archived: 'border-zinc-600/40 bg-zinc-600/10 text-zinc-400',
+  pending: 'border-dashed border-indigo-300/40 bg-indigo-300/10 text-indigo-200',
+  declined: 'border-zinc-600/40 bg-zinc-600/10 text-zinc-500',
 }
 
 export const CATEGORY_LABEL: Record<MemoryCategory, string> = {

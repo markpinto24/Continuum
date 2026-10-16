@@ -177,6 +177,18 @@ export const api = {
   /** Put one of your memories in the shared team space. */
   shareMemory: (id: string) => request<ShareResponse>(`/memories/${id}/share`, post()),
 
+  // --- Pending: said, not decided ----------------------------------------------
+  pendingMemories: (limit = 100) =>
+    request<MemoryListResponse>(
+      `/memories?${new URLSearchParams({ status: 'pending', limit: String(limit) })}`,
+    ),
+  /** Yes: it becomes a belief, judged against the graph now. */
+  confirmPending: (id: string) => request<IngestResponse>(`/memories/${id}/confirm`, post()),
+  /** No: hidden for good, kept for the record. */
+  declinePending: (id: string) => request<Memory>(`/memories/${id}/decline`, post()),
+  /** Still unsure: stays pending, counts as one reminder. */
+  unsurePending: (id: string) => request<Memory>(`/memories/${id}/unsure`, post()),
+
   /** Bring an archived or superseded memory back. Nothing here is a one-way door. */
   reactivate: (id: string) => request<Memory>(`/memories/${id}/reactivate`, post()),
 

@@ -57,6 +57,10 @@ class ExtractionReport(BaseModel):
     excerpt_rate: float = Field(
         ..., description="Extracted facts carrying a source excerpt. Provenance coverage."
     )
+    tentative_accuracy: float = Field(
+        1.0, description="Of matched pairs, share whose decided/pending flag was right."
+    )
+    tentative_labelled: int = Field(0, description="Labelled facts that are pending.")
 
     forbidden_total: int = 0
     forbidden_rate: float = Field(
@@ -113,7 +117,7 @@ def score_extraction(
     results: list[tuple[ExtractionCase, list[ExtractedFact]]],
 ) -> ExtractionReport:
     labelled = extracted = matched = 0
-    right_category = right_subject = 0
+    right_category = right_subject = right_tentative = tentative_labelled = 0
     with_excerpt = 0
     missed: list[str] = []
     spurious: list[str] = []
@@ -139,6 +143,8 @@ def score_extraction(
             # A null label means "no single clear entity", and the extractor
             # agreeing that there is none counts as correct.
             right_subject += _normalise(want.subject) == _normalise(got.subject)
+            right_tentative += want.tentative == got.tentative
+        tentative_labelled += sum(want.tentative for want in case.expect)
 
         paired_expected = {id(want) for want, _ in pairs}
         paired_actual = {id(got) for _, got in pairs}
@@ -163,6 +169,8 @@ def score_extraction(
         category_accuracy=_ratio(right_category, matched),
         subject_accuracy=_ratio(right_subject, matched),
         excerpt_rate=_ratio(with_excerpt, extracted),
+        tentative_accuracy=_ratio(right_tentative, matched) if matched else 1.0,
+        tentative_labelled=tentative_labelled,
         forbidden_total=forbidden_total,
         forbidden_rate=_ratio(len(forbidden_hits), forbidden_total),
         forbidden_hits=forbidden_hits,

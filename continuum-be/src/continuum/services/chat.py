@@ -43,6 +43,8 @@ from continuum.models.schemas import (
     IngestRequest,
     IngestResponse,
     Message,
+    Question,
+    QuestionOption,
 )
 from continuum.services.ingest import IngestService
 from continuum.services.retrieval import RetrievalService
@@ -86,6 +88,12 @@ other and nobody has decided which one holds. When a disputed memory is relevant
 - Give both sides, with their dates, and cite both.
 - Ask which is correct. Do NOT pick the newer one, the higher-confidence one, or
   the one that makes for a tidier answer.
+
+PENDING items are things the person said they might do, or were still deciding
+on. They are not beliefs: never state one as true and never cite it. When one is
+relevant, mention it once, briefly, with its date, ask whether they have decided,
+and give your own view in one sentence — what you would do, and why. They answer
+with buttons under your reply, so do not ask them to type yes or no.
 
 Format with Markdown where it helps: fenced code blocks tagged with their
 language (```python), lists for steps, **bold** sparingly. Be concise."""
@@ -166,11 +174,13 @@ class ChatService:
             remembered=remembered.extracted if remembered else 0,
         )
 
+        questions = await self._ask_about_pending(context, remembered)
         done = ChatDone(
             memory_ids=[item.memory.id for item in context.memories],
             cited_ids=cited,
             disagreements=len(context.disagreements),
             remembered=remembered,
+            questions=questions,
         )
         yield ChatEvent(event="done", data=done.model_dump(mode="json"))
 
@@ -192,6 +202,26 @@ class ChatService:
             ),
         ]
 
+    async def _ask_about_pending(
+        self, context: ChatContext, remembered: IngestResponse | None
+    ) -> list[Question]:
+        """A question per pending item this answer raised — unless the turn itself
+        just settled it by saying it again. Counted as a reminder now, when it is
+        actually put to the person, so an item nobody answers fades in the end."""
+        settled = set(remembered.confirmed) if remembered else set()
+        questions: list[Question] = []
+        for memory in context.pending:
+            if memory.id in settled:
+                continue
+            questions.append(pending_question(memory))
+            memory.remind()
+            try:
+                await self.ingest.memories.save(memory)
+            except Exception:  # noqa: BLE001
+                # The answer is delivered; a lost count only means one more ask.
+                log.exception("chat.reminder_not_recorded", memory_id=memory.id)
+        return questions
+
     # --- Writing the turn back ---------------------------------------------
 
     async def _remember(self, request: ChatRequest, query: str) -> IngestResponse | None:
@@ -210,6 +240,9 @@ class ChatService:
                     author=request.user_id if request.share else None,
                     author_email=request.author_email if request.share else None,
                     messages=[Message(role="user", content=query)],
+                    # The answer this turn replies to: what "sounds good" means.
+                    # Context for a choice, never a source of facts (agreement.py).
+                    proposal=proposal_for(request),
                     source_id=f"chat:{uuid.uuid4()}",
                 )
             )
@@ -221,6 +254,29 @@ class ChatService:
 
 
 # --- Pure prompt rendering ---------------------------------------------------
+
+
+def pending_question(memory: Memory) -> Question:
+    """Worded here, not by the model: the options are fixed actions."""
+    return Question(
+        memory_id=memory.id,
+        text=f"You were still deciding on this ({memory.created_at.date():%d %b}): "
+        f"{memory.content}",
+        options=[
+            QuestionOption(label="Yes, I'm going with it", action="confirm"),
+            QuestionOption(label="Still unsure", action="unsure"),
+            QuestionOption(label="No", action="decline"),
+        ],
+    )
+
+
+def proposal_for(request: ChatRequest) -> str | None:
+    """The assistant's answer just before the user's latest turn, if any."""
+    messages = request.messages
+    if len(messages) < 2 or messages[-1].role != "user":
+        return None
+    previous = messages[-2]
+    return previous.content if previous.role == "assistant" and previous.content else None
 
 
 def build_system_prompt(context: ChatContext, *, mode: Mode = Mode.WORKSPACE) -> str:
@@ -235,11 +291,13 @@ def build_system_prompt(context: ChatContext, *, mode: Mode = Mode.WORKSPACE) ->
         else ""
     )
 
+    pending = _pending_block(context)
     if not numbering:
         return (
             f"{opening}{when}\n\n"
             "MEMORY: nothing recorded is relevant to this question. Say so rather "
             "than guessing at what they might have told you before."
+            + (f"\n\n{pending}" if pending else "")
         )
 
     disputed_ids = {
@@ -277,6 +335,18 @@ def build_system_prompt(context: ChatContext, *, mode: Mode = Mode.WORKSPACE) ->
                         f"{memory.last_reinforced_at.date()})"
                     )
 
+    if pending:
+        lines.extend(["", pending])
+    return "\n".join(lines)
+
+
+def _pending_block(context: ChatContext) -> str:
+    """Unnumbered on purpose: a pending item is never cited as evidence."""
+    if not context.pending:
+        return ""
+    lines = ["PENDING — said, not decided:"]
+    for memory in context.pending:
+        lines.append(f"- {memory.content} (said {memory.created_at.date()})")
     return "\n".join(lines)
 
 

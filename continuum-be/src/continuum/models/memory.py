@@ -44,6 +44,11 @@ class MemoryStatus(StrEnum):
     SUPERSEDED = "superseded"   # explicitly replaced by a newer memory
     CONTRADICTED = "contradicted"  # conflict detected, awaiting human resolution
     ARCHIVED = "archived"       # decayed below threshold; recoverable, not retrieved
+    # Said, not decided ("maybe", "I'll think about it"). Never a belief: it is
+    # never judged against, never retires anything, and is raised as a question
+    # until the person answers (requirements.md §14).
+    PENDING = "pending"
+    DECLINED = "declined"       # the person said no to a pending item; kept for audit
 
 
 # Categories that represent immutable history and must never be superseded.
@@ -90,6 +95,14 @@ def comparable_categories(a: MemoryCategory, b: MemoryCategory) -> bool:
 # not to silently pick one, and not to go quiet on the subject entirely.
 RETRIEVABLE_STATUSES: frozenset[MemoryStatus] = frozenset(
     {MemoryStatus.ACTIVE, MemoryStatus.CONTRADICTED}
+)
+
+# Choices the person can adopt from a suggestion, or leave pending. Never a fact
+# about who they are, and never health: "ok" to a suggested supplement is not a
+# medication (requirements.md §14).
+CHOICE_CATEGORIES: frozenset[MemoryCategory] = frozenset(
+    {MemoryCategory.DECISION, MemoryCategory.ROUTINE, MemoryCategory.GOAL,
+     MemoryCategory.PREFERENCE}
 )
 
 # Confidence half-life per category, in days. Governs how fast an unreinforced
@@ -311,6 +324,15 @@ class Memory(BaseModel):
     superseded_at: datetime | None = None
     archived_at: datetime | None = None
 
+    # --- Pending (said, not decided) ------------------------------------------
+    reminders: int = Field(
+        default=0, description="How many times a pending item was put to the person."
+    )
+    last_reminded_at: datetime | None = None
+    decided_at: datetime | None = Field(
+        default=None, description="When a pending item was confirmed or declined."
+    )
+
     def touch(self) -> None:
         self.updated_at = _utcnow()
 
@@ -381,6 +403,39 @@ class Memory(BaseModel):
         self.team_conflicts_with = []
         self.touch()
 
+    # --- Pending lifecycle --------------------------------------------------------
+
+    @property
+    def is_pending(self) -> bool:
+        return self.status is MemoryStatus.PENDING
+
+    def remind(self) -> None:
+        """Counted when the question is actually put to the person, not when the
+        item is merely retrieved — silence is not an answer."""
+        self.reminders += 1
+        self.last_reminded_at = _utcnow()
+        self.touch()
+
+    def confirm(self) -> None:
+        """Said yes. It becomes a belief now, so it starts its life now: decay is
+        measured from the moment it was decided, not when it was first floated."""
+        self.status = MemoryStatus.ACTIVE
+        self.decided_at = self.last_reinforced_at = _utcnow()
+        self.touch()
+
+    def decline(self) -> None:
+        """Said no. Out of retrieval and never raised again; the record stays."""
+        self.status = MemoryStatus.DECLINED
+        self.decided_at = _utcnow()
+        self.touch()
+
+    def pending_expired(self, *, now: datetime, max_reminders: int, max_age_days: float) -> bool:
+        """Asked enough times, or around long enough, with no answer."""
+        if not self.is_pending:
+            return False
+        age_days = (now - self.created_at).total_seconds() / 86400
+        return self.reminders >= max_reminders or age_days >= max_age_days
+
     def believed_at(self, when: datetime) -> bool:
         """Was this held as a belief at `when`? Pure, so time-travel queries are testable.
 
@@ -390,6 +445,8 @@ class Memory(BaseModel):
         """
         if self.kind == "summary" or self.rejected_reason or self.redacted_at:
             return False
+        if self.status in (MemoryStatus.PENDING, MemoryStatus.DECLINED):
+            return False  # never a belief, then or now
         if self.created_at > when:
             return False
         ended = None
@@ -487,6 +544,16 @@ class ExtractedFact(BaseModel):
     category: MemoryCategory = MemoryCategory.FACT
     subject: str | None = None
     source_excerpt: str | None = None
+    tentative: bool = Field(
+        default=False,
+        description="Said, not decided ('maybe', 'I'll think about it'): stored as "
+        "pending, never resolved against beliefs until the person confirms it.",
+    )
+    adopted: bool = Field(
+        default=False,
+        description="Taken from the assistant's answer the user agreed to, not said in "
+        "their own words. Never reinforces an existing belief: an echo is not evidence.",
+    )
 
     def to_memory(
         self,
@@ -503,4 +570,5 @@ class ExtractedFact(BaseModel):
             source_id=source_id,
             source_excerpt=self.source_excerpt,
             confidence=confidence,
+            status=MemoryStatus.PENDING if self.tentative else MemoryStatus.ACTIVE,
         )

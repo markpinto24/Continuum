@@ -26,7 +26,15 @@ export type MemoryCategory =
  */
 export type Mode = 'personal' | 'workspace'
 
-export type MemoryStatus = 'active' | 'superseded' | 'contradicted' | 'archived'
+export type MemoryStatus =
+  | 'active'
+  | 'superseded'
+  | 'contradicted'
+  | 'archived'
+  /** Said, not decided ("maybe"): asked about, never treated as true. */
+  | 'pending'
+  /** The person said no to a pending item. Kept for audit, never raised again. */
+  | 'declined'
 
 export interface Escalation {
   target_id: string
@@ -166,6 +174,10 @@ export interface IngestResponse {
   conflicts_raised: string[]
   /** Team memories a new private one disagrees with. */
   team_conflicts: string[]
+  /** Stored as pending: said, not decided. */
+  pending: string[]
+  /** Pending items this turn confirmed — now beliefs. */
+  confirmed: string[]
   resolutions: ResolutionRecord[]
 }
 
@@ -192,8 +204,24 @@ export interface ChatContext {
   query: string
   memories: RetrievedMemory[]
   disagreements: Disagreement[]
+  /** Said, not decided, and relevant here: to ask about, never to assert. */
+  pending: Memory[]
   /** Set when these are the beliefs held at a past moment. */
   as_of: string | null
+}
+
+export interface QuestionOption {
+  label: string
+  /** A fixed server action — the model words the question, never the outcome. */
+  action: 'confirm' | 'unsure' | 'decline'
+}
+
+/** Something to settle with a button, like Claude Code's questions. */
+export interface Question {
+  kind: 'pending'
+  memory_id: string
+  text: string
+  options: QuestionOption[]
 }
 
 export interface ChatDone {
@@ -201,6 +229,8 @@ export interface ChatDone {
   cited_ids: string[]
   disagreements: number
   remembered: IngestResponse | null
+  /** Pending items this answer raised. */
+  questions: Question[]
 }
 
 export interface ChatMessage {

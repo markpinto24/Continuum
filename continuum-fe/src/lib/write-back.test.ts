@@ -13,6 +13,8 @@ function response(overrides: Partial<IngestResponse>): IngestResponse {
     superseded: [],
     conflicts_raised: [],
     team_conflicts: [],
+    pending: [],
+    confirmed: [],
     resolutions: [],
     ...overrides,
   }

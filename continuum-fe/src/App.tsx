@@ -487,6 +487,8 @@ function tallyByStatus(graph: GraphResponse): Record<MemoryStatus, number> {
     contradicted: 0,
     superseded: 0,
     archived: 0,
+    pending: 0,
+    declined: 0,
   }
   for (const node of graph.nodes) counts[node.status] += 1
   return counts

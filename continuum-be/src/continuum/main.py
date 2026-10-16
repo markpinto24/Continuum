@@ -29,6 +29,7 @@ from continuum.services.feedback import Calibration, FeedbackService
 from continuum.services.ingest import IngestService
 from continuum.services.limits import SlidingWindow
 from continuum.services.memory_store import MemoryStore
+from continuum.services.pending import PendingService
 from continuum.services.reindex import EmbeddingMigration
 from continuum.services.resolution import ResolutionService
 from continuum.services.retrieval import RetrievalService
@@ -139,6 +140,7 @@ async def lifespan(app: FastAPI):
         memories, labels=feedback.store, learning=learning
     )
     app.state.sharing = SharingService(ingest, memories, settings)
+    app.state.pending = PendingService(ingest, memories)
 
     speech = SpeechService(settings)
     app.state.speech = speech

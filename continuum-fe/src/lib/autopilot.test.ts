@@ -6,6 +6,7 @@ import {
   isEndCommand,
   isInterruptCommand,
   readAutopilotPref,
+  spokenAnswer,
   writeAutopilotPref,
 } from './autopilot'
 
@@ -48,5 +49,25 @@ describe('the remembered preference', () => {
     expect(readAutopilotPref()).toBe(false)
     writeAutopilotPref(true)
     expect(readAutopilotPref()).toBe(true)
+  })
+})
+
+describe('answering a pending item aloud', () => {
+  it.each([
+    ['Yes', 'confirm'],
+    ["Yeah, I'm going with it, Lumen", 'confirm'],
+    ['No thanks', 'decline'],
+    ['nope', 'decline'],
+    ["I'm not sure yet", 'unsure'],
+    ["No, I'm not sure", 'unsure'],
+    ['maybe', 'unsure'],
+  ] as const)('%s → %s', (said, want) => {
+    expect(spokenAnswer(said)).toBe(want)
+  })
+
+  it('anything else is the next thing the person wants to say, not an answer', () => {
+    expect(spokenAnswer('what should I eat after training?')).toBeNull()
+    expect(spokenAnswer('I think the second split is better')).toBeNull()
+    expect(spokenAnswer('Lumen')).toBeNull()
   })
 })

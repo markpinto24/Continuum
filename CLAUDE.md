@@ -149,6 +149,8 @@ Continuum/                            ← git root
 │   │   │   ├── speech.py             dictation: local Whisper, audio never kept
 │   │   │   ├── voice.py              spoken answers: local Piper voice
 │   │   │   ├── sharing.py            ★ private memory → shared space, via resolver
+│   │   │   ├── agreement.py          ★ replies to suggestions: whose words, guards
+│   │   │   ├── pending.py            pending ("maybe") items: confirm/decline/unsure
 │   │   │   ├── feedback.py           ★ decisions → labels, gate evidence, export,
 │   │   │   │                           calibration curve, rule suggestions
 │   │   │   ├── corrections.py        ★ reject a misreading; forget (redaction)
@@ -200,6 +202,8 @@ Continuum/                            ← git root
 │       ├── test_modes.py             ★ two graphs per person: header, keys, by id, resolver
 │       ├── test_personal_model.py    ★ health, relationships, name swaps, Personal decay
 │       ├── test_personal_privacy.py  health never logged, never exported by default
+│       ├── test_pending.py           ★ a maybe never retires or is retired; fades
+│       ├── test_agreement.py         ★ echoes, health, questions, refusals, hedges
 │       └── test_ingest_pipeline.py   end-to-end vs in-memory Qdrant
 └── continuum-fe/                     ← the belief graph UI
     ├── package.json · yarn.lock      yarn 1; `resolutions` pins one vite
@@ -213,6 +217,7 @@ Continuum/                            ← git root
         │   ├── voice-player.ts       ★ ordered, prefetched spoken chunks
         │   ├── speakable.ts          markdown → speech; finished sentences
         │   ├── greeting.ts           the session's opening line
+        │   ├── pending.ts            answering a pending item (chat, inbox, Lumen)
         │   └── memory-style.ts       ★ colour/size vocabulary, shared canvas+DOM
         ├── hooks/                    use-resource, use-recorder, use-dictation,
         │                             use-voice, use-autopilot ★, use-element-size,
@@ -226,6 +231,7 @@ Continuum/                            ← git root
         │   ├── contradiction-inbox.tsx   + why it escalated, learning panel
         │   ├── learning-panel.tsx    what your decisions say about the gate
         │   ├── chat-panel.tsx        ★ streaming, citations, disputes, autopilot
+        │   ├── turn-outcome.tsx      "Remembered: …" + Undo; questions with options
         │   ├── autopilot-overlay.tsx ★ Lumen's full-screen HUD: reactor, waveform
         │   ├── voice-settings.tsx    Settings → Voice: pick, hear, speed
         │   └── ui/                   shadcn-style primitives, owned in-repo
@@ -349,6 +355,7 @@ that touches memories takes `principal: CurrentUser` and passes
 | `escalations` | What the resolver thought when it escalated: judge relation, probability, similarity, gate. Graded against the person's decision later |
 | `shared_by` / `shared_by_email` | On a memory in the shared space (`user_id == "_shared"`): who put it there |
 | `shared_as` | On a private memory that was shared: the shared memory that now carries it. Retired by that edge, never deleted |
+| `reminders` / `decided_at` | On a `pending` memory: how often it was put to the person, and when they answered |
 
 **Each person has two graphs.** Workspace is owned by the account id
 (unchanged, so every memory stored before modes stays put); Personal by
@@ -369,6 +376,15 @@ Reading is across graphs (`visible_owners()` = your id + `_shared`); writing and
 resolution stay inside one graph, so a decision never reaches from the shared
 space into anyone's private memories.
 | `source_id` / `source_excerpt` | Traceability from any assertion back to its origin text |
+
+**Pending is said, not decided.** `pending` ("maybe", "I'll think about it")
+is kept and never believed: it is never a resolution neighbour, never retires
+anything, is never retired, never decays, and is retrieved only into its own
+unnumbered **PENDING** prompt section. The person settles it with a button or a
+spoken answer — `confirm` (it becomes a belief and is judged against the graph
+only now), `decline` (status `declined`: out of the way, kept for audit), or
+`unsure` (stays pending, counts as a reminder). Asked 3 times, or after 30 days,
+it fades to archived. Restating it in your own words confirms it.
 
 `RETRIEVABLE_STATUSES = {active, contradicted}` — **contradicted memories are
 deliberately still retrieved.** When two beliefs disagree, the honest behaviour
@@ -434,6 +450,17 @@ judge folded "Sam is the user's partner" into "Priya is the user's partner" —
 narrower than `material_difference` on purpose: it overrides the judge, so it
 fires only when each statement names something the other lacks ("lives in
 Kothrud, Pune" adds detail; "Sam" for "Priya" is a swap).
+
+**A reply to an answer reads the answer — as context, never as a source of
+facts** (`services/agreement.py`). The chat write-back hands ingest the answer
+the turn replies to (`IngestRequest.proposal`, never client-settable). Whose
+words a fact is, is read from the words: at least half its content words in the
+reply makes it the user's own; anything else was *adopted*, and only a choice
+survives — never a fact about the user, never anything naming a dose, a
+supplement or a health word. An adopted fact never reinforces (an echo is not
+evidence). A hedged reply makes what it adopts pending; a reply opening with a
+no adopts nothing; a question makes no choice at all. The instructions for this
+live in the reply's own framing, not the system prompts (FINDINGS §12).
 
 **`auto_supersede_confidence` (default 0.80) is the single most consequential
 setting in the project.** Raise it and you escalate more; lower it and you
@@ -665,6 +692,39 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   synthesis; the server accepts only catalogued voices — it never downloads a
   name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
 - API keys panel now says what a key is for, in plain words
+
+### ✅ Phase 16 — Agreements, pending memories, questions with options (done, this release)
+
+Found in use: "it sounds good for me for now", after the assistant proposed a
+workout split, stored nothing. Planned in `requirements.md` Part 2, decisions
+asked first; both modes.
+
+- **Agreements are remembered**: the answer a turn replies to is read as
+  context, the choice the user took up is stored in their name with their reply
+  as its source, and the turn says so — "Remembered: …" with **Undo** (= *this
+  isn't a real fact*)
+- **A maybe is pending**: stored, never believed (see Data model). Raised when
+  its topic comes up — the answer gives its own one-line view, and a **question
+  card** offers *Yes / Still unsure / No*, fixed server actions. The inbox has
+  **Disputes | Undecided**; the graph draws pending nodes with a dashed ring.
+  **Lumen** asks aloud after its answer and takes a spoken yes / not sure / no by
+  word match, only right after the question
+- **Measured** (FINDINGS §12): agreement corpus (25 cases, both modes, labelled
+  first) recall 5.6% → 58–68%, precision 25% → 73–81%, every matched maybe
+  pending, 0 forbidden statements (echoes, health, refusals, questions). Both
+  system prompts byte-identical, so the Work and Personal corpora cannot move —
+  the first version put the rules there and cost Work F1 0.74 → 0.56–0.64
+- **Live check** (throwaway instance, real Ollama, both modes) found three bugs
+  the corpus could not: a question replying to an answer was stored as a
+  decision; the first turn of a session skipped the question guard; and
+  `swapped_names` read "Postgres"/"PostgreSQL" as a swap. All fixed, re-run
+  live: every turn as designed
+- **Not achieved**: an unprompted "maybe I'll start running on Sundays" stores
+  nothing (decided 2026-10-16 that it should be pending) — the rule that would
+  do it caught 0 of its cases and cost Work. A confirmed maybe keeps its hedged
+  wording ("will think about adding…"). An adopted choice is filed as decision
+  or routine run to run
+- 506 backend tests, 184 frontend tests
 
 ### ✅ Phase 15 — Personal mode: a memory for your life (done, this release)
 
@@ -1034,7 +1094,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 457 tests, no services needed
+uv run pytest                          # 506 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -1055,6 +1115,8 @@ uv run python scripts/run_eval.py --retrieval continuum-retrieval.yaml   # live 
 uv run python scripts/run_eval.py --personal --record personal-run.json
 uv run python scripts/run_eval.py --extraction --personal              # personal prompt
 uv run python scripts/run_eval.py --extraction --personal --prompt workspace   # baseline
+uv run python scripts/run_eval.py --agreement            # replies to suggestions
+uv run python scripts/run_eval.py --agreement --before   # today's: the reply alone
 
 uv run python scripts/backup.py                       # -> backups/<UTC stamp>/
 uv run python scripts/restore.py backups/<stamp> --yes   # replaces current data
@@ -1212,6 +1274,25 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
   discards the new fact; "a different name for the same relationship" is the
   judge being confidently wrong in exactly the way the duplicate guard exists
   for. `swapped_names` is deliberately narrower than `material_difference`.
+- **Feeding the assistant's answer into memory "so agreements are captured".**
+  Answers are made from memory; read as a source, they re-learn "you are 22"
+  from their own echo. The answer is context for a choice the user adopts —
+  only choices, and an adopted fact never reinforces.
+- **Putting the reply rules in the system prompts.** Measured: two extra rules
+  there cost the Work extractor F1 0.74 → 0.56–0.64 on inputs that are not
+  replies at all. They live in the reply's own framing.
+- **Trusting the extractor's `tentative` flag or category for an agreement.**
+  "I'll think about it" came back decided, "no thanks" came back a decision,
+  creatine came back a decision not health — three runs in three each. Read the
+  words: hedges, refusals, doses.
+- **Declining a pending item from free text.** Only a button, or a spoken no
+  to the question just asked. A contradiction in passing leaves it pending —
+  commitment 2.
+- **Letting a pending item be judged, or retire anything.** "Maybe I'll switch
+  to upper/lower" must not retire the split you actually follow. It is judged
+  only when confirmed, as if just said.
+- **Counting a reminder when a pending item is merely retrieved.** It is
+  counted when the question is put to the person; otherwise it fades unseen.
 - **"Tidying" the transcript format into one rule for both modes.** A lone
   chat turn goes to the extractor bare in Personal and as `user: …` in Work,
   because that is what each extractor measured better at (FINDINGS §11: the

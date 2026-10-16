@@ -103,6 +103,7 @@ describe('rating an answer', () => {
     query: 'q',
     memories: [{ memory: makeMemory({ id: 'used' }), similarity: 0.7, recency: 1, keyword: 0, score: 0.5 }],
     disagreements: [],
+    pending: [],
     as_of: null,
   }
 

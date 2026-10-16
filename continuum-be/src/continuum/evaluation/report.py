@@ -139,6 +139,11 @@ def render_extraction(report: ExtractionReport, *, label: str) -> str:
         f"    subject      {_pct(report.subject_accuracy)}   of matched facts",
         f"    provenance   {_pct(report.excerpt_rate)}   carry a source excerpt",
     ]
+    if report.tentative_labelled:
+        lines.append(
+            f"    pending      {_pct(report.tentative_accuracy)}   of matched facts flagged "
+            f"right (decided vs maybe; {report.tentative_labelled} labelled maybe)"
+        )
     if report.forbidden_total:
         lines.append(
             f"    forbidden    {_pct(report.forbidden_rate)}   of {report.forbidden_total} "

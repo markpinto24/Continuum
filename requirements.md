@@ -1,4 +1,4 @@
-# Requirements — Personal mode (general life memory)
+# Requirements — Personal mode (Part 1) · Agreements and pending memories (Part 2)
 
 Status: **built (Phase 15, 2026-10-10)** on the defaults in §10: strictly
 separate modes, one Lumen, finance later, "Personal / Work", existing accounts
@@ -283,3 +283,114 @@ Phases A and B can start together. C and D need B. E and F need A.
 - Mobile apps.
 - Sharing personal memories with family members (a "family space" would be a
   third graph, like the team space, and needs its own plan).
+
+---
+---
+
+# Part 2 — Agreements, pending memories and questions
+
+Status: **built 2026-10-16 — Phases H, I, J, K done** (CLAUDE.md Phase 16, FINDINGS §12). Applies to both modes.
+
+**Changed from §17 by measurement:** an unprompted plan ("maybe I'll start running on Sundays") is **not** yet pending — the rule that would do it caught 0 of its cases and cost the Work extractor (F1 0.74 → 0.56–0.64). A maybe in reply to a suggestion is pending, as decided.
+
+## 12. The problem
+
+Found in use. Asked for a workout split, the assistant proposed push/pull/legs;
+the user replied "it sounds good for me for now". Nothing was stored, because
+only the user's own words are ever extracted and "sounds good" holds no fact.
+A real decision was lost.
+
+The rule that caused it exists for a reason (CLAUDE.md, "Ingesting the
+assistant's reply"): answers are assembled *from* memory, so feeding them back
+in lets the graph confirm itself — "you are 22" re-learned from its own echo.
+The fix must tell **a choice the user made about something the assistant
+proposed** apart from **a fact the assistant repeated from memory**.
+
+## 13. Decisions (asked 2026-10-16)
+
+| Question | Decision |
+| --- | --- |
+| A clear yes ("sounds good", "let's do that") | **Stored at once as confirmed**, shown in the turn ("Remembered: you follow a push/pull/legs split…") with one-tap **Undo** |
+| A maybe ("I'll think about it", "maybe") | **Stored as pending** — kept, never treated as true |
+| A no to a pending item | **Declined**: leaves the graph and retrieval, never raised again; the record stays for audit. Forget still erases the words |
+| How pending items come back | **In chat when the topic comes up**, with option buttons, **and** a **Pending** tab in the inbox |
+| An unanswered pending item | **Asked up to 3 times, then fades** to archived (or after ~30 days). Recoverable, never deleted |
+| Modes | **Both** — "sounds good, let's go with Postgres" is a work decision |
+
+## 14. Design (proposed — overrule any line)
+
+**Two new statuses.** `pending` — said, not decided. `declined` — the person
+said no. Both live in Qdrant payloads like every status: no migration.
+
+| | Retrieved | In the graph | Judged by the resolver | Decays |
+| --- | --- | --- | --- | --- |
+| `pending` | yes, in its own **PENDING** prompt section | dashed outline | never retires or is retired by anything | no — it fades by reminders (3) or age (30 d) |
+| `declined` | no | only with "Show archived" | no | no |
+
+- **A pending item is not a belief.** It never supersedes an active memory and
+  is never superseded: "maybe I'll switch to upper/lower" must not retire "you
+  follow push/pull/legs". Only when confirmed does it go through the resolver,
+  as if just said — so a confirmed switch supersedes the old split normally.
+- **Confirming** (a button, or restating it in your own words — a cheap
+  duplicate match, no LLM) makes it `active` and runs it through resolution.
+  **Declining** needs a button or a spoken "no" to the question just asked;
+  a free-text contradiction never declines on its own (commitment 2: no LLM
+  reading intent decides). It shows the buttons again instead.
+- **The answer is context, never a source of facts about you.** For a turn that
+  replies to an answer, the extractor sees that answer marked *proposed by the
+  assistant — context only*, with a rule: record only what the user adopted,
+  in the user's name. Two guards that read the result, not the model:
+  - only a **choice** can come from an agreement — decision, routine, goal,
+    preference. Never `person`, `fact` about the user, and **never health**:
+    "ok" to a suggested supplement is not a medication.
+  - an agreement fact that duplicates a memory **the answer itself used** is
+    dropped — not reinforced. Echo is not evidence.
+- **It stores the choice, not the document.** "The user follows a push/pull/
+  legs split, 6 days a week, ~2 h a session" — one memory, `routine`, subject
+  `gym`, source excerpt = the user's reply. The full exercise list is a
+  document, not a belief; keeping it whole would make it unsupersedable.
+- **Questions with options, like Claude Code's.** The chat's `done` event gains
+  `questions`: each has text, 2–4 fixed options and the assistant's own short
+  take ("6 days fits PPL well"). **Options map to server-side actions only**
+  (confirm / still unsure / decline; and the existing *this holds* / *both are
+  true* for disputes) — the model words the question, never the outcome. An
+  "Other" reply is just the next chat turn, through normal ingest.
+- **Reminders are counted when shown**, not when retrieved silently. At 3, or
+  30 days, the item fades to archived and stops being raised.
+- **Lumen** reads the options aloud and accepts a spoken "yes", "no" or "not
+  sure" — word match right after the question, like its commands, no LLM.
+- **Undo on a confirmed agreement** is the existing *This isn't a real fact*:
+  archived, anything it superseded restored, and it becomes an extraction case.
+
+## 15. Evaluation
+
+- **Agreement corpus** (`corpus/extraction-agreement.yaml`), each case = the
+  assistant's answer + the user's reply, labelled before the first run, both
+  modes: clear yes; yes with conditions ("yes, but 5 days"); maybe; no; yes to
+  an answer that also repeats the user's age (age must **not** come back); yes
+  to a supplement suggestion (nothing health); a reply that changes topic
+  (nothing from the answer); a held-out set of 6, one labelled against the echo
+  guard so its cost is visible. Three runs before and after.
+- **Unit tests** for every lifecycle edge: pending never retires or is retired;
+  confirm runs the resolver; decline hides and never resurfaces; three reminders
+  fade it; a free-text contradiction does not decline; an echo is not
+  reinforced; health is never stored from an agreement; Work and Personal both.
+- Existing corpora must not move: the Work and Personal extraction corpora (a
+  turn with no preceding answer is extracted exactly as today), and both
+  resolution corpora.
+
+## 16. Delivery plan
+
+| Phase | Scope | Done when |
+| --- | --- | --- |
+| **H — Pending lifecycle** ✅ | `pending` / `declined`; confirm, decline, keep-pending routes (owner-checked, 404 across modes); PENDING prompt section; reminder count and fade in the decay sweep | Lifecycle tests, incl. every failure mode above |
+| **I — Agreement extraction** ✅ | Previous answer as context; tentative flag; choice-only and echo guards; health excluded | Agreement corpus 3× before/after; other corpora unchanged |
+| **J — Questions with options** ✅ | `done.questions`; chat prompt raises pending items when relevant; option chips; Lumen spoken answers | Chat + frontend tests; real-browser check |
+| **K — Interface** ✅ | "Remembered: …" with Undo; Pending tab in the inbox; dashed pending nodes; declined under "Show archived"; `types.ts` mirror | Frontend tests; live check in both modes |
+
+## 17. Decided before Phase I
+
+1. **A maybe that is not a reply** (2026-10-16): **pending only if it is a
+   plan** — "maybe I'll start running on Sundays" is pending and asked about;
+   idle musing ("someday, who knows") stays nothing, so passing thoughts are
+   never nagged about. `maybe-is-nothing` keeps its label.

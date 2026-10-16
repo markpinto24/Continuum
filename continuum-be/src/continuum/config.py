@@ -248,6 +248,15 @@ class Settings(BaseSettings):
     decay_archive_threshold: float = 0.25    # below this, a memory is archived
     decay_floor: float = 0.05                # never decay below this
     decay_batch_limit: int = 2000
+    # A pending item ("maybe") is put to the person when its topic comes up.
+    # Unanswered after this many reminders, or this many days, it fades to
+    # archived — recoverable, never deleted. More reminders capture more
+    # decisions; fewer stop nagging about passing thoughts.
+    pending_max_reminders: int = 3
+    # Pending items placed beside the memories when relevant to a question. Few:
+    # each one is a question put to the person, and a list of them is a nag.
+    chat_pending_limit: int = 2
+    pending_max_age_days: float = 30.0
 
     # --- Chat & retrieval (Phase 3) ----------------------------------------
     # Memories injected into a chat turn. Small on purpose: a wall of context

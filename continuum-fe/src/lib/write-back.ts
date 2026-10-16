@@ -23,8 +23,12 @@ export function describeWriteBack(remembered: IngestResponse | null): string | n
   }
 
   const parts: string[] = []
-  const created = remembered.created.length
+  const undecided = remembered.pending?.length ?? 0
+  const created = remembered.created.length - undecided
   if (created > 0) parts.push(`stored ${created} new ${created === 1 ? 'memory' : 'memories'}`)
+  if (undecided > 0) parts.push(`${undecided} undecided`)
+  const settled = remembered.confirmed?.length ?? 0
+  if (settled > 0) parts.push(`settled ${settled} you were deciding on`)
   if (remembered.reinforced.length > 0) parts.push(`confirmed ${remembered.reinforced.length}`)
   if (remembered.superseded.length > 0) parts.push(`superseded ${remembered.superseded.length}`)
   const disputes = remembered.conflicts_raised.length

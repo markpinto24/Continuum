@@ -692,6 +692,10 @@ _HEALTH = frozenset(
 )
 
 
+# Read by the agreement guard too: health is never taken from an answer.
+HEALTH_WORDS = _HEALTH
+
+
 def is_health_statement(fact: ExtractedFact, existing: Memory) -> bool:
     """Is this pair about someone's health? The category on either side, or — in a
     Personal graph — the words. Workspace text uses "condition", "therapy" or
@@ -751,7 +755,18 @@ def swapped_names(new: str, old: str) -> bool:
         return {norm for norm, original in own.items() if norm not in other
                 and _is_name(norm, original)}
 
-    return bool(names(new_tokens, old_tokens)) and bool(names(old_tokens, new_tokens))
+    added, dropped = names(new_tokens, old_tokens), names(old_tokens, new_tokens)
+    # One spelling of one name is not a swap: "Postgres"/"PostgreSQL" and
+    # "Mongo"/"MongoDB" raised a dispute between two identical decisions, live.
+    variants = {(a, b) for a in added for b in dropped if _same_name(a, b)}
+    added -= {a for a, _ in variants}
+    dropped -= {b for _, b in variants}
+    return bool(added) and bool(dropped)
+
+
+def _same_name(a: str, b: str) -> bool:
+    short, long = sorted((a, b), key=len)
+    return len(short) >= 4 and long.startswith(short)
 
 
 def _is_name(norm: str, original: str) -> bool:

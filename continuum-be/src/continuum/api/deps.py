@@ -26,6 +26,7 @@ from continuum.services.feedback import FeedbackService
 from continuum.services.ingest import IngestService
 from continuum.services.limits import SlidingWindow
 from continuum.services.memory_store import MemoryStore
+from continuum.services.pending import PendingService
 from continuum.services.resolution import ResolutionService
 from continuum.services.retrieval import RetrievalService
 from continuum.services.sharing import SharingService
@@ -98,6 +99,10 @@ def get_correction_service(request: Request) -> CorrectionService:
     return request.app.state.corrections
 
 
+def get_pending_service(request: Request) -> PendingService:
+    return request.app.state.pending
+
+
 def get_summary_service(request: Request) -> SummaryService:
     return request.app.state.summaries
 
@@ -120,6 +125,7 @@ VoiceDep = Annotated[SynthesisService, Depends(get_synthesis_service)]
 SharingDep = Annotated[SharingService, Depends(get_sharing_service)]
 CorrectionDep = Annotated[CorrectionService, Depends(get_correction_service)]
 SummaryDep = Annotated[SummaryService, Depends(get_summary_service)]
+PendingDep = Annotated[PendingService, Depends(get_pending_service)]
 
 
 # --- Authentication ------------------------------------------------------------

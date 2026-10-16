@@ -634,6 +634,68 @@ prompt change would need. Of the two cases labelled against the rules,
 `blood-orange-preference` shows the word rule's cost ("blood" is a health
 word); `second-flatmate` passed, stored free by the subject filter.
 
+## 12. Replies to suggestions: "sounds good" was a lost decision
+
+Found in use (2026-10-12): asked for a workout split, the user replied "it
+sounds good for me for now" and nothing was stored — only the user's turn is
+extracted, and it holds no fact. `extraction-agreement.yaml`: 23 cases (17 + 6
+held-out), both modes, each the assistant's answer plus the reply, labelled
+before the first run. Three runs per configuration.
+
+| | precision | recall | pending flag | forbidden (12) |
+| --- | --- | --- | --- | --- |
+| today (the reply alone) | 25.0% ×3 | 5.6% ×3 | — | 0% |
+| v1: reply rules in both system prompts | 71–79% | 56–61% | 100% | 8.3% (creatine) |
+| v2: rules in the reply's own framing | 69–75% | 61–67% | 82–83% | 8.3% (a "no") |
+| **v3: + hedges and refusals read from the words** | **73.3% ×3** | **61.1% ×3** | **100%** | **0%** |
+| v4 (25 cases): + a question makes no choice | 73–80% | 58–63% | 100% | 0% (of 14) |
+
+What each version taught:
+
+- **v1 cost the Work extractor.** Two extra rules in its system prompt took
+  its own corpus from F1 0.74 ×3 to 0.56–0.64 — rewording facts the matcher
+  then missed, and inventing a "should discuss". It also dropped the user's own
+  words beside a suggestion ("a change of subject takes nothing" was read as
+  "record nothing"), and the unprompted-maybe rule it paid for caught none of
+  its cases. So the rules moved into the reply's own framing: every other input
+  is extracted from byte-identical text, and both corpora cannot move.
+- **The category guard alone leaked health.** "Added 5 grams of creatine daily"
+  was filed as a *decision*, three runs in three. An adopted fact naming a dose,
+  a supplement or a health word is now dropped, whatever its category.
+- **The model's flags were not the signal; the words were.** Without the flag
+  in the system prompt's JSON shape, "I'll think about it" came back as a plain
+  decision three in three; "no thanks" came back as "the user will not wake up
+  at 5 am". A hedged reply now makes what it adopts pending; a reply opening
+  with a no adopts nothing. Own words are kept either way.
+- **Whose words, read from the words.** A fact is the user's own when at least
+  half its content words are in the reply; anything else was adopted, and only
+  a choice survives. Every echo case passed: no age, no allergy, no "Sara owns
+  billing" came back from an answer, and an adopted fact never reinforces.
+
+**The live check found what the corpus could not** (throwaway instance, real
+Ollama, both modes, the conversation from the original report):
+
+- "should I add a Sunday long run?", replying to an answer, was stored as "the
+  user considered adding one" — the reply framing had overridden the
+  extractor's own *a question is not a fact*. Confirming the later maybe then
+  raised a dispute with it. A question now makes no choice, and is read with no
+  answer as context.
+- The Work extractor stored "for the Atlas event store, should we use Postgres
+  or MongoDB? we need transactions" as "chose Postgres", 3 runs in 3 (two cases
+  added, labelled first: forbidden 7.1% → 0%). The guard was at first skipped on
+  a session's first turn — no answer before it — so every lone turn now takes
+  the same path.
+- `swapped_names` read "Postgres"/"PostgreSQL" as a swap. One name that is a
+  prefix of the other (4+ letters) is now one name.
+
+Re-run live after the fixes: every turn as designed in both modes.
+
+Still open: an unprompted plan ("maybe I'll start running on Sundays", "we
+might move standups to 10am") records nothing, 0 in 3 — the prompts' musing rule
+wins, and the rule that would change it cost Work more than it caught. The
+adopted choice is filed as decision or routine run to run (they decay at 180 vs
+45 days). "Sounds good, and I train at Gold's Gym" keeps the gym, loses the yes.
+
 ---
 
 ## What this changes

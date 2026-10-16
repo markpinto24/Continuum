@@ -55,6 +55,7 @@ from continuum.evaluation.preflight import render_preflight, run_preflight
 from continuum.evaluation.runner import EVAL_USER, ResolutionRunner
 from continuum.evaluation.types import CaseOutcome
 from continuum.models.memory import Mode, graph_owner
+from continuum.models.schemas import IngestRequest, Message
 from continuum.services.extraction import FactExtractor, Mem0Extractor
 from continuum.services.memory_store import MemoryStore
 
@@ -140,6 +141,48 @@ def present(outcomes: list[CaseOutcome], *, show_cases: bool) -> None:
 
     _rule("BY TAG")
     print(report.render_by_tag(metrics.by_tag(outcomes)))
+
+
+async def run_agreement(before: bool) -> None:
+    """Replies to what the assistant suggested (requirements.md §15).
+
+    `before` is what the system does today: only the user's turn is read, as
+    the chat write-back sends it. After, the reply goes through
+    `agreement.extract_turn` — the answer as context, then the guards — which is
+    exactly what ingest runs, so the corpus measures what would be stored.
+    """
+    settings = get_settings()
+    cases = corpus.load_extraction_cases(corpus.AGREEMENT_EXTRACTION_CORPUS)
+    llm = LLMClient(settings)
+    try:
+        extractor = FactExtractor(llm)
+        results = []
+        for case in cases:
+            mode = case.mode or Mode.PERSONAL
+            if before:
+                turn = IngestRequest(
+                    user_id="eval", messages=[Message(role="user", content=case.text)]
+                )
+                text = turn.as_transcript(label_lone_turn=mode is Mode.WORKSPACE)
+                facts = await extractor.extract(text, mode=mode)
+            else:
+                from continuum.services.agreement import extract_turn
+
+                facts = await extract_turn(
+                    extractor, reply=case.text, proposal=case.context, mode=mode
+                )
+            results.append((case, facts))
+        _rule(f"EXTRACTION — agreement corpus, {'before (reply only)' if before else 'after'}")
+        print(report.render_extraction(score_extraction(results), label="continuum"))
+        print("\n  per case (read the numbers — token matching cannot):")
+        for case, facts in results:
+            shown = "; ".join(
+                f"{'~' if f.tentative else ''}{f.category.value}/{f.subject}: {f.content}"
+                for f in facts
+            ) or "(nothing)"
+            print(f"    {case.id:24} {shown}")
+    finally:
+        await llm.aclose()
 
 
 async def run_extraction(
@@ -263,6 +306,14 @@ async def main() -> None:
     )
     parser.add_argument("--k", type=int, default=None, help="Top k for --retrieval.")
     parser.add_argument(
+        "--agreement", action="store_true",
+        help="The agreement corpus: replies to what the assistant suggested.",
+    )
+    parser.add_argument(
+        "--before", action="store_true",
+        help="With --agreement: today's behaviour (the reply alone), the baseline.",
+    )
+    parser.add_argument(
         "--personal", action="store_true",
         help="The Personal-mode corpus (with --extraction, or for resolution).",
     )
@@ -298,6 +349,10 @@ async def main() -> None:
             print(render_calibration(await calibrate(llm, cases)))
         finally:
             await llm.aclose()
+        return
+
+    if args.agreement:
+        await run_agreement(args.before)
         return
 
     if args.extraction:

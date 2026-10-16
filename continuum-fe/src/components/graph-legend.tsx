@@ -6,7 +6,7 @@ import { EDGE_COLOR, STATUS_BLURB, STATUS_COLOR, STATUS_LABEL, SUMMARY_COLOR } f
 import type { MemoryStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-const ORDER: MemoryStatus[] = ['active', 'contradicted', 'superseded', 'archived']
+const ORDER: MemoryStatus[] = ['active', 'contradicted', 'pending', 'superseded', 'archived']
 const OPEN_KEY = 'continuum.legend_open'
 
 function readOpen(): boolean {

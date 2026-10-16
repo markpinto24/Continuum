@@ -36,6 +36,7 @@ class DecayReport(BaseModel):
     decayed: int = 0
     archived: int = 0
     unchanged: int = 0
+    pending_faded: int = 0
 
 
 class DecayService:
@@ -80,6 +81,25 @@ class DecayService:
 
             if not dry_run:
                 await self.memories.save(memory)
+
+        # Pending items do not lose confidence — they were never beliefs. They
+        # fade once they have been asked about enough, or have waited long enough.
+        pending = await self.memories.list_all(
+            user_id=user_id,
+            limit=self.settings.decay_batch_limit,
+            statuses=[MemoryStatus.PENDING],
+        )
+        for memory in pending:
+            if memory.pending_expired(
+                now=now,
+                max_reminders=self.settings.pending_max_reminders,
+                max_age_days=self.settings.pending_max_age_days,
+            ):
+                memory.archive()
+                report.pending_faded += 1
+                log.info("decay.pending_faded", memory_id=memory.id, reminders=memory.reminders)
+                if not dry_run:
+                    await self.memories.save(memory)
 
         log.info(
             "decay.sweep_completed",

@@ -35,6 +35,8 @@ import {
   isEndCommand,
   isInterruptCommand,
   readAutopilotPref,
+  spokenAnswer,
+  spokenQuestion,
   writeAutopilotPref,
 } from '@/lib/autopilot'
 import { disputeKey } from '@/lib/escalation'
@@ -49,10 +51,13 @@ import {
   type Me,
   type Memory,
   type Mode,
+  type Question,
   type VoiceSettings,
 } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { describeWriteBack } from '@/lib/write-back'
+import { PendingQuestionCard, RememberedList } from '@/components/turn-outcome'
+import { answerPending } from '@/lib/pending'
 
 interface Turn {
   role: 'user' | 'assistant'
@@ -70,6 +75,8 @@ interface SendOptions {
   via?: 'voice'
   /** The whole answer so far, on every chunk — autopilot speaks it as it grows. */
   onText?: (answer: string) => void
+  /** The finished turn — autopilot asks its questions aloud. */
+  onDone?: (done: ChatDone) => void
 }
 
 /**
@@ -231,6 +238,7 @@ export function ChatPanel({
             },
             onDone: (done) => {
               patch({ done })
+              options.onDone?.(done)
               // The turn was fed back through ingest, so the graph may have grown
               // a node, an edge, or a fresh dispute. Pull it again.
               if (done.remembered && done.remembered.extracted > 0) onGraphChanged()
@@ -273,6 +281,21 @@ export function ChatPanel({
   // is never mistaken for one spoken by the user.
   const sayingRef = useRef('')
   const handlers = useRef({ thankAndEnd: () => {}, interrupt: () => {} })
+  // A pending item Lumen just asked about aloud: the next thing said is read as
+  // its answer — by the words, and only right after the question.
+  const askingRef = useRef<Question | null>(null)
+
+  const say = useCallback(
+    async (text: string) => {
+      sayingRef.current = text
+      setPilotAnswer(text)
+      const speech = reader.stream(`pilot-say-${Date.now()}`)
+      speech.push(text)
+      speech.end()
+      await speech.done()
+    },
+    [reader],
+  )
 
   const speakAnswerTo = useCallback(
     async (said: string) => {
@@ -280,6 +303,7 @@ export function ChatPanel({
       sayingRef.current = ''
       setPilotAnswer(null)
       const speech = reader.stream(`pilot-${Date.now()}`)
+      let questions: Question[] = []
       await sendText(said, {
         via: 'voice',
         onText: (answer) => {
@@ -288,12 +312,21 @@ export function ChatPanel({
           if (finishedSentences(answer).length > 0) setPilotStage('speaking')
           speech.push(answer)
         },
+        onDone: (done) => {
+          questions = done.questions ?? []
+        },
       })
       setPilotStage('speaking')
       speech.end()
       await speech.done()
+      // One question at a time, after the answer: a list read aloud is a nag.
+      const [first] = questions
+      if (first) {
+        askingRef.current = first
+        await say(spokenQuestion(first.text))
+      }
     },
-    [reader, sendText],
+    [reader, say, sendText],
   )
 
   const handleUtterance = useCallback(
@@ -303,14 +336,26 @@ export function ChatPanel({
         const said = (await api.transcribe(clip)).text.trim()
         if (!said) return
         setPilotCaption(said)
+        const asked = askingRef.current
+        askingRef.current = null
         if (isEndCommand(said)) return handlers.current.thankAndEnd()
         if (isInterruptCommand(said)) return // nothing is playing to stop
+        const choice = asked ? spokenAnswer(said) : null
+        if (asked && choice) {
+          setPilotStage('thinking')
+          const outcome = await answerPending(asked.memory_id, choice)
+          settle(`pending:${asked.memory_id}`, outcome)
+          setPilotStage('speaking')
+          await say(outcome)
+          return
+        }
+        // Not an answer: the item stays undecided, its buttons still in the chat.
         await speakAnswerTo(said)
       } finally {
         setPilotStage(null)
       }
     },
-    [speakAnswerTo],
+    [say, settle, speakAnswerTo],
   )
 
   /** Heard while Lumen was busy: act on its commands, ignore everything else. */
@@ -439,6 +484,7 @@ export function ChatPanel({
                   question={previousQuestion(turns, index)}
                   greetingText={greetingText}
                   onSelectMemory={onSelectMemory}
+                  onGraphChanged={onGraphChanged}
                   settled={settled}
                   onSettled={settle}
                   reader={reader}
@@ -629,6 +675,7 @@ function TurnView({
   question,
   greetingText,
   onSelectMemory,
+  onGraphChanged,
   settled,
   onSettled,
   reader,
@@ -639,6 +686,7 @@ function TurnView({
   question: string
   greetingText: string
   onSelectMemory: (id: string) => void
+  onGraphChanged: () => void
   settled: Record<string, string>
   onSettled: (key: string, outcome: string) => void
   reader: Reader
@@ -749,6 +797,24 @@ function TurnView({
         </p>
       )}
 
+      {turn.done?.remembered && (
+        <RememberedList
+          remembered={turn.done.remembered}
+          onChanged={onGraphChanged}
+          onSelect={onSelectMemory}
+        />
+      )}
+      {(turn.done?.questions ?? []).map((q) => (
+        <PendingQuestionCard
+          key={q.memory_id}
+          question={q}
+          outcome={settled[`pending:${q.memory_id}`]}
+          onAnswered={(outcome) => {
+            onSettled(`pending:${q.memory_id}`, outcome)
+            onGraphChanged()
+          }}
+        />
+      ))}
       <div className="flex items-center gap-2">
         {turn.done && describeWriteBack(turn.done.remembered) && (
           <p className="flex-1 text-[11px] text-muted/70">{describeWriteBack(turn.done.remembered)}</p>

@@ -88,6 +88,10 @@ class IngestRequest(_IngestFields):
     # memory it creates there, so teammates can see who said it.
     author: str | None = None
     author_email: str | None = None
+    # The assistant's answer this turn replies to — set by the chat write-back
+    # only, never by a client: context for what the user adopted, never a
+    # source of facts about them (services/agreement.py).
+    proposal: str | None = None
 
 
 class ResolutionRecord(BaseModel):
@@ -126,6 +130,14 @@ class IngestResponse(BaseModel):
     team_conflicts: list[str] = Field(
         default_factory=list,
         description="Team memories a new private one disagrees with (flagged on yours).",
+    )
+    pending: list[str] = Field(
+        default_factory=list,
+        description="IDs stored as pending: said, not decided. Asked about later.",
+    )
+    confirmed: list[str] = Field(
+        default_factory=list,
+        description="Pending IDs this input confirmed — now beliefs, judged like any other.",
     )
     resolutions: list[ResolutionRecord] = Field(default_factory=list)
 
@@ -269,6 +281,10 @@ class ChatContext(BaseModel):
     query: str
     memories: list[RetrievedMemory] = Field(default_factory=list)
     disagreements: list[Disagreement] = Field(default_factory=list)
+    pending: list[Memory] = Field(
+        default_factory=list,
+        description="Said, not decided, and relevant here: to ask about, never to assert.",
+    )
     as_of: datetime | None = Field(
         default=None, description="Set when these are the beliefs held at a past moment."
     )
@@ -325,6 +341,22 @@ class ChatContextRequest(ClientBody):
     as_of: datetime | None = None
 
 
+class QuestionOption(BaseModel):
+    label: str
+    # A fixed server action, never free text: the model words the question,
+    # never the outcome (commitment 2).
+    action: Literal["confirm", "unsure", "decline"]
+
+
+class Question(BaseModel):
+    """Something the person is asked to settle, with options — like Claude Code's."""
+
+    kind: Literal["pending"] = "pending"
+    memory_id: str
+    text: str
+    options: list[QuestionOption]
+
+
 class ChatDone(BaseModel):
     """Terminal event of a chat stream."""
 
@@ -337,6 +369,10 @@ class ChatDone(BaseModel):
     disagreements: int = 0
     remembered: IngestResponse | None = Field(
         default=None, description="What this turn contributed back to the graph."
+    )
+    questions: list[Question] = Field(
+        default_factory=list,
+        description="Pending items this answer raised, to settle with a button.",
     )
 
 

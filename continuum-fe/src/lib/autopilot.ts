@@ -69,3 +69,28 @@ export function writeAutopilotPref(on: boolean): void {
     // Storage blocked: Lumen simply starts off next time.
   }
 }
+
+const UNSURE = /(?:^| )(?:not sure|unsure|maybe|don t know|dont know|still deciding|still thinking|i ll think|let me think|not yet)(?: |$)/
+const NO = /^(?:no|nope|nah|no thanks|no thank you|not really|i m not)(?: |$)/
+const YES = /^(?:yes|yeah|yep|yup|sure|definitely|absolutely|of course|i am|i m going with it|going with it|correct)(?: |$)/
+
+/**
+ * The spoken answer to the question Lumen just asked about a pending item —
+ * read from the words, right after the question, like its commands. Never a
+ * model reading intent (commitment 2). Unsure wins over no, and no over yes:
+ * "no, I'm not sure" is not a no, and when in doubt the item stays undecided.
+ * Anything else is not an answer: it is the next thing the person wants to say.
+ */
+export function spokenAnswer(text: string): 'confirm' | 'unsure' | 'decline' | null {
+  const said = words(text).replace(new RegExp(`(?:^| )${NAME}(?: |$)`, 'g'), ' ').trim()
+  if (!said) return null
+  if (UNSURE.test(said)) return 'unsure'
+  if (NO.test(said)) return 'decline'
+  if (YES.test(said)) return 'confirm'
+  return null
+}
+
+/** How Lumen puts a pending item to the person. */
+export function spokenQuestion(text: string): string {
+  return `${text}. Are you going with it? You can say yes, not sure, or no.`
+}

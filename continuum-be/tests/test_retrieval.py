@@ -12,7 +12,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from continuum.config import Settings
-from continuum.models.memory import Memory, MemoryCategory, MemoryStatus
+from continuum.models.memory import (
+    RETRIEVABLE_STATUSES,
+    Memory,
+    MemoryCategory,
+    MemoryStatus,
+)
 from continuum.services.retrieval import RetrievalService, rank_score
 
 
@@ -60,10 +65,14 @@ class StubStore:
         for m in extra or []:
             self._by_id[m.id] = m
 
-    async def search(self, *, user_id, query, limit=None, score_threshold=None, **kwargs):  # noqa: ANN001, ARG002
-        self.requested_limit = limit
+    async def search(self, *, user_id, query, limit=None, score_threshold=None, statuses=None, **kwargs):  # noqa: ANN001, ARG002, E501
+        # The first search is the memory pool; a later one looks for pending items.
+        if self.requested_limit is None:
+            self.requested_limit = limit
         owners = user_id if isinstance(user_id, list) else [user_id]
-        return [(m, s) for m, s in self.hits if m.user_id in owners]
+        # Like MemoryStore: no statuses means the retrievable ones.
+        wanted = set(statuses or RETRIEVABLE_STATUSES)
+        return [(m, s) for m, s in self.hits if m.user_id in owners and m.status in wanted]
 
     async def keyword_memories(self, *, user_id, query: str, limit: int = 50, statuses=None):  # noqa: ANN001, ANN201, ARG002
         """No keyword hits unless a test scripts them."""

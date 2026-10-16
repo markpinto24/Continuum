@@ -27,7 +27,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from continuum.models.memory import MemoryCategory
+from continuum.models.memory import MemoryCategory, Mode
 from continuum.services.resolution import Verdict
 
 
@@ -136,12 +136,23 @@ class ExpectedFact(BaseModel):
     content: str
     category: MemoryCategory
     subject: str | None = None
+    tentative: bool = Field(
+        default=False, description="Said, not decided: should be stored as pending."
+    )
 
 
 class ExtractionCase(BaseModel):
     id: str
     why: str
     text: str
+    context: str | None = Field(
+        default=None,
+        description="The assistant's answer this text replies to, when it is a reply. "
+        "Context only: what it says about the user is never the user's word.",
+    )
+    mode: Mode | None = Field(
+        default=None, description="Which mode's prompt reads it; None = the corpus's own."
+    )
     expect: list[ExpectedFact] = Field(default_factory=list)
     forbid: list[str] = Field(
         default_factory=list,

@@ -30,6 +30,7 @@ const disputed: ChatContext = {
   query: 'db?',
   memories: [],
   disagreements: [{ subject: 'atlas', memories: [postgres, mongo] }],
+  pending: [],
   as_of: null,
 }
 

@@ -162,8 +162,24 @@ class RetrievalService:
             top_score=selected[0].score if selected else None,
         )
 
+        # Pending items from the person's own graph only — a maybe is never team
+        # knowledge — and never in the past: what was undecided then is not a
+        # question to put now.
+        pending: list[Memory] = []
+        if as_of is None and self.settings.chat_pending_limit > 0:
+            pending = [
+                m for m, _ in await self.memories.search(
+                    user_id=[user_id],
+                    query=query,
+                    limit=self.settings.chat_pending_limit,
+                    score_threshold=self.settings.chat_min_similarity,
+                    statuses=[MemoryStatus.PENDING],
+                )
+            ]
+
         return ChatContext(
-            query=query, memories=selected, disagreements=disagreements, as_of=as_of
+            query=query, memories=selected, disagreements=disagreements, pending=pending,
+            as_of=as_of,
         )
 
     # --- Disagreement assembly ---------------------------------------------

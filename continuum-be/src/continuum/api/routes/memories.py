@@ -9,6 +9,7 @@ from continuum.api.deps import (
     CorrectionDep,
     CurrentUser,
     MemoryStoreDep,
+    PendingDep,
     SettingsDep,
     SharingDep,
     SummaryDep,
@@ -24,6 +25,7 @@ from continuum.models.schemas import (
     GraphEdge,
     GraphNode,
     GraphResponse,
+    IngestResponse,
     MemoryExport,
     MemoryListResponse,
     MemorySearchRequest,
@@ -35,6 +37,7 @@ from continuum.models.schemas import (
     SummaryRefreshResponse,
 )
 from continuum.services.corrections import CorrectionError
+from continuum.services.pending import PendingError
 from continuum.services.sharing import SharingError
 
 router = APIRouter(prefix="/memories", tags=["memories"])
@@ -178,6 +181,9 @@ async def memory_graph(
         MemoryStatus.ACTIVE,
         MemoryStatus.CONTRADICTED,
         MemoryStatus.SUPERSEDED,
+        # Shown, drawn apart (dashed): said, not decided. Declined ones appear
+        # only with include_archived, like everything else no longer in play.
+        MemoryStatus.PENDING,
     ]
     items = await memories.list_all(
         user_id=principal.owners(shared=settings.shared_space_enabled),
@@ -262,6 +268,56 @@ async def reactivate_memory(
     memory.reactivate()
     memory.reinforce()
     return await memories.save(memory)
+
+
+async def _own_pending(memories: MemoryStoreDep, memory_id: str, principal: Principal) -> Memory:
+    """A pending item can be answered only by the person who said it."""
+    memory = await _owned(memories, memory_id, principal)
+    if memory.user_id != principal.owner:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Memory not found")
+    return memory
+
+
+@router.post(
+    "/{memory_id}/confirm",
+    response_model=IngestResponse,
+    dependencies=[Depends(limit_llm_requests)],
+)
+async def confirm_pending(
+    memory_id: str, principal: CurrentUser, memories: MemoryStoreDep, pending: PendingDep
+) -> IngestResponse:
+    """Yes: the pending item becomes a belief, judged against the graph now —
+    so confirming a change can supersede the old belief, or raise a dispute."""
+    memory = await _own_pending(memories, memory_id, principal)
+    try:
+        return await pending.confirm(memory)
+    except PendingError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from None
+
+
+@router.post("/{memory_id}/decline", response_model=Memory)
+async def decline_pending(
+    memory_id: str, principal: CurrentUser, memories: MemoryStoreDep, pending: PendingDep
+) -> Memory:
+    """No: out of retrieval and never raised again. The record stays for audit;
+    Forget is still there to erase the words."""
+    memory = await _own_pending(memories, memory_id, principal)
+    try:
+        return await pending.decline(memory)
+    except PendingError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from None
+
+
+@router.post("/{memory_id}/unsure", response_model=Memory)
+async def keep_pending(
+    memory_id: str, principal: CurrentUser, memories: MemoryStoreDep, pending: PendingDep
+) -> Memory:
+    """Still unsure: stays pending. Counts as one reminder, so it fades in the end."""
+    memory = await _own_pending(memories, memory_id, principal)
+    try:
+        return await pending.keep(memory)
+    except PendingError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from None
 
 
 @router.post("/{memory_id}/reject", response_model=RejectResponse)

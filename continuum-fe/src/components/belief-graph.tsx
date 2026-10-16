@@ -455,6 +455,25 @@ function nodeDecoration(
       ),
     )
   }
+  if (node.status === 'pending') {
+    // A dashed ring: said, not decided. Drawn apart so a "maybe" never looks
+    // like a belief — the same reason a dispute has no arrowhead.
+    const dashes = 14
+    const arc = (Math.PI * 2) / dashes / 2
+    const material = new MeshBasicMaterial({
+      color: STATUS_COLOR.pending,
+      transparent: true,
+      opacity: muted ? 0.1 : 0.8,
+    })
+    for (let i = 0; i < dashes; i += 1) {
+      const dash = new Mesh(
+        new TorusGeometry(radius * 1.6, Math.max(0.2, radius * 0.05), 6, 6, arc),
+        material,
+      )
+      dash.rotation.z = (i * Math.PI * 2) / dashes
+      group.add(dash)
+    }
+  }
   if (node.kind === 'summary') {
     group.add(
       new Mesh(

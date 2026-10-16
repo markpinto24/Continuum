@@ -465,3 +465,78 @@ async def test_personal_mode_gets_the_personal_assistant_and_work_keeps_its_own(
     # The dispute rules are identical in both.
     for llm in (personal_llm, work_llm):
         assert "Do NOT pick the newer one" in llm.system_prompt
+
+
+# --- Questions with options (requirements.md Part 2, Phase J) -------------------------------
+
+
+class SavingIngest(StubIngest):
+    """A StubIngest whose memory store records what was saved."""
+
+    def __init__(self, response: IngestResponse | None = None) -> None:
+        super().__init__(response)
+        self.saved: list[Memory] = []
+        outer = self
+
+        class Store:
+            async def save(self, memory: Memory) -> Memory:
+                outer.saved.append(memory)
+                return memory
+
+        self.memories = Store()
+
+
+def pending_item(content: str = "The user is considering a Sunday long run") -> Memory:
+    return Memory(user_id="mark:personal", content=content, status=MemoryStatus.PENDING)
+
+
+async def test_a_pending_item_that_comes_up_is_asked_about_with_fixed_options(settings):
+    maybe = pending_item()
+    ingest = SavingIngest()
+    service = build(ChatContext(query="q", pending=[maybe]), StubLLM(["ok"]), settings, ingest)
+
+    done = (await collect(service, request()))[-1].data
+    [question] = done["questions"]
+
+    assert question["memory_id"] == maybe.id and maybe.content in question["text"]
+    assert [o["action"] for o in question["options"]] == ["confirm", "unsure", "decline"]
+    # Asked now, so counted now — that is what lets an unanswered item fade.
+    assert ingest.saved == [maybe] and maybe.reminders == 1
+
+
+async def test_a_turn_that_settles_the_item_is_not_asked_about_it(settings):
+    maybe = pending_item()
+    ingest = SavingIngest(IngestResponse(source_id="s", extracted=1, confirmed=[maybe.id]))
+    service = build(ChatContext(query="q", pending=[maybe]), StubLLM(["ok"]), settings, ingest)
+
+    done = (await collect(service, request()))[-1].data
+    assert done["questions"] == [] and maybe.reminders == 0
+
+
+async def test_the_prompt_asks_for_the_assistants_own_view_and_buttons(settings):
+    llm = StubLLM(["ok"])
+    service = build(ChatContext(query="q", pending=[pending_item()]), llm, settings,
+                    SavingIngest())
+    await collect(service, request())
+    assert "give your own view in one sentence" in llm.system_prompt
+    assert "do not ask them to type yes or no" in llm.system_prompt
+
+
+async def test_the_write_back_hands_ingest_the_answer_being_replied_to(settings):
+    ingest = StubIngest()
+    service = build(ChatContext(query="q"), StubLLM(["ok"]), settings, ingest)
+    await collect(service, ChatRequest(user_id="mark", messages=[
+        Message(role="user", content="best split?"),
+        Message(role="assistant", content="Try push/pull/legs, six days a week."),
+        Message(role="user", content="sounds good"),
+    ]))
+    [sent] = ingest.requests
+    assert sent.proposal == "Try push/pull/legs, six days a week."
+    assert [m.content for m in sent.messages] == ["sounds good"]  # only the user's words
+
+
+async def test_a_reminder_that_cannot_be_saved_does_not_lose_the_answer(settings):
+    service = build(ChatContext(query="q", pending=[pending_item()]), StubLLM(["ok"]), settings,
+                    StubIngest())  # no store at all
+    events = await collect(service, request())
+    assert events[-1].event == "done" and len(events[-1].data["questions"]) == 1

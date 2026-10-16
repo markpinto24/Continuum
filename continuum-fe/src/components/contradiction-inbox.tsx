@@ -5,11 +5,14 @@ import { EmptyPanel } from '@/components/memory-detail'
 import { Badge } from '@/components/ui/badge'
 import { type EvidenceScope, LearningPanel } from '@/components/learning-panel'
 import { Button } from '@/components/ui/button'
+import { PendingQuestionCard } from '@/components/turn-outcome'
+import { questionFor } from '@/lib/pending'
 import { api } from '@/lib/api'
 import { describeEscalation, findEscalation } from '@/lib/escalation'
 import { CATEGORY_LABEL } from '@/lib/memory-style'
 import { SHARED_SPACE, type ConflictPair, type Memory, type TeamDecision } from '@/lib/types'
 import { type Resource, useResource } from '@/hooks/use-resource'
+import { cn } from '@/lib/utils'
 import type { ConflictListResponse, Mode } from '@/lib/types'
 
 /**
@@ -42,6 +45,11 @@ export function ContradictionInbox({
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [scope, setScope] = useState<EvidenceScope>('mine')
+  // Disputes are two beliefs at odds; undecided items are things you said
+  // "maybe" to. Different questions, so different lists (requirements.md §13).
+  const [view, setView] = useState<'disputes' | 'undecided'>('disputes')
+  const undecided = useResource(() => api.pendingMemories(), [resource.data])
+  const [answered, setAnswered] = useState<Record<string, string>>({})
   // Refetched whenever the conflict list reloads — i.e. after any decision,
   // whether made here or in the chat.
   const evidenceScope = mode === 'workspace' ? scope : 'mine'
@@ -90,6 +98,63 @@ export function ContradictionInbox({
     }
   }
 
+  const disputeCount = resource.data?.total ?? 0
+  const undecidedItems = undecided.data?.memories ?? []
+  const header = (
+    <div role="tablist" aria-label="Inbox" className="mb-3 flex gap-1 rounded-xl bg-surface p-0.5 ring-1 ring-border/60">
+      {(
+        [
+          ['disputes', 'Disputes', disputeCount],
+          ['undecided', 'Undecided', undecidedItems.length],
+        ] as const
+      ).map(([value, label, count]) => (
+        <button
+          key={value}
+          type="button"
+          role="tab"
+          aria-selected={view === value}
+          onClick={() => setView(value)}
+          className={cn(
+            'flex h-7 flex-1 items-center justify-center gap-1.5 rounded-[0.6rem] text-xs transition-colors',
+            view === value ? 'bg-surface-raised text-foreground' : 'text-muted hover:text-foreground',
+          )}
+        >
+          {label}
+          {count > 0 && <span className="tabular-nums text-muted">{count}</span>}
+        </button>
+      ))}
+    </div>
+  )
+
+  if (view === 'undecided') {
+    return (
+      <div className="scrollbar-slim h-full overflow-y-auto px-4 py-4">
+        {header}
+        {undecidedItems.length === 0 ? (
+          <EmptyPanel
+            title="Nothing undecided"
+            body="When you say “maybe” or “I'll think about it”, it is kept here — never treated as true — and you are asked when it comes up. Asked three times with no answer, it fades."
+          />
+        ) : (
+          <ul className="space-y-2.5">
+            {undecidedItems.map((memory) => (
+              <li key={memory.id}>
+                <PendingQuestionCard
+                  question={questionFor(memory)}
+                  outcome={answered[memory.id]}
+                  onAnswered={(outcome) => {
+                    setAnswered((was) => ({ ...was, [memory.id]: outcome }))
+                    onResolved()
+                  }}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )
+  }
+
   if (resource.loading && !resource.data) {
     return <Centered>Loading the inbox…</Centered>
   }
@@ -101,6 +166,7 @@ export function ContradictionInbox({
   if (pairs.length === 0) {
     return (
       <div className="scrollbar-slim h-full overflow-y-auto px-4 py-4">
+        {header}
         <EmptyPanel
           title="Nothing to decide"
           body="No unresolved contradictions. When the resolver is not confident enough to retire a belief on its own, the pair lands here instead of being guessed at."
@@ -112,6 +178,7 @@ export function ContradictionInbox({
 
   return (
     <div className="scrollbar-slim h-full overflow-y-auto px-4 py-4">
+      {header}
       <p className="mb-3 text-xs leading-relaxed text-muted">
         {pairs.length} unresolved {pairs.length === 1 ? 'disagreement' : 'disagreements'}. The
         system stopped rather than pick a side.
