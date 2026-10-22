@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowUp,
   AudioLines,
   Check,
@@ -70,6 +71,9 @@ interface Turn {
   /** The session's opening line: written locally, never sent to the model. */
   kind?: 'greeting'
 }
+
+/** Within this distance of the bottom, the chat keeps following new text. */
+const FOLLOW_SLACK_PX = 48
 
 interface SendOptions {
   via?: 'voice'
@@ -190,9 +194,28 @@ export function ChatPanel({
     return () => window.removeEventListener('keydown', onKey)
   }, [dictationState, cancelDictation])
 
+  // Follow the conversation only while the reader is at the bottom. Scrolling up
+  // during an answer used to be undone on every streamed token, so earlier
+  // answers could not be read until it finished.
+  const followRef = useRef(true)
+  const [atBottom, setAtBottom] = useState(true)
+  const onChatScroll = useCallback(() => {
+    const view = scrollRef.current
+    if (!view) return
+    const near = view.scrollHeight - view.scrollTop - view.clientHeight < FOLLOW_SLACK_PX
+    followRef.current = near
+    setAtBottom(near)
+  }, [])
+  const jumpToLatest = useCallback(() => {
+    const view = scrollRef.current
+    followRef.current = true
+    setAtBottom(true)
+    if (view) view.scrollTo({ top: view.scrollHeight, behavior: 'smooth' })
+  }, [])
+
   useEffect(() => {
     const view = scrollRef.current
-    if (view) view.scrollTop = view.scrollHeight
+    if (view && followRef.current) view.scrollTop = view.scrollHeight
   }, [turns])
 
   useEffect(() => () => abortRef.current?.abort(), [])
@@ -201,6 +224,9 @@ export function ChatPanel({
   const sendText = useCallback(
     async (question: string, options: SendOptions = {}): Promise<void> => {
       if (!question || abortRef.current) return
+      // Asking something means wanting to see the answer: follow it again.
+      followRef.current = true
+      setAtBottom(true)
 
       const history: ChatMessage[] = [
         ...turnsRef.current
@@ -466,7 +492,11 @@ export function ChatPanel({
           onClose={endAutopilot}
         />
       )}
-      <div ref={scrollRef} className="scrollbar-slim min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-2">
+      <div
+        ref={scrollRef}
+        onScroll={onChatScroll}
+        className="scrollbar-slim min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-2"
+      >
         {turns.length === 0 ? (
           <div className="mt-6 text-center">
             <p className="text-sm font-medium text-foreground">Ask about their work</p>
@@ -494,6 +524,19 @@ export function ChatPanel({
               </li>
             ))}
           </ul>
+        )}
+        {!atBottom && (
+          // Sticky inside the scroller, so it stays at the bottom of the view.
+          <div className="pointer-events-none sticky bottom-1 flex justify-center pt-2">
+            <button
+              type="button"
+              onClick={jumpToLatest}
+              className="glass pointer-events-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-foreground/90 shadow-lg shadow-black/30 animate-fade-up hover:text-foreground"
+            >
+              <ArrowDown className="size-3.5" />
+              {streaming ? 'Jump to the answer' : 'Jump to latest'}
+            </button>
+          </div>
         )}
       </div>
 

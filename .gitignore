@@ -46,3 +46,7 @@ build/
 
 # Backups hold every memory in plain text (scripts/backup.py)
 continuum-be/backups/
+
+# Production settings hold real secrets; only the .example templates are tracked.
+continuum-be/.envs/.production/*
+!continuum-be/.envs/.production/*.example

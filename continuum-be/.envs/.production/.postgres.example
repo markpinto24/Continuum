@@ -1,0 +1,5 @@
+# Copy to `.postgres` (gitignored). Read once, when the volume is first created:
+# changing the password later means ALTER USER inside the database.
+POSTGRES_USER=continuum
+POSTGRES_PASSWORD=<CHANGE_ME_DB_PASSWORD>
+POSTGRES_DB=continuum

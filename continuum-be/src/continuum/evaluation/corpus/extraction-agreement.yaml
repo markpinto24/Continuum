@@ -383,3 +383,62 @@
   forbid:
     - The user switched to a 5-day split
   tags: [question, found-in-use]
+
+# =============================================================================
+# Found in use (2026-10-22): an agreement stored as "this workout"
+# Labelled before the fix was written. Live, "keep this workout as my active
+# current workout" was stored as "The user keeps this workout as their active
+# current workout" — true, and useless: asked later what the split was, the
+# assistant could not say.
+# =============================================================================
+
+- id: ref-keep-this-workout
+  mode: personal
+  why: >
+    The live case. "This workout" must be written out as the split it refers to
+    — its days, in order — not the exercises. A memory that says "this" can never
+    answer "what is my split?".
+  context: >
+    Here's a 6-day split, about 2 hours a session. Day 1 Push: bench, incline
+    dumbbell press, shoulder press. Day 2 Pull: deadlifts, rows, curls. Day 3
+    Legs: squats, leg press, calves. Day 4 Full body: compound lifts. Day 5 Push.
+    Day 6 Pull. Day 7 rest.
+  text: keep this workout as my active current workout
+  expect:
+    - content: The user follows a 6-day split of push, pull, legs, full body, push and pull
+      category: routine
+      subject: gym
+  forbid:
+    - The user keeps this workout as their active current workout
+  tags: [reference, found-in-use]
+
+- id: ref-go-with-that
+  mode: workspace
+  why: >
+    The Work shape: "that" is the release plan the answer proposed.
+  context: >
+    I'd release weekly on Tuesdays, with a code freeze every Monday afternoon.
+  text: perfect, we'll go with that
+  expect:
+    - content: The team releases weekly on Tuesdays with a Monday code freeze
+      category: decision
+  forbid:
+    - The team will go with that
+  tags: [reference, workspace]
+
+- id: ref-make-it-my-plan
+  mode: personal
+  why: >
+    Held out from the case that prompted the fix: a different noun for the same
+    reference ("it", "my plan").
+  context: >
+    For your mornings: wake at 6:30, ten minutes of stretching, then a 20-minute
+    walk before breakfast.
+  text: make it my morning plan
+  expect:
+    - content: The user wakes at 6:30, stretches for ten minutes and walks for 20 minutes before breakfast
+      category: routine
+      subject: morning
+  forbid:
+    - The user makes it their morning plan
+  tags: [reference, held-out]

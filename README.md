@@ -118,6 +118,9 @@ To point the LLM at Groq or a hosted vLLM instead of your local Ollama, put
 `continuum-be/.envs/.local/.api.override` (gitignored; it overrides the tracked
 defaults in `.envs/.local/.api`).
 
+**Public deployment:** [`DEPLOY.md`](DEPLOY.md) puts the whole stack on one free
+Oracle Cloud VM, with HTTPS from Caddy and your data staying on that machine.
+
 ---
 
 ## Repository layout

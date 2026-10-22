@@ -19,6 +19,7 @@ import {
 } from 'three'
 
 import { useElementSize } from '@/hooks/use-element-size'
+import { centreOnOpenArea } from '@/lib/view-offset'
 import {
   EDGE_COLOR,
   STATUS_COLOR,
@@ -168,13 +169,14 @@ export function BeliefGraph({
   }, [ready, palette])
 
   // Centre the view on the part of the canvas the floating panel leaves open.
+  // Applied here and re-asserted every frame (in the label loop below): the
+  // library keeps its own view offset, [0, 0], and its first update — which runs
+  // after this effect — clears ours, so on launch the graph sat in the middle of
+  // the whole window, half behind the panel, until something was resized.
   useEffect(() => {
     const graph = graphRef.current
     if (!ready || !graph) return
-    const camera = graph.camera() as PerspectiveCamera
-    if (rightInset > 0) camera.setViewOffset(width, height, rightInset / 2, 0, width, height)
-    else camera.clearViewOffset()
-    camera.updateProjectionMatrix()
+    centreOnOpenArea(graph.camera() as PerspectiveCamera, width, height, rightInset)
   }, [ready, width, height, rightInset])
 
   // Frame the graph once per dataset, when the layout first settles. Only once:
@@ -194,6 +196,22 @@ export function BeliefGraph({
   // to see what a belief is connected to, not to fly into one glowing sphere.
   // The camera keeps its current angle and moves to a distance set by how far
   // apart the group is — close for a pair, further for a crowd.
+  // Clearing the selection frames the whole graph again. Without this the camera
+  // kept aiming at the memory last selected, which became the point the graph
+  // orbited around.
+  const hadSelection = useRef(false)
+  useEffect(() => {
+    const graph = graphRef.current
+    if (!graph) return
+    if (neighbourhood) {
+      hadSelection.current = true
+      return
+    }
+    if (!hadSelection.current) return
+    hadSelection.current = false
+    graph.zoomToFit(800, 70 + rightInset / 4)
+  }, [neighbourhood, rightInset])
+
   useEffect(() => {
     const graph = graphRef.current
     if (!graph || !neighbourhood) return
@@ -245,6 +263,7 @@ export function BeliefGraph({
       const graph = graphRef.current
       if (!graph) return
       const camera = graph.camera() as PerspectiveCamera
+      centreOnOpenArea(camera, width, height, rightInset)
       const focal = height / (2 * Math.tan((camera.fov * Math.PI) / 360))
       const visibleRight = width - rightInset - 12
 

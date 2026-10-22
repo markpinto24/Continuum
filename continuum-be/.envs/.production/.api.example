@@ -1,0 +1,62 @@
+# Settings for the api in production.yml. Copy to `.api` (gitignored) and fill
+# in every <CHANGE_ME>. DEPLOY.md generates the secrets for you.
+
+# Any value other than local/dev turns on redaction of memory content in logs.
+ENVIRONMENT=production
+DEBUG=false
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+LOG_COLORS=false
+
+# --- Inside the compose network -------------------------------------------
+QDRANT_URL=http://qdrant:6333
+QDRANT_COLLECTION=continuum_memories
+# The password must match POSTGRES_PASSWORD in .postgres.
+DATABASE_URL=postgresql+asyncpg://continuum:<CHANGE_ME_DB_PASSWORD>@postgres:5432/continuum
+OLLAMA_URL=http://ollama:11434
+
+# --- Models ----------------------------------------------------------------
+LLM_BASE_URL=http://ollama:11434/v1
+LLM_API_KEY=ollama
+# 7B is what every number in FINDINGS was measured with. On a 4-core ARM VM it
+# answers at a few tokens a second; qwen2.5:3b-instruct is faster but a weaker
+# judge — re-run the corpora before relying on it.
+LLM_MODEL=qwen2.5:7b-instruct
+EMBEDDING_BASE_URL=http://ollama:11434/v1
+EMBEDDING_API_KEY=ollama
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_DIM=1024
+
+# --- Behaviour (same as local) ---------------------------------------------
+DECAY_ENABLED=true
+DECAY_INTERVAL_MINUTES=360
+AUTO_SUPERSEDE_CONFIDENCE=0.80
+SPEECH_ENABLED=true
+SPEECH_MODEL=base
+SPEECH_LANGUAGE=en
+SPEECH_MAX_SECONDS=120
+TTS_ENABLED=true
+TTS_VOICE=en_US-lessac-medium
+TTS_LENGTH_SCALE=1.0
+HF_HUB_DISABLE_TELEMETRY=1
+SHARED_SPACE_ENABLED=true
+TEAM_CROSS_CHECK=true
+CALIBRATED_GATE=false
+SUMMARIES_ENABLED=true
+RETRIEVAL_KEYWORD_WEIGHT=0.7
+
+# --- Authentication: the public-internet settings ----------------------------
+# Off: on a public address, whoever opened the page first would own the
+# instance. The first admin is created from these two at startup instead.
+AUTH_ALLOW_WEB_SETUP=false
+ADMIN_EMAIL=<CHANGE_ME_YOUR_EMAIL>
+ADMIN_PASSWORD=<CHANGE_ME_STRONG_PASSWORD>
+ADMIN_USER_ID=
+SESSION_TTL_HOURS=336
+LLM_REQUESTS_PER_MINUTE=30
+MAX_INPUT_CHARS=50000
+# On: Caddy is the only way in and it overwrites X-Real-IP with the real
+# visitor, so the sign-in lockout counts visitors instead of the proxy.
+TRUST_PROXY_HEADERS=true
+# Same origin through Caddy: no cross-origin caller is needed.
+CORS_ORIGINS=[]

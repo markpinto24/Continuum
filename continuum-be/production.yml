@@ -1,0 +1,145 @@
+# The public, permanent deployment: one VM running everything, with Caddy as the
+# only thing the internet can reach. Guide: DEPLOY.md at the repo root.
+#
+#   docker compose -f production.yml up -d --build     # from continuum-be/
+#   docker compose -f production.yml logs -f api
+#   docker compose -f production.yml down              # stop; data is kept
+#
+# How it differs from local.yml, and why:
+#   - **Only `web` publishes ports (80, 443).** The API, Qdrant, Postgres and
+#     Ollama are reachable on the compose network alone — none on the host, so
+#     no firewall mistake can expose them.
+#   - **`web` serves the built UI and proxies /api** (continuum-fe/Dockerfile,
+#     Caddyfile): one origin, as the SameSite=Strict session cookie requires,
+#     with HTTPS from Let's Encrypt.
+#   - **Ollama is a container here.** local.yml keeps it on the host to avoid a
+#     second copy of every model on a development machine; on a server it is the
+#     only copy, and as a container it never listens on a public interface.
+#   - **Settings and secrets come from .envs/.production/** (gitignored; copy
+#     the .example files). Nothing secret is tracked.
+#
+# Needs Compose v2. `name:` keeps the volumes stable whatever the folder is.
+
+name: continuum-prod
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    healthcheck:
+      test: ["CMD", "/qdrant/qdrant", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - .envs/.production/.postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  ollama:
+    # The version this project is developed and measured against: the judge's
+    # confidence comes from token probabilities, which older releases did not
+    # return through the OpenAI-compatible API.
+    image: ollama/ollama:0.20.7
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      # Keep both models loaded: the judge and the embedder alternate on every
+      # message, and reloading a 7B model from disk costs seconds each time.
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_KEEP_ALIVE: "24h"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # One-shot: make sure Ollama has the configured models (first run downloads
+  # ~6 GB), then exit. The API waits for it.
+  models:
+    image: alpine:3.20
+    env_file:
+      - .envs/.production/.api
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for model in "$${LLM_MODEL}" "$${EMBEDDING_MODEL}"; do
+          echo "ensuring $${model} ..."
+          result=$$(wget -qO- -T 7200 --header="Content-Type: application/json" \
+            --post-data="{\"model\":\"$${model}\",\"stream\":false}" \
+            "$${OLLAMA_URL}/api/pull")
+          case "$${result}" in
+            *success*) echo "  $${model}: ready" ;;
+            *) echo "  $${model}: pull failed: $${result}"; exit 1 ;;
+          esac
+        done
+        echo "models ready"
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      models:
+        condition: service_completed_successfully
+    volumes:
+      - speech_models:/home/continuum/.cache/huggingface
+    env_file:
+      - .envs/.production/.api
+
+  web:
+    build:
+      context: ../continuum-fe
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    env_file:
+      - .envs/.production/.web
+    volumes:
+      # Caddy's certificates and ACME account. Kept, or every restart would
+      # request new certificates and hit Let's Encrypt's rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  qdrant_storage:
+  postgres_data:
+  ollama_models:
+  speech_models:
+  caddy_data:
+  caddy_config:

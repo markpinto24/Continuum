@@ -540,3 +540,43 @@ async def test_a_reminder_that_cannot_be_saved_does_not_lose_the_answer(settings
                     StubIngest())  # no store at all
     events = await collect(service, request())
     assert events[-1].event == "done" and len(events[-1].data["questions"]) == 1
+
+
+# --- Replying to the last answer: keep it short ---------------------------------------------
+
+
+def _reply_to_answer(text: str) -> ChatRequest:
+    return ChatRequest(user_id="mark:personal", messages=[
+        Message(role="user", content="tell me a good workout split"),
+        Message(role="assistant", content="Mark's four-day split: Monday upper body, ..."),
+        Message(role="user", content=text),
+    ])
+
+
+async def test_agreeing_asks_for_a_short_reply_not_the_plan_again(settings):
+    # Live: "keep this as current workout split for me" got the whole plan back.
+    llm = StubLLM(["Done."])
+    service = build(ChatContext(query="q"), llm, settings, SavingIngest())
+    await collect(service, _reply_to_answer("keep this as current workout split for me"))
+    last = llm.messages[-1]
+    assert last["role"] == "system" and "just accepted" in last["content"]
+    assert "Do not repeat the plan" in last["content"]
+
+
+async def test_a_question_or_new_subject_gets_a_normal_answer(settings):
+    for text in ("what about a five-day version?", "by the way my sister moved to Porto",
+                 "keep in mind I have a sore knee"):
+        llm = StubLLM(["..."])
+        await collect(build(ChatContext(query="q"), llm, settings, SavingIngest()),
+                      _reply_to_answer(text))
+        assert llm.messages[-1]["role"] == "user", text  # no note added
+
+
+def test_how_a_reply_answers_the_answer():
+    from continuum.services.agreement import reply_kind
+
+    assert reply_kind("it sounds good for me for now") == "accepted"
+    assert reply_kind("the second one") == "accepted"
+    assert reply_kind("hmm, I'll think about it") == "undecided"
+    assert reply_kind("no thanks") == "declined"
+    assert reply_kind("what about swimming?") is None

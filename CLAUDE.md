@@ -95,6 +95,8 @@ Continuum/                            ← git root
 ├── README.md                         the project story; links to each side
 ├── CLAUDE.md                         this file — the engineering brief
 ├── requirements.md                   Personal (life) mode beside Workspace — the plan, now built
+├── TODO.md                           the improvement backlog, in iterations
+├── DEPLOY.md                         free public deployment: one Oracle VM, Caddy, HTTPS
 ├── .env.example                      template for continuum-be/.env (uv run)
 ├── .gitignore                        covers both projects
 ├── .github/workflows/
@@ -103,8 +105,10 @@ Continuum/                            ← git root
 ├── continuum-be/
 │   ├── pyproject.toml                uv project, deps, ruff + pytest config
 │   ├── local.yml                     ★ the Docker stack: qdrant, postgres, api
+│   ├── production.yml                ★ the public stack: + ollama, web (Caddy); only web exposed
 │   ├── .envs/.local/.api · .postgres its settings (tracked local defaults;
 │   │                                 personal ones in gitignored *.override)
+│   ├── .envs/.production/*.example   production templates; the real files are gitignored
 │   ├── alembic.ini                   migration CLI; DB comes from DATABASE_URL
 │   ├── uv.lock
 │   ├── .dockerignore
@@ -114,6 +118,7 @@ Continuum/                            ← git root
 │   │   ├── seed_demo.py              end-to-end demo incl. a reversed decision
 │   │   ├── run_eval.py               Phase 5 harness: record once, sweep free
 │   │   ├── backup.py · restore.py    Qdrant snapshots + pg_dump, and back
+│   │   ├── backup-production.sh      the same for production.yml, cron-ready
 │   │   └── recheck.py                re-check stored memories under today's rules
 │   ├── src/continuum/
 │   │   ├── main.py                   app factory, lifespan, scheduler wiring
@@ -208,6 +213,7 @@ Continuum/                            ← git root
 └── continuum-fe/                     ← the belief graph UI
     ├── package.json · yarn.lock      yarn 1; `resolutions` pins one vite
     ├── vite.config.ts                dev server + /api proxy (no container)
+    ├── Dockerfile · Caddyfile        production only: built UI + /api proxy + HTTPS
     └── src/
         ├── lib/
         │   ├── types.ts              ★ the backend contract, mirrored by hand
@@ -1070,6 +1076,9 @@ There is deliberately **no** separate migrate, init or model-pull step. If you
 find yourself adding a startup command that has to be run by hand, put it in the
 lifespan hook or the compose graph instead.
 
+For the public deployment (`production.yml`, Caddy, HTTPS on a free Oracle VM)
+follow `DEPLOY.md`.
+
 ```bash
 docker-compose -f local.yml logs -f api
 docker-compose -f local.yml down        # keeps volumes
@@ -1094,7 +1103,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 506 tests, no services needed
+uv run pytest                          # 512 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -1185,6 +1194,15 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
 - **Letting API keys manage keys, passwords or users.** Agents run in places a
   person does not watch; a key that can mint keys turns one leak into permanent
   access.
+- **Publishing anything but `web` in `production.yml`.** The API, Qdrant,
+  Postgres and Ollama listen on the compose network only, so no firewall slip
+  can expose them; Caddy is the one way in, and it is what sets `X-Real-IP`.
+- **`AUTH_ALLOW_WEB_SETUP=true` on a public address.** Whoever loads the page
+  first becomes the admin. Production creates the admin from `ADMIN_EMAIL` /
+  `ADMIN_PASSWORD` at startup.
+- **Serving the production UI from a different host than the API** (a static
+  host plus an API elsewhere). The session cookie is SameSite=Strict: Caddy
+  serves both from one origin for that reason.
 - **Publishing Qdrant or the api port on all interfaces again.** Qdrant has no
   auth of its own by default; anyone reaching it reads every memory and never
   meets the API's checks.

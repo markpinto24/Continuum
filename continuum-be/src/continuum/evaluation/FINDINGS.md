@@ -690,6 +690,33 @@ Ollama, both modes, the conversation from the original report):
 
 Re-run live after the fixes: every turn as designed in both modes.
 
+**Found in use (2026-10-22): an agreement that named nothing.** "Keep this
+workout as my active current workout" was stored as "the user keeps this workout
+as their active current workout" — so "what is my split?" could not be answered.
+The guard counted it as the user's own words (most of them are in the reply), and
+the model copied the reply. Three cases added, labelled first (one held out):
+before, the live case failed 3 in 3; the other two already resolved their "that"
+and "it". Now the reply's guide says to name the choice in full, and a statement
+that still points at "this workout", "that plan" or "it" gets one more try, told
+what is missing. After, 3 in 3: "the user has chosen a 6-day split with specific
+days for push, pull, legs, full body and rest"; forbidden 5.9% → 0%. Recall
+reads lower (55–64% → 50–59%), but every case that moved is the matcher: the
+outputs are right and longer than their labels ("The user's sister Ana moved to
+Porto last month"). The real cost: one run in three stored the exercises too.
+
+**Tried and not kept (2026-10-22): a real subject for an agreed choice.**
+Live, "the user will follow a four-day workout split" (subject `self`) was
+disputed against "the user does coding and goes to the gym" (also `self`) —
+the judge called them an overlap at 0.84; both are true. Telling the reply's
+extractor to name the subject ("gym", "sleep"), never `self`, took subject
+accuracy from 8% to 58–69% (0 of 18 facts on `self`, 3 runs in 3), recall and
+precision unchanged. Reverted anyway: the same split came back as `gym` in one
+run and `workout` in another, and the resolver never compares two different
+subjects — so a later change of split could leave both splits active with
+nobody asked. That trades an unnecessary question for a silent stale belief,
+the wrong way round (commitment 4). The false dispute is the judge's
+over-escalation (§11), and "Both are true" settles it.
+
 Still open: an unprompted plan ("maybe I'll start running on Sundays", "we
 might move standups to 10am") records nothing, 0 in 3 — the prompts' musing rule
 wins, and the rule that would change it cost Work more than it caught. The

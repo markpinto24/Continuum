@@ -1,0 +1,7 @@
+# Copy to `.web` (gitignored).
+# Your public host name. Its DNS must point at this machine before the first
+# start, or Caddy cannot get the certificate.
+DOMAIN=<CHANGE_ME_e.g._continuum.duckdns.org>
+# Let's Encrypt writes here about expiring certificates.
+ACME_EMAIL=<CHANGE_ME_YOUR_EMAIL>
+API_UPSTREAM=api:8000

@@ -55,6 +55,9 @@ _REPLY_GUIDE = """How to read this reply:
 - If the user takes up something the assistant suggested ("sounds good", "let's
   do that", "the second one"), record that choice once, as the user's own
   decision: the choice itself with any change the user made, not every detail.
+- Name the choice in full. Never write "this", "that" or "it" for what the
+  assistant suggested: write out what it is, with its structure (which days, in
+  what order, how often), but not every exercise or step.
 - A thank-you or a no takes nothing from the assistant's words.
 - Still record, as usual, anything new the user says in their own words.
 - Add "tentative": true to a memory the user has not decided on ("maybe", "I'll
@@ -100,8 +103,42 @@ async def extract_turn(
         return kept
     if not proposal or not proposal.strip():
         return await extractor.extract(lone_turn(reply, mode), mode=mode)
-    facts = await extractor.extract(reply_transcript(reply, proposal), mode=mode)
+    transcript = reply_transcript(reply, proposal)
+    facts = await extractor.extract(transcript, mode=mode)
+    vague = [f for f in facts if points_at_something(f.content)]
+    if vague:
+        # "Keep this workout as my active workout" came back as "the user keeps
+        # this workout as their active workout", three runs in three: true, and
+        # unable ever to say what the workout is. One more try, told exactly what
+        # is missing — extraction, not a judgement, so a second call is fine.
+        log.info("agreement.vague_reference", count=len(vague))
+        retry = await extractor.extract(transcript + _name_it(vague), mode=mode)
+        if retry and not any(points_at_something(f.content) for f in retry):
+            facts = retry
     return adopted_only(facts, reply=reply)
+
+
+# "this workout", "that plan", "it as my plan": a choice that names nothing.
+_POINTS_AT = re.compile(
+    r"\b(?:this|that|these|those|the same|said)\s+(?!is\b|was\b|are\b|week\b|year\b|"
+    r"month\b|morning\b|evening\b|time\b)[a-z]+|\b(?:make|keep|use|follow|do|try|take)s?\s+it\b"
+    r"|\bgo(?:es)? with (?:it|that|this)\b",
+    re.IGNORECASE,
+)
+
+
+def points_at_something(content: str) -> bool:
+    """Does the statement refer to the answer instead of saying what it was?"""
+    return bool(_POINTS_AT.search(content))
+
+
+def _name_it(vague: list[ExtractedFact]) -> str:
+    said = "; ".join(f'"{f.content}"' for f in vague)
+    return (
+        f"\n\nYour last answer recorded {said}. That says \"this\" or \"that\" instead "
+        "of what it is. Answer again, writing out what the assistant suggested that the "
+        "user took up."
+    )
 
 
 def adopted_only(facts: list[ExtractedFact], *, reply: str) -> list[ExtractedFact]:
@@ -174,6 +211,30 @@ def is_refusal(reply: str) -> bool:
     """The reply opens with a no ("no thanks", "nah, too early")."""
     first = _WORD.findall(reply.lower()[:20])
     return bool(first) and first[0] in _REFUSALS
+
+
+_ACCEPTS = re.compile(
+    r"\b(?:yes|yeah|yep|yup|ok|okay|sure|sounds good|looks good|great|perfect|deal|"
+    r"agreed|works for me|let'?s do (?:it|that|this)|let'?s go with|go with|keep (?:it|this|that)|"
+    r"make (?:it|this|that)|i'?ll take|i'?ll do|i'?ll go with|use (?:it|this|that)|"
+    r"the (?:first|second|third|last) one)\b",
+    re.IGNORECASE,
+)
+
+
+def reply_kind(reply: str) -> str | None:
+    """How a turn answers the answer before it: "accepted", "undecided",
+    "declined", or None when it is not a reply to it at all (a question, a new
+    subject). Read from the words, so the chat can keep its reply short."""
+    if is_question(reply):
+        return None
+    if is_refusal(reply):
+        return "declined"
+    if is_hedged(reply):
+        return "undecided"
+    if _ACCEPTS.search(reply):
+        return "accepted"
+    return None
 
 
 def is_hedged(reply: str) -> bool:

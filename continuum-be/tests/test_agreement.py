@@ -233,3 +233,51 @@ async def test_a_first_turn_that_asks_makes_no_choice(store, settings):  # noqa:
         Message(role="user", content="should we use Postgres or MongoDB? we need transactions"),
     ]))
     assert result.created == []
+
+
+# --- Found in use, 2026-10-22: "keep this workout" -------------------------------------------
+
+
+class Scripted:
+    """An extractor that answers each call with the next scripted batch."""
+
+    def __init__(self, *batches: list[ExtractedFact]) -> None:
+        self.batches = list(batches)
+        self.transcripts: list[str] = []
+
+    async def extract(self, transcript, *, mode):  # noqa: ANN001, ANN201, ARG002
+        self.transcripts.append(transcript)
+        return self.batches.pop(0) if self.batches else []
+
+
+SPLIT_ANSWER = "Day 1 Push, Day 2 Pull, Day 3 Legs, Day 4 Full body, Day 5 Push, Day 6 Pull."
+
+
+async def test_a_choice_that_only_says_this_is_asked_for_once_more():
+    vague = fact("The user keeps this workout as their active current workout", C.ROUTINE, "gym")
+    named = fact("The user follows a 6-day push, pull, legs, full body, push, pull split",
+                 C.ROUTINE, "gym")
+    extractor = Scripted([vague], [named])
+
+    [kept] = await extract_turn(extractor, reply="keep this workout as my active current workout",  # type: ignore[arg-type]
+                                proposal=SPLIT_ANSWER, mode=Mode.PERSONAL)
+
+    assert kept.content == named.content
+    assert len(extractor.transcripts) == 2
+    assert "this workout" in extractor.transcripts[1]  # told exactly what was missing
+
+
+async def test_if_the_retry_is_still_vague_the_first_answer_stands():
+    vague = fact("The user keeps this workout as their active current workout", C.ROUTINE, "gym")
+    still = fact("The user will follow that plan", C.ROUTINE, "gym")
+    [kept] = await extract_turn(Scripted([vague], [still]),  # type: ignore[arg-type]
+                                reply="keep this workout as my active current workout",
+                                proposal=SPLIT_ANSWER, mode=Mode.PERSONAL)
+    assert kept.content == vague.content  # never worse than before; Undo is there
+
+
+async def test_a_concrete_choice_costs_no_second_call():
+    extractor = Scripted([fact(PPL, C.ROUTINE, "gym")])
+    await extract_turn(extractor, reply="sounds good", proposal=SPLIT_ANSWER,  # type: ignore[arg-type]
+                       mode=Mode.PERSONAL)
+    assert len(extractor.transcripts) == 1

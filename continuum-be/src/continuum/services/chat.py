@@ -46,6 +46,7 @@ from continuum.models.schemas import (
     Question,
     QuestionOption,
 )
+from continuum.services.agreement import reply_kind
 from continuum.services.ingest import IngestService
 from continuum.services.retrieval import RetrievalService
 
@@ -190,7 +191,7 @@ class ChatService:
         self, request: ChatRequest, context: ChatContext
     ) -> list[dict[str, str]]:
         history = request.messages[-self.settings.chat_max_history :]
-        return [
+        messages = [
             {
                 "role": "system",
                 "content": build_system_prompt(context, mode=mode_of(request.user_id)),
@@ -201,6 +202,10 @@ class ChatService:
                 if m.role != "system"
             ),
         ]
+        note = reply_note(request)
+        if note:
+            messages.append({"role": "system", "content": note})
+        return messages
 
     async def _ask_about_pending(
         self, context: ChatContext, remembered: IngestResponse | None
@@ -267,6 +272,33 @@ def pending_question(memory: Memory) -> Question:
             QuestionOption(label="Still unsure", action="unsure"),
             QuestionOption(label="No", action="decline"),
         ],
+    )
+
+
+_REPLY_NOTES = {
+    "accepted": "The person has just accepted what you suggested in your previous answer.",
+    "undecided": "The person has not decided yet on what you suggested in your previous answer.",
+    "declined": "The person has just declined what you suggested in your previous answer.",
+}
+
+
+def reply_note(request: ChatRequest) -> str | None:
+    """A short instruction for this turn only, when it answers the last answer.
+
+    Told "keep this as my current workout split", the model printed the whole
+    four-day plan again. Agreeing to something wants a sentence back, not the
+    plan — the plan is already on screen, and what was remembered is shown
+    under the reply.
+    """
+    if proposal_for(request) is None:
+        return None
+    kind = reply_kind(request.messages[-1].content)
+    if kind is None:
+        return None
+    return (
+        f"{_REPLY_NOTES[kind]} Reply in one or two short sentences: acknowledge it in "
+        "a few words. Do not repeat the plan or your previous answer, and do not add "
+        "new suggestions unless they ask."
     )
 
 
