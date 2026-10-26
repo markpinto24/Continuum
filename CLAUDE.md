@@ -163,7 +163,8 @@ Continuum/                            ← git root
 │   │   │   ├── keywords.py           keyword terms + score for retrieval
 │   │   │   ├── chat.py               ★ prompt assembly; surfaces disputes
 │   │   │   ├── subjects.py           one entity, one slug (atlas = atlas-project);
-│   │   │   │                           a missing subject from the words
+│   │   │   │                           a missing subject from the words; two words
+│   │   │   │                           for one thing meet (gym ~ workout) ★
 │   │   │   ├── recheck.py            backfill: stored memories through the resolver
 │   │   │   └── reindex.py            ★ re-embed on model change; crash-safe
 │   │   ├── evaluation/               ← Phase 5: the instrument
@@ -172,6 +173,7 @@ Continuum/                            ← git root
 │   │   │   ├── baselines/            recorded runs, replayable at any gate
 │   │   │   ├── preflight.py          ★ can the embedder see an entity swap?
 │   │   │   ├── calibrate.py          ★ derive both cosine bands for a model
+│   │   │   ├── subjects.py           ★ when do two slugs name one thing? threshold
 │   │   │   ├── types.py              Action vocabulary, corpus + outcome models
 │   │   │   ├── corpus.py             strict loading; rejects unlabelled cases
 │   │   │   ├── corpus/*.yaml         ★ the labelled data (+ *-personal.yaml)
@@ -419,9 +421,13 @@ ingest (note / transcript)
    │     (decision, fact, constraint, person compare with each other ★;
    │      preference only with preference)
    ├─ different subject ................ NEW           → free, no LLM call
+   │     └─ unless two words mean one thing (gym ~ workout, home ~ flat):
+   │        compared, never renamed, and judged without either slug ★
+   │        — never for names, look-alikes (sara ~ sarah-k) or `self`
    ├─ either side is an event .......... NEW           → free, no LLM call
    └─ score ≥ conflict band, same kind . judge (LLM call, reason first)
-         (one candidate: the same named subject first, then the closest)
+         (one candidate: the same named subject first, then one that means
+          the same, then the closest)
          ├─ duplicate ................... reinforce
          │     └─ each side names someone the other does not → CONFLICT ★
          ├─ supersedes, p ≥ 0.80 ........ SUPERSEDES   → write edges, retire old
@@ -437,7 +443,18 @@ ingest (note / transcript)
 
 **The bands belong to the embedding model** — bge-m3: duplicate 0.86, conflict
 0.45 — and come from `CALIBRATED_THRESHOLDS` in `config.py`, derived by
-`run_eval.py --calibrate`. Never set them by feel.
+`run_eval.py --calibrate`. Never set them by feel. So does the subject band
+(bge-m3: 0.67, `CALIBRATED_SUBJECT_THRESHOLDS`, from `run_eval.py --subjects`
+on `corpus/subjects.yaml`); a model without one matches subjects by spelling.
+
+**Subjects meet by meaning, names by spelling.** Slug similarity measures
+relatedness, not identity — frontend / backend scores like a synonym, anna /
+ana higher than any — so a pair that meets is only *compared*, never renamed,
+and the judge is shown neither slug (its "different subject is independent"
+rule would otherwise undo the match). A slug written with a capital in the
+memory's own words is a name and matches by spelling only, as do look-alikes
+(`looks_alike`) and `self`. A sentence-initial capital reads as a name too:
+"Billing runs through Stripe" stays apart from `payments` (FINDINGS §13).
 
 **`p` is a probability, not a number the judge wrote.** It is the model's token
 probability for the relation it chose, read from logprobs. A 7B judge's written
@@ -698,6 +715,47 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   synthesis; the server accepts only catalogued voices — it never downloads a
   name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
 - API keys panel now says what a key is for, in plain words
+
+### ✅ Phase 18 — Agreement and pending polish (done, this release)
+
+TODO Iteration 3 (FINDINGS §14). Each change measured three runs each side on
+cases labelled first.
+
+- **An unprompted maybe is pending**: a hedged lone turn the extractor took
+  nothing from is read once more by its own small prompt (`_MAYBE_PROMPTS` in
+  `agreement.py`) — framing inside the turn could not beat the system prompts'
+  musing rule. 4/4 pending, musing still nothing; agreement F1 → 0.80 ×3
+- **A confirmed maybe reads as decided** (`services/wording.py`): one guarded
+  rewrite — a changed number, name or negation, a kept hedge, or lost words
+  keep the old wording. A restatement takes the person's own words. The maybe's
+  wording stays in `tentative_wording`
+- **Adopted choices fade at one rate**: `Memory.adopted` is stored;
+  `ADOPTED_CHOICE_HALF_LIFE_DAYS` = 90 whatever the category (mirrored in
+  `memory-style.ts`)
+- Long plans already keep their shape (12/12 runs); cases kept as a check
+
+### ✅ Phase 17 — Subjects by meaning (done, this release)
+
+TODO Iteration 1. The same split came back as `gym` in one run and `workout` in
+the next, and the subject filter never compared them (FINDINGS §13).
+
+- **Two words for one thing meet** (`SubjectRelations`): different slugs whose
+  "my {slug}" embeddings score ≥ 0.67 (bge-m3, `CALIBRATED_SUBJECT_THRESHOLDS`)
+  are compared — never renamed — and judged with neither slug shown. Names
+  (a capital in the memory's own words), look-alikes and `self` match by
+  spelling only. An embedding failure compares (fails toward the judge)
+- **Measured first**: 95 labelled slug pairs (`corpus/subjects.yaml`, 17 held
+  out), `run_eval.py --subjects`. Slug similarity is relatedness, not identity
+  (AUC 0.74); held out, 9/9 must-meet pairs meet, sara / sarah-k stays apart
+- **Held-out resolution cases** (11, labelled first): before, all 5 changes
+  filed under a synonym were silently stale; after, 4 retired or asked, the
+  fifth a labelled known gap (a sentence-initial capital reads as a name). All
+  5 cost cases judged independent — no false disputes. Both corpora, two
+  passes: belief loss and merge loss 0%; stale 0% outside that known gap
+- **The reverted rule is back**: an agreed choice gets a real subject, never
+  `self` — 11 of 18 facts on `self` → 0 of 18, subjects that meet the label's
+  15–21% → 100%, precision and recall unchanged, three runs in three
+- 545 backend tests
 
 ### ✅ Phase 16 — Agreements, pending memories, questions with options (done, this release)
 
@@ -1103,7 +1161,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 512 tests, no services needed
+uv run pytest                          # 568 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -1114,6 +1172,8 @@ CONTINUUM_API_KEY=ck_... uv run python scripts/seed_demo.py   # end-to-end, live
 # Phase 5: check the embedder, then one slow pass, then sweep the gate for free
 uv run python scripts/run_eval.py --preflight
 uv run python scripts/run_eval.py --crowded     # right memory judged in a crowded graph?
+uv run python scripts/run_eval.py --subjects    # when do two slugs name one thing?
+uv run python scripts/run_eval.py --confirmations   # a confirmed maybe, reworded
 uv run python scripts/run_eval.py --record eval-run.json
 uv run python scripts/run_eval.py --replay eval-run.json
 # decisions from real use, exported from the Inbox → learning panel:
@@ -1303,6 +1363,11 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
   "I'll think about it" came back decided, "no thanks" came back a decision,
   creatine came back a decision not health — three runs in three each. Read the
   words: hedges, refusals, doses.
+- **Adding the unprompted-maybe rule to the extraction system prompts.** It cost
+  Work F1 0.74 → 0.56–0.64 and framing in the turn cannot beat them; a hedged
+  turn that yielded nothing gets its own prompt instead (FINDINGS §14).
+- **Rewording a confirmed maybe without the guard.** It is a model changing a
+  belief's words; a changed number, name or negation keeps the original.
 - **Declining a pending item from free text.** Only a button, or a spoken no
   to the question just asked. A contradiction in passing leaves it pending —
   commitment 2.
@@ -1344,6 +1409,14 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
 - **Narrowing `STATEMENT_CATEGORIES` back to same-category-only "to save judge
   calls".** It hid a stated database change (fact vs decision) from the resolver
   entirely. Splitting silently turns detection off; merging costs a call.
+- **Renaming a subject onto one that means the same.** Meaning is measured as
+  relatedness — sister / brother, lunch / dinner meet too. Comparing them costs
+  a judge call; renaming one onto the other would file a belief under the
+  wrong thing for good.
+- **Letting names meet by meaning.** The embedder scores anna / ana at 0.95
+  and has no idea whether Mike is Michael (FINDINGS §1). Names match by spelling.
+- **Showing the judge both slugs when they met by meaning.** Its own rule — a
+  different subject is independent — decides the pair before it reads the words.
 - **Guessing a subject when the words name two, or none.** A wrong subject hides
   the pair from the right comparison; a null one at least stays comparable.
 - **Merging duplicates in the recheck backfill.** DUPLICATE discards a memory —

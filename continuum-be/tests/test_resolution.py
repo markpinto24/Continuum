@@ -652,3 +652,73 @@ async def test_a_different_named_subject_is_still_never_judged(settings):
         [(memory("Chose Postgres for Atlas", MemoryCategory.DECISION, "atlas"), 0.9)],
     )
     assert judge.calls == 0 and result.verdict is Verdict.NEW
+
+
+# --- Subjects that mean the same (FINDINGS §13) ------------------------------
+
+
+class SubjectAwareJudge(ScriptedJudge):
+    """A judge that also embeds slugs, and keeps the prompt it was shown."""
+
+    VECTORS = {"gym": [1.0, 0.0], "workout": [0.95, 0.31], "diet": [0.3, 0.95]}
+
+    def __init__(self, relation: str, confidence: float) -> None:
+        super().__init__(relation, confidence)
+        self.prompts: list[str] = []
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return [self.VECTORS[t.removeprefix("my ")] for t in texts]
+
+    async def complete_json_with_logprobs(self, **kwargs):  # noqa: ANN003
+        self.prompts.append(kwargs["user"])
+        return await super().complete_json_with_logprobs(**kwargs)
+
+
+def routine(content: str, subject: str) -> Memory:
+    return memory(content, MemoryCategory.ROUTINE, subject)
+
+
+async def test_one_thing_under_two_words_reaches_the_judge(settings):
+    judge = SubjectAwareJudge("supersedes", 0.95)
+    gym = routine("The user follows a six-day split", "gym")
+    result = await service(judge, settings).resolve(
+        fact("The user now follows a four-day split", MemoryCategory.ROUTINE, "workout"),
+        [(gym, 0.85)],
+    )
+    assert result.target is gym and result.verdict is Verdict.SUPERSEDES
+    # Shown "gym" beside "workout", the judge's own rule — a different subject is
+    # independent — would decide the pair before it read the words.
+    assert "subject: gym" not in judge.prompts[0]
+    assert "subject: workout" not in judge.prompts[0]
+
+
+async def test_a_subject_that_means_something_else_is_still_never_judged(settings):
+    judge = SubjectAwareJudge("supersedes", 0.95)
+    result = await service(judge, settings).resolve(
+        fact("The user now follows a four-day split", MemoryCategory.ROUTINE, "workout"),
+        [(routine("The user eats high protein", "diet"), 0.85)],
+    )
+    assert judge.calls == 0 and result.verdict is Verdict.NEW
+
+
+async def test_the_same_subject_is_preferred_over_one_that_means_the_same(settings):
+    judge = SubjectAwareJudge("conflict", 0.9)
+    gym = routine("The user trains at six", "gym")
+    workout = routine("The user follows a six-day split", "workout")
+    await service(judge, settings).resolve(
+        fact("The user now follows a four-day split", MemoryCategory.ROUTINE, "workout"),
+        [(gym, 0.9), (workout, 0.8)],
+    )
+    # Same subject: the judge is shown it.
+    assert "subject: workout" in judge.prompts[0]
+
+
+async def test_a_subject_that_means_the_same_is_preferred_over_none(settings):
+    judge = SubjectAwareJudge("conflict", 0.9)
+    loose = routine("The user wakes at six", None)  # type: ignore[arg-type]
+    gym = routine("The user follows a six-day split", "gym")
+    result = await service(judge, settings).resolve(
+        fact("The user now follows a four-day split", MemoryCategory.ROUTINE, "workout"),
+        [(loose, 0.9), (gym, 0.8)],
+    )
+    assert result.target is gym

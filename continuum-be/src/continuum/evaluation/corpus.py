@@ -11,7 +11,13 @@ from pathlib import Path
 
 import yaml
 
-from continuum.evaluation.types import ExtractionCase, ResolutionCase, RetrievalCase
+from continuum.evaluation.types import (
+    ConfirmationCase,
+    ExtractionCase,
+    ResolutionCase,
+    RetrievalCase,
+    SubjectPair,
+)
 
 CORPUS_DIR = Path(__file__).parent / "corpus"
 RESOLUTION_CORPUS = CORPUS_DIR / "resolution.yaml"
@@ -19,6 +25,8 @@ EXTRACTION_CORPUS = CORPUS_DIR / "extraction.yaml"
 PERSONAL_EXTRACTION_CORPUS = CORPUS_DIR / "extraction-personal.yaml"
 PERSONAL_RESOLUTION_CORPUS = CORPUS_DIR / "resolution-personal.yaml"
 AGREEMENT_EXTRACTION_CORPUS = CORPUS_DIR / "extraction-agreement.yaml"
+SUBJECT_CORPUS = CORPUS_DIR / "subjects.yaml"
+CONFIRMATION_CORPUS = CORPUS_DIR / "confirmations.yaml"
 
 
 class CorpusError(ValueError):
@@ -65,6 +73,23 @@ def load_extraction_cases_with(extra: list[Path]) -> list[ExtractionCase]:
 
 def load_retrieval_cases(path: Path) -> list[RetrievalCase]:
     cases = [RetrievalCase.model_validate(row) for row in _read(path)]
+    _check_unique(case.id for case in cases)
+    return cases
+
+
+def load_subject_pairs(path: Path | None = None) -> list[SubjectPair]:
+    pairs = [SubjectPair.model_validate(row) for row in _read(path or SUBJECT_CORPUS)]
+    _check_unique(pair.id for pair in pairs)
+    for pair in pairs:
+        if not pair.why.strip():
+            raise CorpusError(
+                f"Pair {pair.id!r} has no rationale. A label without a why is a guess."
+            )
+    return pairs
+
+
+def load_confirmation_cases(path: Path | None = None) -> list[ConfirmationCase]:
+    cases = [ConfirmationCase.model_validate(r) for r in _read(path or CONFIRMATION_CORPUS)]
     _check_unique(case.id for case in cases)
     return cases
 

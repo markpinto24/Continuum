@@ -974,3 +974,74 @@
     subject: atlas
   expect: store
   tags: [held-out-family, cross-category, cost-of-change]
+
+# =============================================================================
+# held-out-subjects — one thing under two words (FINDINGS §13). Written and
+# labelled before semantic subject matching first ran.
+# =============================================================================
+
+- id: payments-filed-apart-from-billing
+  why: >
+    One system under two words. "Now … instead of Stripe" says the old provider
+    stopped, and a team processes payments through one provider. Kept apart by
+    subject, Stripe stays the belief and nobody is asked.
+  existing:
+    content: The team processes billing through Stripe
+    category: decision
+    subject: billing
+    age_days: 90
+  incoming:
+    content: The team now processes payments through Adyen instead of Stripe
+    category: decision
+    subject: payments
+  expect: retire
+  tags: [held-out-subjects, synonym-subject, reversal]
+
+- id: payments-filed-apart-sentence-start
+  why: >
+    The same change, worded the way the Work extractor often writes it — subject
+    first. A capital at the start of a sentence reads as a name, and names match
+    by spelling only, so this stays apart: the rule's known cost.
+  existing:
+    content: Billing runs through Stripe
+    category: decision
+    subject: billing
+    age_days: 90
+  incoming:
+    content: Payments now run through Adyen instead of Stripe
+    category: decision
+    subject: payments
+  expect: retire
+  tags: [held-out-subjects, synonym-subject, reversal, known-gap]
+
+- id: sara-and-sarah-k-preferences
+  why: >
+    Two colleagues with look-alike names and different preferences. Both hold.
+    Look-alike names never meet, so this must stay free.
+  existing:
+    content: Sara prefers async written standups
+    category: preference
+    subject: sara
+    age_days: 40
+  incoming:
+    content: Sarah K prefers a daily standup call
+    category: preference
+    subject: sarah-k
+  expect: store
+  tags: [held-out-subjects, look-alike, people, free-expected]
+
+- id: platform-team-owns-billing-and-auth
+  why: >
+    One team owning two areas. Both hold. Billing and auth mean alike enough to
+    meet, so the judge now sees the pair: a dispute here is a false one.
+  existing:
+    content: The platform team owns billing
+    category: fact
+    subject: billing
+    age_days: 100
+  incoming:
+    content: The platform team owns auth
+    category: fact
+    subject: auth
+  expect: store
+  tags: [held-out-subjects, cost-of-change, roles]

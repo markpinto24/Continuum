@@ -442,3 +442,99 @@
   forbid:
     - The user makes it their morning plan
   tags: [reference, held-out]
+
+# =============================================================================
+# Iteration 3 (2026-10-26, FINDINGS §14) — labelled before the first run.
+# An unprompted maybe that is a plan; a hedge that is not one; long plans whose
+# shape is the choice, never the list of exercises or dishes.
+# =============================================================================
+
+- id: held-maybe-pottery-unprompted
+  mode: personal
+  why: >
+    An unprompted plan with what and when, said as a maybe: pending, like
+    plan-maybe-unprompted (decided 2026-10-16).
+  text: thinking about joining a pottery class on Saturdays
+  expect:
+    - content: The user is considering joining a pottery class on Saturdays
+      category: goal
+      subject: pottery
+      tentative: true
+  tags: [held-out, maybe, unprompted]
+
+- id: held-maybe-nightly-build
+  mode: workspace
+  why: >
+    The work shape of an unprompted plan: what and when, not yet decided.
+  text: we might move the nightly build to 2am
+  expect:
+    - content: The team is considering moving the nightly build to 2am
+      category: decision
+      subject: nightly-build
+      tentative: true
+  tags: [held-out, maybe, unprompted, workspace]
+
+- id: held-hedge-not-a-plan
+  mode: personal
+  why: >
+    A hedge with no plan in it. Nothing is being considered, so nothing is
+    pending — asking "are you going to cook tonight?" later would be noise.
+  text: not sure what to cook tonight
+  expect: []
+  forbid:
+    - The user is considering cooking tonight
+  tags: [held-out, maybe, precision, expected-cost]
+
+- id: held-hedge-musing-work
+  mode: workspace
+  why: >
+    Idle musing, said with a "maybe" — the 2026-10-16 decision: musing stores
+    nothing. This is the cost case for reading a hedge as a plan.
+  text: maybe someday we'll rewrite it all in Rust, who knows
+  expect: []
+  forbid:
+    - The team is considering rewriting it in Rust
+  tags: [held-out, musing, precision, expected-cost, workspace]
+
+- id: held-long-plan-exercises
+  mode: personal
+  why: >
+    A long plan taken up whole. The choice is its shape — four days, upper and
+    lower alternating — not every exercise, set and rep; a memory carrying the
+    list goes stale the first time one exercise changes.
+  context: >
+    Here's a 4-day upper/lower split. Monday Upper: bench press 4x8, barbell rows
+    4x8, overhead press 3x10, pull-ups 3x8. Tuesday Lower: squats 4x6, Romanian
+    deadlifts 3x10, walking lunges 3x12, calf raises 4x15. Thursday Upper:
+    incline dumbbell press 4x10, seated cable rows 4x10, lateral raises 3x15,
+    face pulls 3x15. Friday Lower: deadlifts 3x5, leg press 4x10, leg curls 3x12,
+    hanging leg raises 3x12. Rest on Wednesday and the weekend.
+  text: perfect, I'll do this one
+  expect:
+    - content: The user follows a four-day upper/lower split on Monday, Tuesday, Thursday and Friday
+      category: routine
+      subject: gym
+  forbid:
+    - The user will do bench press, barbell rows, overhead press, pull-ups, squats, Romanian deadlifts, lunges and calf raises
+  tags: [held-out, long-plan]
+
+- id: held-long-plan-meals
+  mode: personal
+  why: >
+    The meal version: the shape (high protein, three meals and two snacks a
+    day) is the choice; the dishes for each day are not memory.
+  context: >
+    Here's a high-protein week: three meals and two snacks a day. Monday: oats
+    with whey, chicken rice bowl, paneer tikka. Tuesday: egg bhurji, dal and
+    rice, grilled fish. Wednesday: Greek yogurt and berries, rajma chawal,
+    tofu stir fry. Thursday: besan chilla, chicken curry, egg salad. Friday:
+    poha with peanuts, fish curry, soya chunks pulao. Snacks: roasted chana,
+    fruit, nuts.
+  text: ok let's go with that meal plan
+  expect:
+    - content: The user follows a high-protein meal plan of three meals and two snacks a day
+      category: routine
+      subject: diet
+  forbid:
+    - The user eats oats with whey, chicken rice bowl, paneer tikka, egg bhurji, dal and rice and grilled fish
+  tags: [held-out, long-plan]

@@ -137,6 +137,13 @@ def render_extraction(report: ExtractionReport, *, label: str) -> str:
         f"    recall       {_pct(report.fact_recall)}   (F1 {report.fact_f1:.2f})",
         f"    category     {_pct(report.category_accuracy)}   of matched facts",
         f"    subject      {_pct(report.subject_accuracy)}   of matched facts",
+    ]
+    if report.subject_meet_rate is not None:
+        lines.append(
+            f"    subj. meets  {_pct(report.subject_meet_rate)}   of matched facts would be "
+            "compared with the label's subject"
+        )
+    lines += [
         f"    provenance   {_pct(report.excerpt_rate)}   carry a source excerpt",
     ]
     if report.tentative_labelled:

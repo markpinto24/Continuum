@@ -1,0 +1,85 @@
+# Labelled confirmations — a maybe the person said yes to (FINDINGS §14).
+#
+# `pending` is how the item read while it was a maybe, worded as the extractor
+# writes them; `expect` is the same statement, decided. Every detail stays —
+# what, when, how often, numbers, names — and only the hedge goes. Labelled
+# before the first run; tag held-out marks cases written to test the rule, not
+# to shape it.
+
+- id: consider-adding-long-run
+  why: The live case — "will consider adding" read as a plan nobody holds after the yes.
+  pending: The user will consider adding a Sunday long run of about 10 km to build endurance
+  expect: The user will add a Sunday long run of about 10 km to build endurance
+
+- id: considering-running-sundays
+  why: The extractor's usual pending shape, "is considering".
+  pending: The user is considering running on Sundays
+  expect: The user will run on Sundays
+
+- id: team-considering-standups
+  why: The work shape; the team, not the user, decides.
+  pending: The team is considering moving standups to 10am
+  expect: The team will move standups to 10am
+
+- id: think-about-pottery
+  why: '"Will think about" is a hedge, the joining is the plan.'
+  pending: The user will think about joining a pottery class on Saturdays
+  expect: The user will join a pottery class on Saturdays
+
+- id: might-switch-split
+  why: A modal hedge; the split and its days must survive.
+  pending: The user might switch to an upper/lower split four days a week
+  expect: The user will switch to an upper/lower split four days a week
+
+- id: may-move-nightly-build
+  why: '"May" is a hedge here, not permission.'
+  pending: The team may move the nightly build to 2am
+  expect: The team will move the nightly build to 2am
+
+- id: thinking-wake-time
+  why: A time that must survive the rewrite exactly.
+  pending: The user is thinking about waking up at 6:30 on weekdays
+  expect: The user will wake up at 6:30 on weekdays
+
+- id: might-cut-coffee
+  why: A limit with a time in it.
+  pending: The user might cut coffee after 2 pm
+  expect: The user will cut coffee after 2 pm
+
+- id: not-sure-job-offer
+  why: A hedge in the middle of the sentence, and a name (Lisbon).
+  pending: The user is not sure yet about taking the Lisbon job offer
+  expect: The user will take the Lisbon job offer
+
+- id: maybe-trunk-based
+  why: A leading "maybe".
+  pending: Maybe the team will adopt trunk-based development
+  expect: The team will adopt trunk-based development
+
+- id: possibly-read-pages
+  why: An adverb hedge and a number.
+  pending: The user will possibly read 20 pages every night
+  expect: The user will read 20 pages every night
+
+- id: thinking-of-postgres
+  why: A work decision with two names in it.
+  pending: The team is thinking of using Postgres for the Atlas event store
+  expect: The team will use Postgres for the Atlas event store
+
+- id: weighing-a-move
+  why: A hedge no word list knows ("weighing"); the month must survive.
+  pending: The user is weighing a move to Bangalore in March
+  expect: The user will move to Bangalore in March
+  tags: [held-out]
+
+- id: considering-instead-of
+  why: An "instead of" that must not be dropped — it names what is replaced.
+  pending: The user is considering a 3-day full-body routine instead of the 6-day split
+  expect: The user will do a 3-day full-body routine instead of the 6-day split
+  tags: [held-out]
+
+- id: perhaps-two-languages
+  why: Two items joined by "and"; both must stay.
+  pending: Perhaps the user will learn Spanish and Portuguese this year
+  expect: The user will learn Spanish and Portuguese this year
+  tags: [held-out]

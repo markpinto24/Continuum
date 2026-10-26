@@ -58,6 +58,7 @@ _REPLY_GUIDE = """How to read this reply:
 - Name the choice in full. Never write "this", "that" or "it" for what the
   assistant suggested: write out what it is, with its structure (which days, in
   what order, how often), but not every exercise or step.
+- Give the choice the subject it is about ("gym", "sleep"), never "self".
 - A thank-you or a no takes nothing from the assistant's words.
 - Still record, as usual, anything new the user says in their own words.
 - Add "tentative": true to a memory the user has not decided on ("maybe", "I'll
@@ -102,7 +103,10 @@ async def extract_turn(
             log.info("agreement.question_made_no_choice", count=len(facts) - len(kept))
         return kept
     if not proposal or not proposal.strip():
-        return await extractor.extract(lone_turn(reply, mode), mode=mode)
+        facts = await extractor.extract(lone_turn(reply, mode), mode=mode)
+        if facts or not is_hedged(reply):
+            return facts
+        return await _unprompted_maybe(extractor, reply=reply, mode=mode)
     transcript = reply_transcript(reply, proposal)
     facts = await extractor.extract(transcript, mode=mode)
     vague = [f for f in facts if points_at_something(f.content)]
@@ -116,6 +120,53 @@ async def extract_turn(
         if retry and not any(points_at_something(f.content) for f in retry):
             facts = retry
     return adopted_only(facts, reply=reply)
+
+
+# Read only for a hedged turn the extractor took nothing from. Both extraction
+# prompts say musing records nothing, and they win: "maybe I'll start running
+# on Sundays" stored nothing, 0 in 3 (FINDINGS §12) — framing inside the turn
+# changed nothing either (§14). Changing the system prompts cost Work F1 0.74 ->
+# 0.56-0.64. So this one reading has its own prompt, and every other input is
+# still extracted from byte-identical text. A template, no worked answer (§9).
+_MAYBE_PROMPT = """You read one thing a person said about something they have not
+decided yet.
+
+Decide whether it is a concrete plan: something they would do, with when or how
+often it would happen.
+- If it is, write that plan once as a third-person statement beginning "The
+  user is considering" ({we}), keeping every detail they gave.
+- A wish with no time to it, or a choice about the moment, is not a plan.
+
+Respond with JSON only, in exactly this shape - an empty list when it is not a
+plan:
+{{"memories": [{{"content": "<the plan>", "category": "<one of: {categories}>",
+               "subject": "<a short slug for what the plan is about>"}}]}}"""
+
+_MAYBE_PROMPTS = {
+    Mode.PERSONAL: _MAYBE_PROMPT.format(
+        we='their "I", "my" and "we" are "the user"',
+        categories="routine, goal, decision, preference",
+    ),
+    Mode.WORKSPACE: _MAYBE_PROMPT.format(
+        we='"The team is considering" when they say "we"', categories="decision"
+    ),
+}
+
+
+async def _unprompted_maybe(
+    extractor: FactExtractor, *, reply: str, mode: Mode
+) -> list[ExtractedFact]:
+    """An unprompted maybe that is a plan is pending (decided 2026-10-16)."""
+    facts = await extractor.extract(reply, mode=mode, system=_MAYBE_PROMPTS[mode])
+    # Only a choice can be pending, and never health: a maybe about a dose is
+    # told in the person's own decided words, or not at all.
+    kept = [f for f in facts if f.category in CHOICE_CATEGORIES and not names_a_dose(f.content)]
+    for fact in kept:
+        fact.tentative = True
+        fact.source_excerpt = fact.source_excerpt or reply.strip()
+    if kept:
+        log.info("agreement.unprompted_maybe", count=len(kept))
+    return kept
 
 
 # "this workout", "that plan", "it as my plan": a choice that names nothing.

@@ -31,6 +31,7 @@ export function makeMemory(over: Partial<Memory> = {}): Memory {
     updated_at: at,
     last_reinforced_at: at,
     reinforcement_count: 0,
+    adopted: false,
     ...over,
   }
 }

@@ -42,6 +42,7 @@ from continuum.models.memory import (
     mode_of,
 )
 from continuum.services.memory_store import MemoryStore
+from continuum.services.subjects import SubjectRelations
 
 log = get_logger(__name__)
 
@@ -166,6 +167,7 @@ class ResolutionService:
         # (services/feedback.Calibration). Used only when CALIBRATED_GATE is on
         # and it returns a value, i.e. once it rests on enough decisions.
         self.calibrate = calibrate
+        self.subjects = SubjectRelations(llm, self.settings.subject_similarity_threshold)
 
     # --- Entry point -------------------------------------------------------
 
@@ -242,7 +244,13 @@ class ResolutionService:
         fact: ExtractedFact,
         neighbours: list[tuple[Memory, float]],
     ) -> Resolution:
-        candidate = self._pick_candidate(fact, neighbours)
+        in_band = [
+            memory for memory, score in neighbours
+            if score >= self.settings.conflict_similarity_threshold
+            and comparable_categories(fact.category, memory.category)
+        ]
+        related = await self.subjects.related(fact, in_band)
+        candidate = self._pick_candidate(fact, neighbours, related)
         if candidate is None:
             return Resolution(
                 Verdict.NEW, reason="no candidate of a comparable kind in the conflict band"
@@ -250,7 +258,11 @@ class ResolutionService:
 
         # --- Paid decision: the judge --------------------------------------
 
-        judgement = await self._judge(fact, candidate)
+        # Met by meaning, the two slugs are different words for one thing. Shown
+        # them, the judge applies its own "a different subject is independent"
+        # rule and the comparison is lost after all; shown neither, it reads the
+        # words, as it does for every subject-less pair.
+        judgement = await self._judge(fact, candidate, show_subjects=candidate.id not in related)
         relation, confidence, reason = judgement.relation, judgement.confidence, judgement.reason
         provenance = {
             "confidence_source": judgement.source,
@@ -389,19 +401,24 @@ class ResolutionService:
     # --- Candidate selection ----------------------------------------------
 
     def _pick_candidate(
-        self, fact: ExtractedFact, neighbours: list[tuple[Memory, float]]
+        self,
+        fact: ExtractedFact,
+        neighbours: list[tuple[Memory, float]],
+        related: frozenset[str] = frozenset(),
     ) -> Memory | None:
         """Cheap filters that decide most cases without an LLM call.
 
         A memory is only worth judging if it could plausibly be replaced by the
         new fact: a comparable category (`comparable_categories`), mutable, and —
-        when both name a subject — the same subject.
+        when both name a subject — the same subject, or one that means the same
+        (`related`: ids of the memories whose subject does, `SubjectRelations`).
 
         Only one candidate is judged, so which one matters: a memory naming the
         same subject is preferred over a closer-worded one with no subject at
         all. Otherwise "Atlas is using MongoDB" is judged against whatever
         subject-less memory happens to score highest, and never against the
-        Atlas decision it actually contradicts.
+        Atlas decision it actually contradicts. A subject that only means the
+        same comes next, ahead of one with no subject.
         """
         eligible: list[Memory] = []
         for memory, score in neighbours:
@@ -409,7 +426,10 @@ class ResolutionService:
                 continue
             if not comparable_categories(fact.category, memory.category):
                 continue  # history is append-only; a preference never replaces a decision
-            if fact.subject and memory.subject and fact.subject != memory.subject:
+            if (
+                fact.subject and memory.subject and fact.subject != memory.subject
+                and memory.id not in related
+            ):
                 continue  # same wording, different entity
             eligible.append(memory)
         if not eligible:
@@ -418,19 +438,26 @@ class ResolutionService:
             for memory in eligible:
                 if memory.subject == fact.subject:
                     return memory
+            for memory in eligible:
+                if memory.id in related:
+                    return memory
         return eligible[0]
 
     # --- The judge ---------------------------------------------------------
 
-    async def _judge(self, fact: ExtractedFact, existing: Memory) -> Judgement:
+    async def _judge(
+        self, fact: ExtractedFact, existing: Memory, *, show_subjects: bool = True
+    ) -> Judgement:
+        existing_subject = (existing.subject if show_subjects else None) or "—"
+        fact_subject = (fact.subject if show_subjects else None) or "—"
         user_prompt = (
             f"EXISTING memory:\n"
-            f'  subject: {existing.subject or "—"}\n'
+            f"  subject: {existing_subject}\n"
             f"  category: {existing.category}\n"
             f"  recorded: {existing.created_at.date()}\n"
             f"  content: {existing.content}\n\n"
             f"NEW statement:\n"
-            f'  subject: {fact.subject or "—"}\n'
+            f"  subject: {fact_subject}\n"
             f"  category: {fact.category}\n"
             f"  recorded: just now, after the EXISTING memory\n"
             f"  content: {fact.content}"

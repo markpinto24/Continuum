@@ -159,15 +159,17 @@ class FactExtractor:
         self.llm = llm
 
     async def extract(
-        self, transcript: str, *, mode: Mode = Mode.WORKSPACE
+        self, transcript: str, *, mode: Mode = Mode.WORKSPACE, system: str | None = None
     ) -> list[ExtractedFact]:
+        """`system` replaces the mode's prompt for one narrow reading (an
+        unprompted maybe); every ordinary input uses the mode's own."""
         text = transcript.strip()
         if not text:
             return []
 
         try:
             payload = await self.llm.complete_json(
-                system=prompt_for(mode),
+                system=system or prompt_for(mode),
                 user=f"Input:\n---\n{text}\n---",
             )
         except Exception as exc:  # noqa: BLE001

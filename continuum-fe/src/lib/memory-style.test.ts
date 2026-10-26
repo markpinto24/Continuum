@@ -49,6 +49,13 @@ describe('Personal mode', () => {
     expect(halfLifeDays('person', 'workspace')).toBe(365)
     expect(halfLifeDays('health', 'personal')).toBeNull()
     expect(halfLifeDays('routine', 'personal')).toBe(45)
+  })
+
+  it('fades an adopted choice at one rate, whatever it was filed as', () => {
+    expect(halfLifeDays('decision', 'personal', true)).toBe(90)
+    expect(halfLifeDays('routine', 'workspace', true)).toBe(90)
+    // Only choices are ever adopted; anything else keeps its own rate.
+    expect(halfLifeDays('person', 'personal', true)).toBe(730)
     expect(CATEGORY_LABEL.goal).toBe('Goal')
   })
 })

@@ -22,7 +22,8 @@ import re
 from pydantic import BaseModel, Field
 
 from continuum.evaluation.types import ExpectedFact, ExtractionCase
-from continuum.models.memory import ExtractedFact
+from continuum.models.memory import ExtractedFact, Memory
+from continuum.services.subjects import SubjectRelations, canonical_subject
 
 # Words that carry no distinguishing signal; keeping them inflates every overlap.
 _STOPWORDS = frozenset(
@@ -53,6 +54,11 @@ class ExtractionReport(BaseModel):
     )
     subject_accuracy: float = Field(
         ..., description="Of matched pairs, share with the right subject slug."
+    )
+    subject_meet_rate: float | None = Field(
+        None,
+        description="Of matched pairs, share whose subject the resolver would compare "
+        "with the label's: the same slug, spelling or meaning, or no subject on a side.",
     )
     excerpt_rate: float = Field(
         ..., description="Extracted facts carrying a source excerpt. Provenance coverage."
@@ -113,11 +119,39 @@ def match(
     return pairs
 
 
+async def subjects_that_meet(
+    relations: SubjectRelations,
+    results: list[tuple[ExtractionCase, list[ExtractedFact]]],
+) -> set[tuple[int, int]]:
+    """The matched (label, extraction) pairs, by id, whose subjects would be compared.
+
+    A subject that differs from the label is only wrong if it keeps the fact from
+    the beliefs it should be compared with: `gym` for `workout` is fine once the
+    two meet. Read through the resolver's own `SubjectRelations`.
+    """
+    meeting: set[tuple[int, int]] = set()
+    for case, actual in results:
+        for want, got in match(case.expect, actual):
+            a, b = _normalise(want.subject), _normalise(got.subject)
+            # No subject on either side is compared with everything.
+            if not a or not b or canonical_subject(b, {a}) == a:
+                meeting.add((id(want), id(got)))
+                continue
+            label = Memory(user_id="eval", content=want.content, category=want.category, subject=a)
+            fact = got.model_copy(update={"subject": b})
+            if await relations.related(fact, [label]):
+                meeting.add((id(want), id(got)))
+    return meeting
+
+
 def score_extraction(
     results: list[tuple[ExtractionCase, list[ExtractedFact]]],
+    *,
+    meeting: set[tuple[int, int]] | None = None,
 ) -> ExtractionReport:
     labelled = extracted = matched = 0
     right_category = right_subject = right_tentative = tentative_labelled = 0
+    subject_meets = 0
     with_excerpt = 0
     missed: list[str] = []
     spurious: list[str] = []
@@ -143,6 +177,7 @@ def score_extraction(
             # A null label means "no single clear entity", and the extractor
             # agreeing that there is none counts as correct.
             right_subject += _normalise(want.subject) == _normalise(got.subject)
+            subject_meets += meeting is not None and (id(want), id(got)) in meeting
             right_tentative += want.tentative == got.tentative
         tentative_labelled += sum(want.tentative for want in case.expect)
 
@@ -168,6 +203,7 @@ def score_extraction(
         fact_f1=round(f1, 4),
         category_accuracy=_ratio(right_category, matched),
         subject_accuracy=_ratio(right_subject, matched),
+        subject_meet_rate=None if meeting is None else _ratio(subject_meets, matched),
         excerpt_rate=_ratio(with_excerpt, extracted),
         tentative_accuracy=_ratio(right_tentative, matched) if matched else 1.0,
         tentative_labelled=tentative_labelled,

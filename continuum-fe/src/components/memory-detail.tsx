@@ -144,7 +144,11 @@ export function MemoryDetail({
   if (!memory) return null
 
   const personal = modeOf(memory.user_id) === 'personal'
-  const halfLife = halfLifeDays(memory.category, personal ? 'personal' : 'workspace')
+  const halfLife = halfLifeDays(
+    memory.category,
+    personal ? 'personal' : 'workspace',
+    memory.adopted,
+  )
   const forgotten = memory.redacted_at !== null
   const summary = memory.kind === 'summary'
   // Either of your own graphs: Work is your id, Personal is your id + ":personal".

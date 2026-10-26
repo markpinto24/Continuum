@@ -244,9 +244,11 @@ class Scripted:
     def __init__(self, *batches: list[ExtractedFact]) -> None:
         self.batches = list(batches)
         self.transcripts: list[str] = []
+        self.systems: list[str | None] = []
 
-    async def extract(self, transcript, *, mode):  # noqa: ANN001, ANN201, ARG002
+    async def extract(self, transcript, *, mode, system=None):  # noqa: ANN001, ANN201, ARG002
         self.transcripts.append(transcript)
+        self.systems.append(system)
         return self.batches.pop(0) if self.batches else []
 
 
@@ -281,3 +283,39 @@ async def test_a_concrete_choice_costs_no_second_call():
     await extract_turn(extractor, reply="sounds good", proposal=SPLIT_ANSWER,  # type: ignore[arg-type]
                        mode=Mode.PERSONAL)
     assert len(extractor.transcripts) == 1
+
+
+# --- An unprompted maybe (decided 2026-10-16; FINDINGS §14) ----------------------------
+
+
+async def test_an_unprompted_maybe_that_is_a_plan_is_pending():
+    plan = fact("The user is considering running on Sundays", C.ROUTINE, "running")
+    extractor = Scripted([], [plan])
+    [kept] = await extract_turn(extractor, reply="maybe I'll start running on Sundays",  # type: ignore[arg-type]
+                                proposal=None, mode=Mode.PERSONAL)
+    assert kept.tentative  # pending, whatever the model flagged
+    # Read again with its own prompt; the first read used the mode's, untouched.
+    assert extractor.systems[0] is None and "not\ndecided yet" in extractor.systems[1]
+
+
+async def test_a_turn_without_a_hedge_is_read_once():
+    extractor = Scripted([])
+    assert await extract_turn(extractor, reply="someday I'd love to see Japan",  # type: ignore[arg-type]
+                              proposal=None, mode=Mode.PERSONAL) == []
+    assert len(extractor.transcripts) == 1
+
+
+async def test_a_hedged_turn_that_already_gave_facts_is_not_read_again():
+    own = fact("The user is tired this week", C.FACT, "self")
+    extractor = Scripted([own], [fact("The user is considering resting", C.ROUTINE, "sleep")])
+    assert await extract_turn(extractor, reply="maybe I'm just tired this week",  # type: ignore[arg-type]
+                              proposal=None, mode=Mode.PERSONAL) == [own]
+
+
+async def test_an_unprompted_maybe_never_makes_a_fact_or_a_dose_pending():
+    extractor = Scripted([], [
+        fact("The user is a runner", C.FACT, "running"),
+        fact("The user is considering taking 5 g of creatine daily", C.ROUTINE, "gym"),
+    ])
+    assert await extract_turn(extractor, reply="maybe I should take creatine",  # type: ignore[arg-type]
+                              proposal=None, mode=Mode.PERSONAL) == []

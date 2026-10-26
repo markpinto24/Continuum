@@ -180,3 +180,29 @@ class RetrievalCase(BaseModel):
     query: str
     expect: list[ExpectedMemory] = Field(..., min_length=1)
     tags: list[str] = Field(default_factory=list)
+
+
+class SubjectPair(BaseModel):
+    """Two subject slugs, and whether facts filed under them must be compared."""
+
+    id: str
+    a: str
+    b: str
+    meet: bool = Field(
+        ..., description="A statement about one can replace one about the other."
+    )
+    names: bool = Field(
+        False, description="Memories write these as names; they match by spelling only."
+    )
+    why: str
+    tags: list[str] = Field(default_factory=list)
+
+
+class ConfirmationCase(BaseModel):
+    """A maybe the person said yes to, and how it should read once decided."""
+
+    id: str
+    why: str
+    pending: str
+    expect: str
+    tags: list[str] = Field(default_factory=list)

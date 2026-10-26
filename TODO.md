@@ -11,33 +11,41 @@ Status keys: `[ ]` to do · `[~]` in progress · `[x]` done
 
 ## Iteration 0 — Housekeeping (do first)
 
-- [ ] **Commit the uncommitted work**: short replies to agreements, naming
+- [x] **Commit the uncommitted work**: short replies to agreements, naming
       "this workout" in full, graph centred on launch, chat scroll while
-      streaming, graph re-framed after unselecting
+      streaming, graph re-framed after unselecting (`8acee10`)
 - [ ] Rebuild the API container so it runs the latest backend code
 - [ ] Settle the one false dispute in the live Personal graph
       ("coding and gym" vs the four-day split) with **Both are true**
 
 ---
 
-## Iteration 1 — Semantic subject matching *(highest value)*
+## Iteration 1 — Semantic subject matching *(highest value)* — done, FINDINGS §13
 
 The weakest link today. Many facts are filed under `self`, and one thing is
 filed as `gym` in one run and `workout` in another. That causes false disputes
 (everything on `self` is compared) and risks silent stale beliefs (`gym` and
 `workout` are never compared).
 
-- [ ] Treat two subjects as one when their names are semantically close
+- [x] Treat two subjects as one when their names are semantically close
       (embedding similarity between subject slugs), not only when spelled alike
-- [ ] Calibrate the threshold on real subject pairs (same thing / different thing)
-- [ ] Then re-try the reverted rule "an agreed choice gets a real subject, never
-      `self`" (FINDINGS §12) — safe once synonyms meet
-- [ ] Held-out cases first: synonym subjects that must meet (gym / workout,
-      home / flat), and look-alikes that must not (sara / sarah-k)
-- [ ] Success: no new false disputes on the agreement corpus; belief loss and
-      stale beliefs stay at 0% on both resolution corpora
+      — *compared*, never renamed: slug similarity is relatedness, not identity.
+      Names, look-alikes and `self` stay spelling-only
+- [x] Calibrate the threshold on real subject pairs (same thing / different thing)
+      — `corpus/subjects.yaml`, `run_eval.py --subjects`: bge-m3 0.67
+- [x] Then re-try the reverted rule "an agreed choice gets a real subject, never
+      `self`" (FINDINGS §12) — kept: `self` 11/18 → 0/18, P/R unchanged
+- [x] Held-out cases first: synonym subjects that must meet (gym / workout,
+      home / flat), and look-alikes that must not (sara / sarah-k) — 9/9 meet,
+      sara / sarah-k apart; 11 held-out resolution cases
+- [x] Success: no new false disputes (5 cost cases, all independent, 2 passes);
+      belief loss 0% on both corpora; stale 0% except one known-gap case added
+      this iteration, which was stale before too
+- [ ] Follow-ups found: a subject-first sentence ("Payments now run…") reads as
+      a name and stays apart; the *spelling* rule renames `brother-in-law` to
+      `brother` (a qualified form, like sara / sara-chen)
 
-## Iteration 2 — A judge that asks less
+## Iteration 2 — A judge that asks less *(deferred 2026-10-26: needs a 14B–32B model download)*
 
 Personal mode sends about 68% of cases to the inbox; clear changes ("no longer
 vegetarian", "budget is now 10000") come back as "conflict".
@@ -49,14 +57,20 @@ vegetarian", "budget is now 10000") come back as "conflict".
       decision, recorded with the evidence
 - [ ] Success: escalation down, belief loss still 0%
 
-## Iteration 3 — Agreement and pending polish
+## Iteration 3 — Agreement and pending polish — done, FINDINGS §14
 
-- [ ] An unprompted "maybe I'll start running on Sundays" becomes pending
-      (decided 2026-10-16, not achieved — FINDINGS §12)
-- [ ] A confirmed maybe drops its hedged wording ("will think about adding…")
-- [ ] One decay rate for adopted choices, so decision vs routine filing does not
-      change how fast they fade (180 vs 45 days)
-- [ ] Long plans: store the shape (days, order), never the full exercise list
+- [x] An unprompted "maybe I'll start running on Sundays" becomes pending
+      — its own small prompt for hedged turns; 4/4 pending ×3, musing still
+      nothing, agreement F1 0.61–0.70 → 0.80
+- [x] A confirmed maybe drops its hedged wording ("will think about adding…")
+      — guarded rewrite; 13/15 as labelled, the other 2 right in other words
+- [x] One decay rate for adopted choices, so decision vs routine filing does not
+      change how fast they fade (180 vs 45 days) — 90 days, decided 2026-10-26
+- [x] Long plans: store the shape (days, order), never the full exercise list
+      — already true, 12/12 runs; held-out cases kept as a regression check
+- [ ] Follow-up: the "never self" rule's example word anchors (a long run and a
+      meal plan both filed under `gym`) — compared anyway, but worth a neutral
+      example
 
 ## Iteration 4 — Evaluation you can quote
 

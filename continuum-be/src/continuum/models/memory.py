@@ -185,7 +185,19 @@ PERSONAL_HALF_LIFE_DAYS: dict[MemoryCategory, float | None] = {
 }
 
 
-def half_life_for(category: MemoryCategory, mode: Mode) -> float | None:
+# A choice taken up from the assistant's suggestion. The extractor files the
+# same adopted split as a decision (180 d) in one run and a routine (45 d) in the
+# next (FINDINGS §14), so how fast it faded was a coin toss. One rate for all of
+# them, in both modes — a product decision (2026-10-26). Restating it in the
+# person's own words reinforces it, which restarts the clock.
+ADOPTED_CHOICE_HALF_LIFE_DAYS = 90.0
+
+
+def half_life_for(
+    category: MemoryCategory, mode: Mode, *, adopted: bool = False
+) -> float | None:
+    if adopted and category in CHOICE_CATEGORIES:
+        return ADOPTED_CHOICE_HALF_LIFE_DAYS
     table = PERSONAL_HALF_LIFE_DAYS if mode is Mode.PERSONAL else CATEGORY_HALF_LIFE_DAYS
     return table.get(category)
 
@@ -331,6 +343,16 @@ class Memory(BaseModel):
     last_reminded_at: datetime | None = None
     decided_at: datetime | None = Field(
         default=None, description="When a pending item was confirmed or declined."
+    )
+    adopted: bool = Field(
+        default=False,
+        description="A choice the user took up from the assistant's answer rather than "
+        "stated in their own words. Fades at one rate whatever its category.",
+    )
+    tentative_wording: str | None = Field(
+        default=None,
+        description="How a confirmed pending item read while it was only a maybe. "
+        "Kept for audit; the content now says it as decided.",
     )
 
     def touch(self) -> None:
@@ -482,7 +504,7 @@ class Memory(BaseModel):
 
     @property
     def half_life_days(self) -> float | None:
-        return half_life_for(self.category, mode_of(self.user_id))
+        return half_life_for(self.category, mode_of(self.user_id), adopted=self.adopted)
 
     def decayed_confidence(self, *, now: datetime, floor: float) -> float:
         """Confidence after exponential decay since last reinforcement.
@@ -571,4 +593,5 @@ class ExtractedFact(BaseModel):
             source_excerpt=self.source_excerpt,
             confidence=confidence,
             status=MemoryStatus.PENDING if self.tentative else MemoryStatus.ACTIVE,
+            adopted=self.adopted,
         )

@@ -112,7 +112,26 @@ export const PERSONAL_HALF_LIFE_DAYS: Record<MemoryCategory, number | null> = {
   goal: 120,
 }
 
-export function halfLifeDays(category: MemoryCategory, mode: Mode): number | null {
+/** The backend's CHOICE_CATEGORIES: what a person can take up from a suggestion. */
+const CHOICE_CATEGORIES: ReadonlySet<MemoryCategory> = new Set([
+  'decision',
+  'routine',
+  'goal',
+  'preference',
+])
+
+/**
+ * ADOPTED_CHOICE_HALF_LIFE_DAYS: one rate for a choice taken up from a
+ * suggestion, whichever of decision or routine the extractor filed it as.
+ */
+export const ADOPTED_CHOICE_HALF_LIFE_DAYS = 90
+
+export function halfLifeDays(
+  category: MemoryCategory,
+  mode: Mode,
+  adopted = false,
+): number | null {
+  if (adopted && CHOICE_CATEGORIES.has(category)) return ADOPTED_CHOICE_HALF_LIFE_DAYS
   return (mode === 'personal' ? PERSONAL_HALF_LIFE_DAYS : CATEGORY_HALF_LIFE_DAYS)[category]
 }
 

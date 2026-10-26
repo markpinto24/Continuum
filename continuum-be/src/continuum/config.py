@@ -214,6 +214,13 @@ class Settings(BaseSettings):
     #   high and contradictions are never examined (band misses).
     duplicate_similarity_threshold: float | None = None
     conflict_similarity_threshold: float | None = None
+    # Two different subject slugs meet — are compared, never renamed — when
+    # their meanings score at least this (services/subjects.py). Also a property
+    # of the embedding model: from CALIBRATED_SUBJECT_THRESHOLDS, and unset (off:
+    # spelling only) for a model with no calibration. Too high and one thing
+    # filed under two words is never compared — a silent stale belief; too low
+    # and unrelated topics cost judge calls. 1.0 turns meaning off.
+    subject_similarity_threshold: float | None = None
     retrieval_top_k: int = 8
     # How many existing memories the resolver will reason over per new fact.
     resolution_candidate_limit: int = 5
@@ -324,6 +331,10 @@ class Settings(BaseSettings):
             self.duplicate_similarity_threshold = duplicate
         if self.conflict_similarity_threshold is None:
             self.conflict_similarity_threshold = conflict
+        if self.subject_similarity_threshold is None:
+            self.subject_similarity_threshold = CALIBRATED_SUBJECT_THRESHOLDS.get(
+                self.embedding_model.split(":")[0]
+            )
         return self
 
     @property
@@ -342,6 +353,13 @@ CALIBRATED_THRESHOLDS: dict[str, tuple[float, float]] = {
     "nomic-embed-text": (0.90, 0.66),
 }
 UNCALIBRATED_THRESHOLDS: tuple[float, float] = (0.94, 0.78)
+
+#: Subject-slug similarity per embedding model, from `run_eval.py --subjects` on
+#: `corpus/subjects.yaml` (FINDINGS §13). No fallback: without a calibration,
+#: subjects match by spelling only, as they did before meaning was read.
+CALIBRATED_SUBJECT_THRESHOLDS: dict[str, float] = {
+    "bge-m3": 0.67,
+}
 
 
 @lru_cache

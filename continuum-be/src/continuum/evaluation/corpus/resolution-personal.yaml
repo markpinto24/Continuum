@@ -567,3 +567,121 @@
     subject: home
   expect: store
   tags: [held-out-guard, compatible, cost-of-change]
+
+# =============================================================================
+# held-out-subjects — one thing under two words (FINDINGS §13). Written and
+# labelled before semantic subject matching first ran. The store cases are its
+# cost: two different things whose words mean alike, which now reach the judge.
+# =============================================================================
+
+- id: split-filed-under-workout
+  why: >
+    The live case (FINDINGS §12): one split filed as gym, its replacement as
+    workout. "Now … instead of" says the old split stopped; only one split is
+    followed at a time. Kept apart by subject, the six-day split stays active
+    and nobody is asked.
+  existing:
+    content: The user follows a push/pull/legs split six days a week
+    category: routine
+    subject: gym
+    age_days: 60
+  incoming:
+    content: The user now follows a four-day upper/lower split instead of push/pull/legs
+    category: routine
+    subject: workout
+  expect: retire
+  tags: [held-out-subjects, synonym-subject, reversal]
+
+- id: moved-from-house-to-flat
+  why: >
+    Where the user lives, filed as home then flat. "Moved" says the old home
+    stopped. Spelling can never join home and flat.
+  existing:
+    content: The user lives in a house in Pune
+    category: fact
+    subject: home
+    age_days: 400
+  incoming:
+    content: The user moved to a flat in Bangalore
+    category: fact
+    subject: flat
+  expect: retire
+  tags: [held-out-subjects, synonym-subject, places, reversal]
+
+- id: partner-named-as-girlfriend
+  why: >
+    One relationship under two words, and a different name in it. Nothing says
+    the user and Priya split up, so — like the partner cases above — a person
+    decides. Kept apart by subject, the graph silently holds two partners.
+  existing:
+    content: The user's partner is Priya
+    category: person
+    subject: partner
+    age_days: 200
+  incoming:
+    content: The user's girlfriend is Sam
+    category: person
+    subject: girlfriend
+  expect: escalate
+  tags: [held-out-subjects, synonym-subject, relationship, unstated-change]
+
+- id: sister-and-brother-cities
+  why: >
+    Two siblings, two cities. Both hold. Sister and brother mean alike enough
+    to meet, so the judge now sees the pair: a dispute here is a false one.
+  existing:
+    content: The user's sister lives in Pune
+    category: person
+    subject: sister
+    age_days: 120
+  incoming:
+    content: The user's brother lives in Mumbai
+    category: person
+    subject: brother
+  expect: store
+  tags: [held-out-subjects, cost-of-change, people]
+
+- id: mum-and-aunt-in-goa
+  why: >
+    Two relatives in one town. Both hold. The cost of meeting by meaning.
+  existing:
+    content: The user's mum lives in Goa
+    category: person
+    subject: mum
+    age_days: 300
+  incoming:
+    content: The user's aunt lives in Goa too
+    category: person
+    subject: aunt
+  expect: store
+  tags: [held-out-subjects, cost-of-change, people]
+
+- id: lunch-and-dinner-times
+  why: >
+    Two meals, two times; one does not replace the other.
+  existing:
+    content: The user eats lunch at 1 pm
+    category: routine
+    subject: lunch
+    age_days: 30
+  incoming:
+    content: The user eats dinner at 8 pm
+    category: routine
+    subject: dinner
+  expect: store
+  tags: [held-out-subjects, cost-of-change, routine]
+
+- id: budget-and-salary
+  why: >
+    What the user spends and what they earn are two numbers, both true.
+  existing:
+    content: The user's monthly budget is 40000 rupees
+    category: constraint
+    subject: budget
+    age_days: 90
+  incoming:
+    content: The user's salary is 90000 rupees a month
+    category: fact
+    subject: salary
+  expect: store
+  tags: [held-out-subjects, cost-of-change, money]

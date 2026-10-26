@@ -23,6 +23,12 @@
     # derive the two cosine thresholds for the configured embedding model
     EMBEDDING_MODEL=all-minilm EMBEDDING_DIM=384 uv run python scripts/run_eval.py --calibrate
 
+    # derive the subject-meaning threshold: when do two slugs name one thing?
+    uv run python scripts/run_eval.py --subjects
+
+    # a confirmed maybe, reworded as decided: does the guard keep only good ones?
+    uv run python scripts/run_eval.py --confirmations
+
 The split matters. Resolution needs a judge call per ambiguous case, which is the
 slow and non-deterministic part; the gate sweep needs none, because the recorded
 outcome holds the judge's answer from *before* the gate was applied. Run the
@@ -50,14 +56,18 @@ from continuum.evaluation import corpus, metrics, report
 from continuum.evaluation import retrieval as retrieval_eval
 from continuum.evaluation.calibrate import calibrate, render_calibration
 from continuum.evaluation.crowded import load_crowded, render_crowded, run_crowded
-from continuum.evaluation.extraction import score_extraction
+from continuum.evaluation.extraction import overlap, score_extraction, subjects_that_meet
 from continuum.evaluation.preflight import render_preflight, run_preflight
 from continuum.evaluation.runner import EVAL_USER, ResolutionRunner
+from continuum.evaluation.subjects import derive as derive_subjects
+from continuum.evaluation.subjects import render_subjects, score_pairs
 from continuum.evaluation.types import CaseOutcome
 from continuum.models.memory import Mode, graph_owner
 from continuum.models.schemas import IngestRequest, Message
 from continuum.services.extraction import FactExtractor, Mem0Extractor
 from continuum.services.memory_store import MemoryStore
+from continuum.services.subjects import SubjectRelations
+from continuum.services.wording import decided_wording
 
 
 def _rule(title: str) -> None:
@@ -173,7 +183,13 @@ async def run_agreement(before: bool) -> None:
                 )
             results.append((case, facts))
         _rule(f"EXTRACTION — agreement corpus, {'before (reply only)' if before else 'after'}")
-        print(report.render_extraction(score_extraction(results), label="continuum"))
+        relations = SubjectRelations(llm, settings.subject_similarity_threshold)
+        meeting = await subjects_that_meet(relations, results)
+        scored = score_extraction(results, meeting=meeting)
+        print(report.render_extraction(scored, label="continuum"))
+        extracted = [f for _, facts in results for f in facts]
+        on_self = sum(f.subject == "self" for f in extracted)
+        print(f"    on `self`    {on_self} of {len(extracted)} extracted facts")
         print("\n  per case (read the numbers — token matching cannot):")
         for case, facts in results:
             shown = "; ".join(
@@ -181,6 +197,39 @@ async def run_agreement(before: bool) -> None:
                 for f in facts
             ) or "(nothing)"
             print(f"    {case.id:24} {shown}")
+    finally:
+        await llm.aclose()
+
+
+async def run_confirmations() -> None:
+    """Each labelled maybe through the real rewrite and its guard.
+
+    "Right" is the rewrite reading as the label does (token overlap ≥ 0.8 — the
+    labels differ from their maybes by the hedge alone, so this is strict).
+    "Kept" is the guard refusing, which leaves the maybe's words: safe, clumsy.
+    A rewrite that passed the guard but reads wrong is the failure that matters.
+    """
+    cases = corpus.load_confirmation_cases()
+    llm = LLMClient(get_settings())
+    try:
+        right = kept = wrong = 0
+        lines = []
+        for case in cases:
+            got = await decided_wording(llm, case.pending)
+            if got is None:
+                kept += 1
+                verdict = "kept"
+            elif overlap(got, case.expect) >= 0.8:
+                right += 1
+                verdict = "right"
+            else:
+                wrong += 1
+                verdict = "WRONG"
+            held = " [held-out]" if "held-out" in case.tags else ""
+            lines.append(f"    {verdict:<6} {case.id}{held}: {got or case.pending}")
+        _rule("CONFIRMATIONS — a maybe, worded as decided")
+        print(f"  {len(cases)} cases: {right} right · {kept} kept as said · {wrong} wrong\n")
+        print("\n".join(lines))
     finally:
         await llm.aclose()
 
@@ -277,6 +326,16 @@ async def main() -> None:
         help="Derive both cosine thresholds for the configured embedding model. No LLM calls.",
     )
     parser.add_argument(
+        "--subjects",
+        action="store_true",
+        help="Derive the subject-meaning threshold from the subject-pair corpus. No LLM calls.",
+    )
+    parser.add_argument(
+        "--confirmations",
+        action="store_true",
+        help="Reword each labelled maybe as decided, through the real guard.",
+    )
+    parser.add_argument(
         "--force", action="store_true", help="Run even if the embedding preflight fails."
     )
     parser.add_argument(
@@ -349,6 +408,25 @@ async def main() -> None:
             print(render_calibration(await calibrate(llm, cases)))
         finally:
             await llm.aclose()
+        return
+
+    if args.subjects:
+        settings = get_settings()
+        llm = LLMClient(settings)
+        try:
+            _rule("SUBJECTS — when do two slugs name one thing?")
+            scored = await score_pairs(llm, corpus.load_subject_pairs())
+            calibration = derive_subjects(settings.embedding_model, scored)
+            print(render_subjects(calibration))
+            if settings.subject_similarity_threshold not in (None, calibration.threshold):
+                print(f"\n  configured threshold >= {settings.subject_similarity_threshold:.2f}:")
+                print(render_subjects(calibration, settings.subject_similarity_threshold))
+        finally:
+            await llm.aclose()
+        return
+
+    if args.confirmations:
+        await run_confirmations()
         return
 
     if args.agreement:

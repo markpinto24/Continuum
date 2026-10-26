@@ -715,13 +715,161 @@ run and `workout` in another, and the resolver never compares two different
 subjects — so a later change of split could leave both splits active with
 nobody asked. That trades an unnecessary question for a silent stale belief,
 the wrong way round (commitment 4). The false dispute is the judge's
-over-escalation (§11), and "Both are true" settles it.
+over-escalation (§11), and "Both are true" settles it. (Re-tried and kept once
+synonym subjects could meet: §13.)
 
 Still open: an unprompted plan ("maybe I'll start running on Sundays", "we
 might move standups to 10am") records nothing, 0 in 3 — the prompts' musing rule
 wins, and the rule that would change it cost Work more than it caught. The
 adopted choice is filed as decision or routine run to run (they decay at 180 vs
 45 days). "Sounds good, and I train at Gold's Gym" keeps the gym, loses the yes.
+
+## 13. Subjects by meaning: one thing under two words
+
+TODO Iteration 1, 2026-10-26. Same judge (qwen2.5:7b), same embedder (bge-m3).
+
+The subject filter compares slugs exactly, so one split filed as `gym` in one
+run and `workout` in the next was never compared (§12), and nor were `home` and
+`flat`. The plan was "embedding similarity between subject slugs". Measured
+first, on `corpus/subjects.yaml` — 95 labelled pairs (17 held out), each a
+*meet* (a statement about one can replace one about the other) or *apart* (two
+things a person has at once: two people, two topics):
+
+- **Slug similarity is relatedness, not identity.** Separation is weak whatever
+  the wording: AUC 0.69 for the bare slug, 0.74 for "my {slug}" (kept; "the",
+  "topic:" in between). frontend / backend scores 0.92, coffee / tea 0.88,
+  sister / brother 0.83 — as high as true synonyms. So a pair that meets is only
+  **compared**, never renamed: renaming sister onto brother would file a belief
+  under the wrong person for good, while comparing them costs a judge call.
+- **Names are the worst case.** anna / ana 0.95, john / jon 0.95, sara / sarah
+  0.89 — the highest "different" scores in the set, the entity-swap blindness of
+  §1. So names never meet by meaning. A slug written with a capital in the
+  memory's own words is a name ("Sarah K prefers…", "Atlas stores…"), and
+  look-alike slugs (`looks_alike`: a shared word plus a swapped one, or a near
+  spelling that is not an inflection) stay apart whatever their case. `self`
+  never meets a topic: every fact about the user would become comparable with
+  everything.
+- **The judge must not be shown both slugs.** Its rule "a different subject is
+  independent" would undo the match. A pair that met by meaning is judged on
+  its words with neither slug shown — how every subject-less pair is judged.
+
+**Threshold: 0.67**, by the conflict band's rule — just below the lowest
+*training* pair that must meet, since a pair kept apart is a change nobody is
+asked about and a pair that meets costs a call. Training pairs: 37/42 meet (the
+5 misses are the rule's measured cost: mom / mum to the look-alike guard;
+kubernetes / k8s, frontend / ui, ci / pipeline, doctor / gp because they are
+written as names), and 18 of 36 apart pairs meet too. Held out: **9/9 meet**
+(home / flat 0.78, gym / workout 0.87, kids / children, wife / spouse, …), and
+sara / sarah-k stays apart; 3 of 8 apart pairs meet (lunch / dinner, mum / aunt,
+and brother / brother-in-law — joined by the *spelling* rule, which reads it as
+a qualified form like sara / sara-chen: an older bug, renamed, not just
+compared; not fixed here). The sweep shows the trade: at 0.80, 35/42 meet and
+only 3/36 apart pairs do — but held-out home / flat (0.78) would be lost.
+
+**Resolution, held-out cases written and labelled before the first run** (11:
+7 Personal, 4 Work; 5 of them cost cases — apart pairs that now meet, labelled
+store — and one labelled against the rule):
+
+| | before (meaning off) | after, pass 1 | after, pass 2 |
+| --- | --- | --- | --- |
+| changes under a synonym subject, retired or asked (5, one a known gap) | 0 — **all 5 silently stale** | 4 | 4 |
+| cost cases stored, no dispute (5) | 5 (free) | 5 (judged independent) | 5 |
+| look-alike kept free (1) | 1 | 1 | 1 |
+
+`split-filed-under-workout` and `payments-filed-apart-from-billing` were retired;
+`partner-named-as-girlfriend` was asked; `moved-from-house-to-flat` was asked
+rather than retired (judge *conflict* at 0.72 — the safe direction). The known
+gap held as labelled: "Payments now run through Adyen" opens with its subject,
+the capital reads as a name, and the old provider stays — stale, as it was
+before. Every cost case was judged *independent*: no false dispute.
+
+Full corpora, two passes: Work (59) belief loss 0%, merge loss 0%, stale 1.7%
+(that known-gap case; 0% on the 55 cases of `c55-modes`), accuracy 79.7 / 81.4%
+against 80.0 / 76.4%. Personal (40) 0% / 0% / 0%, accuracy 67.5% ×2, escalation
+60%. Six older cases moved; all six have one subject on both sides, which this
+change never touches — the judge changing its own answer. Runs kept:
+`baselines/bgem3-qwen7b-c59-subjects-pass{1,2}.json`,
+`baselines/bgem3-qwen7b-personal-c40-subjects-pass{1,2}.json`.
+
+**Then the reverted rule, re-tried** (§12): the reply's guide now says "give the
+choice the subject it is about ("gym", "sleep"), never "self"". It was reverted
+because `gym` and `workout` never met; now they do. Agreement corpus, three runs
+each; "meets" is new — the share of matched facts whose subject the resolver
+would compare with the label's (`subjects_that_meet`, the resolver's own rule):
+
+| | before | after |
+| --- | --- | --- |
+| precision | 72.2 / 77.8 / 72.2% | 72.2% ×3 |
+| recall | 59.1 / 63.6 / 59.1% | 59.1% ×3 |
+| subject (exact) | 15.4 / 14.3 / 15.4% | 61.5% ×3 |
+| subject meets | 15.4 / 21.4 / 15.4% | **100% ×3** |
+| facts on `self` | 11 of 18 ×3 | **0 of 18 ×3** |
+| forbidden (17) | 0% ×3 | 0% ×3 |
+
+The rule moves subjects, not facts: the same statements come back, filed under
+the thing they are about. Kept. Its cost, read from the outputs: the example
+word anchors — "a Sunday long run" was filed under `gym` (labelled `running`),
+three in three. Harmless here, because running and gym meet and are compared,
+but it is why a prompt example is a measured choice (§7). The system prompts
+are untouched, so the Work and Personal extraction corpora cannot move.
+
+## 14. Agreement and pending polish
+
+TODO Iteration 3, 2026-10-26. qwen2.5:7b, bge-m3. Six cases added to the
+agreement corpus (34 in all) and a new confirmation corpus (15), every case
+labelled before its first run; three runs per configuration.
+
+**An unprompted maybe that is a plan is now pending** (decided 2026-10-16). Two
+attempts:
+
+- *Framing in the turn*, as §12 did for replies: no change, 0 in 3 on every
+  unprompted maybe. The extractor was asked directly why: both system prompts
+  say musing ("maybe", "thinking about") records nothing, and a system prompt
+  beats text inside the input. Changing them is what cost Work F1 in §12.
+- *A reading of its own*: a hedged lone turn the extractor took nothing from is
+  read once more by a small dedicated prompt — is it a plan, with what and
+  when? — that never sees any other input. Kept.
+
+| agreement corpus (34) | before | after |
+| --- | --- | --- |
+| precision | 75.0 / 70.0 / 80.0% | 83.3% ×3 |
+| recall | 57.7 / 53.8 / 61.5% | 76.9% ×3 |
+| F1 | 0.65 / 0.61 / 0.70 | **0.80 ×3** |
+| unprompted maybes pending (4) | 0 ×3 | **4 ×3** |
+| musing and hedges with no plan (3) | nothing ×3 | nothing ×3 |
+| forbidden (21) | 0% | 0% |
+| subject meets | 100% | 100% |
+
+The cost cases held: "maybe someday we'll rewrite it all in Rust, who knows"
+and "not sure what to cook tonight" store nothing, three in three. Exact subject
+accuracy reads 55–64% either side; the new pending items use slugs like
+`nightly-build-schedule`, and every one meets its label.
+
+**A confirmed maybe is worded as decided.** "Yes" to "the user will consider
+adding a Sunday long run" left a belief reading as a plan nobody holds. Now one
+rewrite call drops the hedge (`services/wording.py`), and a guard refuses any
+rewrite that changes a number, a name or a negation, keeps a hedge, or loses
+words — then the old wording stays. Said again in the person's own decided
+words, those words are taken, no call. The maybe's wording is kept
+(`tentative_wording`). Confirmation corpus: 13 of 15 read as labelled, three
+runs in three; the other 2 (both held out) are right and worded "has decided
+on moving to Bangalore in March" — the 0.8 overlap check wants "will move".
+No rewrite changed a detail, so the guard never had to fire.
+
+**One rate for adopted choices.** The same adopted split was filed as a
+decision in one run and a routine in the next — 180 or 45 days to half its
+confidence. `Memory.adopted` is now stored, and an adopted choice fades at 90
+days whatever its category (a product decision, 2026-10-26). Restating it in
+the person's own words reinforces it as before.
+
+**Long plans: already their shape.** Two held-out long plans (a 4-day split with
+every exercise, set and rep; a week of named dishes) came back as their shape —
+"a 4-day upper/lower split", "a high-protein meal plan" — in 6 runs of 6, and
+`ref-keep-this-workout` in 6 more. The reply guide's "not every exercise or
+step" holds; no rule added with nothing to fix. The cases stay as a regression
+check. The cost seen instead: the meal plan was filed under `gym`, the example
+word in the "never self" rule (§13) — `diet` was labelled. They meet (0.77), so
+it is compared; it is the second sign that the example anchors.
 
 ---
 
@@ -738,7 +886,8 @@ Status after §8–§9:
    about is handled by policy (§10). Belief loss 0% on 46 cases. The gate stays
    at 0.80 until there is enough data in the 0.50–0.80 band to justify moving.
 4. **Subject normalisation — the dangerous half done, the other half checked.**
-   Variant spellings are canonicalised. Null subjects were measured harmless on
+   Variant spellings are canonicalised; two words for one thing are compared
+   (§13). Null subjects were measured harmless on
    bge-m3 in crowded graphs (8/8); they matter only with a weaker embedder.
 5. **Still open:** the two `known-gap` cases (a role contested across person
    subjects; one constraint recorded at two scopes) cannot be reached by any

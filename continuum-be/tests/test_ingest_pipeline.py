@@ -74,9 +74,13 @@ class StubLLM:
         self,
         scripted: list[list[dict]],
         judgement: dict | None = None,
+        wording: str | None = None,
     ) -> None:
         self.scripted = scripted
         self.judgement = judgement or {"relation": "independent", "confidence": 0.9}
+        # What a confirmed maybe is reworded as; None answers nothing usable,
+        # so the wording is kept.
+        self.wording = wording
         self.calls = 0
         self.judge_calls = 0
 
@@ -84,6 +88,8 @@ class StubLLM:
         if "decide how they relate" in system:
             self.judge_calls += 1
             return self.judgement
+        if "no longer a maybe" in system:
+            return {"content": self.wording} if self.wording else {}
         batch = self.scripted[min(self.calls, len(self.scripted) - 1)]
         self.calls += 1
         return {"memories": batch}

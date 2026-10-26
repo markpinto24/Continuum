@@ -42,6 +42,7 @@ from continuum.services.resolution import (
     material_difference,
 )
 from continuum.services.subjects import canonical_subject, infer_subject
+from continuum.services.wording import decided_wording
 
 log = get_logger(__name__)
 
@@ -159,6 +160,13 @@ class IngestService:
             # is settled in place of a fresh copy, keeping its first provenance.
             pending = await self._matching_pending(fact, vector, user_id=user_id)
             if pending is not None:
+                # Said again as decided, those are now its words ("will consider
+                # adding a long run" -> "will add a long run"), and the vector
+                # this turn embedded is theirs.
+                if fact.content != pending.content:
+                    pending.tentative_wording = pending.content
+                    pending.content = fact.content
+                    await self.memories.write_with_vector(pending, vector)
                 pending.confirm()
                 batch.confirmed.append(pending.id)
                 log.info("ingest.pending_confirmed", memory_id=pending.id, by="restatement")
@@ -180,13 +188,21 @@ class IngestService:
 
     async def confirm_pending(self, memory: Memory) -> IngestResponse:
         """The person said yes. Only now is it a belief, so only now is it judged:
-        against the graph as it stands, exactly as if it had just been said."""
+        against the graph as it stands, exactly as if it had just been said —
+        and so in decided words, not the maybe's (`wording.decided_wording`)."""
+        decided = await decided_wording(self.llm, memory.content)
+        if decided:
+            memory.tentative_wording = memory.content
+            memory.content = decided
         memory.confirm()
         fact = ExtractedFact(
             content=memory.content, category=memory.category, subject=memory.subject,
             source_excerpt=memory.source_excerpt,
         )
         [vector] = await self.llm.embed([MemoryStore.embedding_text(memory)])
+        if decided:
+            # Every verdict but one rewrites the vector; a duplicate only saves.
+            await self.memories.write_with_vector(memory, vector)
         compatible = await self.rules(memory.user_id) if self.rules else set()
         batch = _Batch(
             check_team=self._checks_team(memory.user_id), compatible=compatible,

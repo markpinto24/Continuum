@@ -85,6 +85,8 @@ export interface Memory {
   updated_at: string
   last_reinforced_at: string
   reinforcement_count: number
+  /** Taken up from the assistant's suggestion, not said in the user's own words. */
+  adopted: boolean
 }
 
 export type MemoryKind = 'fact' | 'summary'

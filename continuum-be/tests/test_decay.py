@@ -90,3 +90,26 @@ def test_archive_is_reversible():
     m.reactivate()
     assert m.status is MemoryStatus.ACTIVE
     assert m.superseded_by is None
+
+
+def test_an_adopted_choice_fades_at_one_rate_whatever_it_was_filed_as():
+    # The same adopted split comes back as a decision (180 d) or a routine (45 d)
+    # run to run; how fast it fades must not depend on that coin toss.
+    from continuum.models.memory import ExtractedFact
+
+    filed = [
+        ExtractedFact(content="x", category=category, adopted=True).to_memory(
+            user_id=user, source_id=None, confidence=0.8
+        )
+        for category in (MemoryCategory.DECISION, MemoryCategory.ROUTINE)
+        for user in ("u", "u:personal")
+    ]
+    assert {m.half_life_days for m in filed} == {90.0}
+    for m in filed:
+        m.last_reinforced_at = NOW - timedelta(days=90)
+        assert m.decayed_confidence(now=NOW, floor=FLOOR) == 0.4
+
+
+def test_said_in_your_own_words_a_choice_keeps_its_category_rate():
+    assert aged(MemoryCategory.ROUTINE, days=0).half_life_days == 45.0
+    assert aged(MemoryCategory.DECISION, days=0).half_life_days == 180.0

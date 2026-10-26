@@ -343,3 +343,63 @@ async def test_a_belief_is_not_answered_like_a_pending_item(store, settings):  #
     async with await _client(memories, pending, me(Mode.PERSONAL)) as client:
         assert (await client.post(f"/memories/{belief.id}/decline")).status_code == 409
     assert (await memories.get(belief.id)).status is MemoryStatus.ACTIVE
+
+
+# --- Decided wording (FINDINGS §14) ------------------------------------------------------
+
+MAYBE = "The user is considering a push/pull/legs split six days a week"
+DECIDED = "The user will do a push/pull/legs split six days a week"
+
+
+async def test_a_confirmed_maybe_is_worded_as_decided(store, settings):  # noqa: F811
+    llm = StubLLM([gym(MAYBE, tentative=True)], wording=DECIDED)
+    ingest = build_service(store, llm, settings)
+    memories = MemoryStore(store, llm, settings)  # type: ignore[arg-type]
+    maybe = (await say(ingest)).created[0]
+
+    await PendingService(ingest, memories).confirm(maybe)
+
+    stored = await memories.get(maybe.id)
+    assert stored.content == DECIDED and stored.tentative_wording == MAYBE
+    # The vector moved with the words: the decided wording is what is found.
+    [vector] = await llm.embed([MemoryStore.embedding_text(stored)])
+    [(hit, score)] = await memories.search_by_vector(
+        user_id="mark:personal", vector=vector, limit=1
+    )
+    assert hit.id == maybe.id and score > 0.999
+
+
+async def test_a_refused_rewrite_keeps_the_words_and_still_confirms(store, settings):  # noqa: F811
+    # The rewrite changed the number: the guard keeps the original.
+    llm = StubLLM([gym(MAYBE, tentative=True)], wording=DECIDED.replace("six", "5"))
+    ingest = build_service(store, llm, settings)
+    memories = MemoryStore(store, llm, settings)  # type: ignore[arg-type]
+    maybe = (await say(ingest)).created[0]
+
+    await PendingService(ingest, memories).confirm(maybe)
+
+    stored = await memories.get(maybe.id)
+    assert stored.status is MemoryStatus.ACTIVE
+    assert stored.content == MAYBE and stored.tentative_wording is None
+
+
+async def test_restating_a_maybe_as_decided_takes_the_new_words(store):  # noqa: F811
+    from continuum.config import Settings
+
+    # The stub puts two statements about one subject at ~0.90: a duplicate band
+    # below that makes the restatement the same statement, as a real embedder does.
+    near = Settings(
+        embedding_dim=len((await StubLLM([[]]).embed(["x"]))[0]),
+        qdrant_collection="test_memories",
+        duplicate_similarity_threshold=0.85,
+        conflict_similarity_threshold=0.70,
+    )
+    ingest, memories, _, _ = await setup(
+        store, near, gym(MAYBE, tentative=True), gym(DECIDED)
+    )
+    maybe = (await say(ingest)).created[0]
+    await say(ingest)
+
+    stored = await memories.get(maybe.id)
+    assert stored.status is MemoryStatus.ACTIVE
+    assert stored.content == DECIDED and stored.tentative_wording == MAYBE

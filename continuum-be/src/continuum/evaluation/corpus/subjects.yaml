@@ -1,0 +1,906 @@
+# Labelled subject pairs — when do two slugs name one thing? (FINDINGS §13)
+#
+# meet: true   a statement about one can replace or contradict a statement about
+#              the other, because they name the same thing. Kept apart, a change
+#              filed under one never reaches the belief filed under the other —
+#              the stale belief stays and nobody is asked.
+# meet: false  two things a person can have at once (two people, two topics).
+#              Meeting costs a judge call, and with an over-eager judge a
+#              false dispute.
+# names: true  memories write these with a capital ("Sara", "Kubernetes", "the
+#              UI"). Names match by spelling only, whatever their meaning.
+#
+# Left out on purpose: alternatives for one slot (coffee / tea, postgres /
+# mongodb, car / bike). Whether they should meet depends on the slot — "switched
+# from coffee to tea" replaces, "likes coffee; likes tea" does not — so no
+# single label is honest. Meeting costs them only a judge call either way.
+#
+# Cases tagged held-out were labelled before they were first embedded, and are
+# not used to set the threshold. Three were seen while exploring (tag
+# seen-in-exploration); the others were not.
+
+- id: father--dad
+  a: father
+  b: dad
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: mother--mom
+  a: mother
+  b: mom
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: home--house
+  a: home
+  b: house
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: flat--apartment
+  a: flat
+  b: apartment
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: home--apartment
+  a: home
+  b: apartment
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: car--vehicle
+  a: car
+  b: vehicle
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: cycling--bike
+  a: cycling
+  b: bike
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: running--run
+  a: running
+  b: run
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: running--jogging
+  a: running
+  b: jogging
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: weight--body-weight
+  a: weight
+  b: body-weight
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: allergy--allergies
+  a: allergy
+  b: allergies
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: coffee--caffeine
+  a: coffee
+  b: caffeine
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: job--employment
+  a: job
+  b: employment
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: job--work
+  a: job
+  b: work
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: salary--pay
+  a: salary
+  b: pay
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: diet--nutrition
+  a: diet
+  b: nutrition
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: diet--meals
+  a: diet
+  b: meals
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: meditation--mindfulness
+  a: meditation
+  b: mindfulness
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: savings--savings-goal
+  a: savings
+  b: savings-goal
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: budget--spending
+  a: budget
+  b: spending
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: sleep--bedtime
+  a: sleep
+  b: bedtime
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: sleep--sleep-schedule
+  a: sleep
+  b: sleep-schedule
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: reading--reading-goal
+  a: reading
+  b: reading-goal
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: reading--books
+  a: reading
+  b: books
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: workout--training
+  a: workout
+  b: training
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: workout--workout-split
+  a: workout
+  b: workout-split
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: workout-split--training-plan
+  a: workout-split
+  b: training-plan
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: weightlifting--gym
+  a: weightlifting
+  b: gym
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: partner--girlfriend
+  a: partner
+  b: girlfriend
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: partner--boyfriend
+  a: partner
+  b: boyfriend
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: partner--wife
+  a: partner
+  b: wife
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: partner--husband
+  a: partner
+  b: husband
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: commute--travel-to-work
+  a: commute
+  b: travel-to-work
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - synonym
+  - life
+- id: mom--mum
+  a: mom
+  b: mum
+  meet: true
+  why: 'One parent, two spellings by region. A near-spelling the look-alike guard cannot tell
+    from two names: the guard''s measured cost.'
+  tags:
+  - synonym
+  - life
+  - expected-cost
+- id: deploy--deployment
+  a: deploy
+  b: deployment
+  meet: true
+  why: Two words for one thing at work; a change filed under one must reach a belief filed
+    under the other.
+  tags:
+  - synonym
+  - work
+- id: database--db
+  a: database
+  b: db
+  meet: true
+  why: Two words for one thing at work; a change filed under one must reach a belief filed
+    under the other.
+  tags:
+  - synonym
+  - work
+- id: billing--payments
+  a: billing
+  b: payments
+  meet: true
+  why: Two words for one thing at work; a change filed under one must reach a belief filed
+    under the other.
+  tags:
+  - synonym
+  - work
+- id: standup--daily-standup
+  a: standup
+  b: daily-standup
+  meet: true
+  why: Two words for one thing at work; a change filed under one must reach a belief filed
+    under the other.
+  tags:
+  - synonym
+  - work
+- id: kubernetes--k8s
+  a: kubernetes
+  b: k8s
+  meet: true
+  names: true
+  why: 'One thing, but written as a name or acronym in a memory ("Kubernetes", "the UI", "CI",
+    "my GP"). Names match by spelling only, so this pair stays apart: the rule''s measured
+    cost.'
+  tags:
+  - synonym
+  - acronym
+  - expected-cost
+- id: frontend--ui
+  a: frontend
+  b: ui
+  meet: true
+  names: true
+  why: 'One thing, but written as a name or acronym in a memory ("Kubernetes", "the UI", "CI",
+    "my GP"). Names match by spelling only, so this pair stays apart: the rule''s measured
+    cost.'
+  tags:
+  - synonym
+  - acronym
+  - expected-cost
+- id: ci--pipeline
+  a: ci
+  b: pipeline
+  meet: true
+  names: true
+  why: 'One thing, but written as a name or acronym in a memory ("Kubernetes", "the UI", "CI",
+    "my GP"). Names match by spelling only, so this pair stays apart: the rule''s measured
+    cost.'
+  tags:
+  - synonym
+  - acronym
+  - expected-cost
+- id: doctor--gp
+  a: doctor
+  b: gp
+  meet: true
+  names: true
+  why: 'One thing, but written as a name or acronym in a memory ("Kubernetes", "the UI", "CI",
+    "my GP"). Names match by spelling only, so this pair stays apart: the rule''s measured
+    cost.'
+  tags:
+  - synonym
+  - acronym
+  - expected-cost
+- id: anna--ana
+  a: anna
+  b: ana
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - name
+  - look-alike
+- id: john--jon
+  a: john
+  b: jon
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - name
+  - look-alike
+- id: mark--marc
+  a: mark
+  b: marc
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - name
+  - look-alike
+- id: alice--alicia
+  a: alice
+  b: alicia
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - name
+  - look-alike
+- id: sara--sarah
+  a: sara
+  b: sarah
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - name
+  - look-alike
+- id: priya--priyanka
+  a: priya
+  b: priyanka
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - name
+  - look-alike
+- id: sam--samuel
+  a: sam
+  b: samuel
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - name
+  - look-alike
+- id: chris--christina
+  a: chris
+  b: christina
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - name
+  - look-alike
+- id: lisa--elisa
+  a: lisa
+  b: elisa
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - name
+  - look-alike
+- id: mike--michael
+  a: mike
+  b: michael
+  meet: false
+  names: true
+  why: Two names. Whether Mike is Michael is not in the words; names match by spelling only.
+  tags:
+  - name
+- id: priya--sam
+  a: priya
+  b: sam
+  meet: false
+  names: true
+  why: Two different people. Names match by spelling only.
+  tags:
+  - name
+- id: atlas--apollo
+  a: atlas
+  b: apollo
+  meet: false
+  names: true
+  why: Two different projects or clients, written as names.
+  tags:
+  - name
+  - work
+- id: acme--globex
+  a: acme
+  b: globex
+  meet: false
+  names: true
+  why: Two different projects or clients, written as names.
+  tags:
+  - name
+  - work
+- id: q3-roadmap--q4-roadmap
+  a: q3-roadmap
+  b: q4-roadmap
+  meet: false
+  names: true
+  why: Two members of one family named by the token that differs; that token is the whole
+    point.
+  tags:
+  - variant
+  - look-alike
+- id: team-a--team-b
+  a: team-a
+  b: team-b
+  meet: false
+  names: true
+  why: Two members of one family named by the token that differs; that token is the whole
+    point.
+  tags:
+  - variant
+  - look-alike
+- id: vitamin-d--vitamin-c
+  a: vitamin-d
+  b: vitamin-c
+  meet: false
+  names: true
+  why: Two members of one family named by the token that differs; that token is the whole
+    point.
+  tags:
+  - variant
+  - look-alike
+- id: billing-service--search-service
+  a: billing-service
+  b: search-service
+  meet: false
+  why: Two members of one family named by the token that differs; that token is the whole
+    point.
+  tags:
+  - variant
+  - look-alike
+- id: sister--brother
+  a: sister
+  b: brother
+  meet: false
+  why: Two different people a person can have at once; a belief about one says nothing about
+    the other.
+  tags:
+  - people
+  - life
+- id: mother--father
+  a: mother
+  b: father
+  meet: false
+  why: Two different people a person can have at once; a belief about one says nothing about
+    the other.
+  tags:
+  - people
+  - life
+- id: mom--dad
+  a: mom
+  b: dad
+  meet: false
+  why: Two different people a person can have at once; a belief about one says nothing about
+    the other.
+  tags:
+  - people
+  - life
+- id: partner--sister
+  a: partner
+  b: sister
+  meet: false
+  why: Two different people a person can have at once; a belief about one says nothing about
+    the other.
+  tags:
+  - people
+  - life
+- id: workout--diet
+  a: workout
+  b: diet
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: gym--diet
+  a: gym
+  b: diet
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: diet--sleep
+  a: diet
+  b: sleep
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: gym--sleep
+  a: gym
+  b: sleep
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: workout--sleep
+  a: workout
+  b: sleep
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: home--office
+  a: home
+  b: office
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: gym--office
+  a: gym
+  b: office
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: home--work
+  a: home
+  b: work
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: job--home
+  a: job
+  b: home
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: partner--job
+  a: partner
+  b: job
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: home--partner
+  a: home
+  b: partner
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: weight--height
+  a: weight
+  b: height
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: budget--salary
+  a: budget
+  b: salary
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: dog--cat
+  a: dog
+  b: cat
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: billing--auth
+  a: billing
+  b: auth
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - topic
+- id: gym--workout
+  a: gym
+  b: workout
+  meet: true
+  why: 'The live case: one split filed as gym in one run and workout in the next (FINDINGS
+    §12). Named in TODO.md; its score was seen while exploring, before this corpus existed.'
+  tags:
+  - held-out
+  - seen-in-exploration
+  - synonym
+  - life
+- id: home--flat
+  a: home
+  b: flat
+  meet: true
+  why: Where the user lives. Share no letters, so spelling could never join them. Named in
+    TODO.md; its score was seen while exploring, before this corpus existed.
+  tags:
+  - held-out
+  - seen-in-exploration
+  - synonym
+  - life
+- id: sara--sarah-k
+  a: sara
+  b: sarah-k
+  meet: false
+  names: true
+  why: Two colleagues. Look-alike names must stay apart. Named in TODO.md; its score was seen
+    while exploring, before this corpus existed.
+  tags:
+  - held-out
+  - seen-in-exploration
+  - name
+  - look-alike
+- id: kids--children
+  a: kids
+  b: children
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - held-out
+  - synonym
+  - life
+- id: wife--spouse
+  a: wife
+  b: spouse
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - held-out
+  - synonym
+  - life
+- id: laptop--computer
+  a: laptop
+  b: computer
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - held-out
+  - synonym
+  - life
+- id: groceries--food-shopping
+  a: groceries
+  b: food-shopping
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - held-out
+  - synonym
+  - life
+- id: therapist--counsellor
+  a: therapist
+  b: counsellor
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - held-out
+  - synonym
+  - life
+- id: phone--mobile
+  a: phone
+  b: mobile
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - held-out
+  - synonym
+  - life
+- id: hiking--trekking
+  a: hiking
+  b: trekking
+  meet: true
+  why: Two words for one thing in a person's life; a change filed under one must reach a belief
+    filed under the other.
+  tags:
+  - held-out
+  - synonym
+  - life
+- id: emma--emily
+  a: emma
+  b: emily
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - held-out
+  - name
+  - look-alike
+- id: tom--tim
+  a: tom
+  b: tim
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - held-out
+  - name
+  - look-alike
+- id: jake--jack
+  a: jake
+  b: jack
+  meet: false
+  names: true
+  why: Two different people whose names look alike. An embedder cannot tell them apart (FINDINGS
+    §1); comparing them invites one person's belief to be read as the other's.
+  tags:
+  - held-out
+  - name
+  - look-alike
+- id: postgres-14--postgres-16
+  a: postgres-14
+  b: postgres-16
+  meet: false
+  names: true
+  why: Two members of one family named by the token that differs; that token is the whole
+    point.
+  tags:
+  - held-out
+  - variant
+- id: lunch--dinner
+  a: lunch
+  b: dinner
+  meet: false
+  why: Two different parts of one life or job; both hold at once and neither replaces the
+    other.
+  tags:
+  - held-out
+  - topic
+- id: mum--aunt
+  a: mum
+  b: aunt
+  meet: false
+  why: Two different people a person can have at once; a belief about one says nothing about
+    the other.
+  tags:
+  - held-out
+  - people
+- id: brother--brother-in-law
+  a: brother
+  b: brother-in-law
+  meet: false
+  why: Two different people a person can have at once; a belief about one says nothing about
+    the other. One slug contains the other, which the look-alike guard does not read as a
+    swap.
+  tags:
+  - held-out
+  - people
