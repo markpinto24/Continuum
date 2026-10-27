@@ -22,7 +22,16 @@ function readOpen(): boolean {
  * failed graph — so the colours and counts are always on screen, and the rest
  * of the key folds away once you know it.
  */
-export function GraphLegend({ counts }: { counts: Record<MemoryStatus, number> }) {
+export function GraphLegend({
+  counts,
+  hidden = new Set(),
+  onToggle,
+}: {
+  counts: Record<MemoryStatus, number>
+  /** Statuses hidden from the graph; their rows stay, dimmed, to bring them back. */
+  hidden?: ReadonlySet<MemoryStatus>
+  onToggle?: (status: MemoryStatus) => void
+}) {
   const [open, setOpen] = useState(readOpen)
   const toggle = () => {
     setOpen((was) => {
@@ -36,22 +45,40 @@ export function GraphLegend({ counts }: { counts: Record<MemoryStatus, number> }
   }
 
   return (
-    <div className="glass pointer-events-auto absolute bottom-4 left-4 w-56 rounded-xl p-2.5 text-xs shadow-xl shadow-black/30">
+    <div className="glass pointer-events-auto w-56 rounded-xl p-2.5 text-xs shadow-xl shadow-black/30">
       <ul className="space-y-0.5">
         {ORDER.map((status) => (
           <li key={status}>
             <Tooltip label={STATUS_BLURB[status]} side="right">
-              <div className="flex cursor-help items-center gap-2.5 rounded-md px-1.5 py-1 hover:bg-surface-raised/60">
+              <button
+                type="button"
+                // Shown or hidden in the graph; the count is always the whole graph's.
+                aria-pressed={!hidden.has(status)}
+                aria-label={`${STATUS_LABEL[status]}: ${counts[status] ?? 0}. ${
+                  hidden.has(status) ? 'Hidden — show in the graph' : 'Shown — hide from the graph'
+                }`}
+                onClick={() => onToggle?.(status)}
+                disabled={!onToggle}
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1 text-left hover:bg-surface-raised/60',
+                  'focus-visible:outline-2 focus-visible:outline-accent',
+                  hidden.has(status) && 'opacity-45',
+                )}
+              >
                 <span
                   className="size-2 shrink-0 rounded-full"
                   style={{
                     backgroundColor: STATUS_COLOR[status],
-                    boxShadow: `0 0 8px ${STATUS_COLOR[status]}`,
+                    boxShadow: hidden.has(status) ? 'none' : `0 0 8px ${STATUS_COLOR[status]}`,
                   }}
                 />
-                <span className="flex-1 text-foreground/85">{STATUS_LABEL[status]}</span>
+                <span
+                  className={cn('flex-1 text-foreground/85', hidden.has(status) && 'line-through')}
+                >
+                  {STATUS_LABEL[status]}
+                </span>
                 <span className="tabular-nums text-muted">{counts[status] ?? 0}</span>
-              </div>
+              </button>
             </Tooltip>
           </li>
         ))}

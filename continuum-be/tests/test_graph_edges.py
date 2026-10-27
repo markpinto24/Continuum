@@ -61,3 +61,16 @@ async def test_a_memory_shared_to_the_team_is_linked_to_its_shared_copy(store, s
     assert [(e["source"], e["target"], e["kind"]) for e in body["edges"]] == [
         (shared.id, private.id, "supersedes")
     ]
+
+
+async def test_a_graph_cut_at_its_limit_says_so(store, settings):  # noqa: F811
+    _, memories, sharing, _ = await setup(store, settings)
+    for n in range(3):
+        await memories.add(
+            Memory(user_id="mark", content=f"fact {n}", category=MemoryCategory.FACT)
+        )
+    app = app_for(memories, sharing, settings, "mark")
+    cut = (await call(app, "GET", "/memories/graph?limit=2")).json()
+    whole = (await call(app, "GET", "/memories/graph?limit=3")).json()
+    assert len(cut["nodes"]) == 2 and cut["truncated"] is True
+    assert len(whole["nodes"]) == 3 and whole["truncated"] is False

@@ -40,7 +40,10 @@ export function Wordmark({ className }: { className?: string }) {
   return (
     <span className={cn('flex items-center gap-2.5', className)}>
       <BrandTile />
-      <span className="text-[15px] font-semibold tracking-tight">Continuum</span>
+      {/* Named for screen readers everywhere; shown from a tablet up. */}
+      <span className="sr-only text-[15px] font-semibold tracking-tight sm:not-sr-only">
+        Continuum
+      </span>
     </span>
   )
 }

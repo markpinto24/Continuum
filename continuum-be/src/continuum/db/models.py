@@ -149,6 +149,11 @@ class ResolutionLabelRow(Base):
     # Whose graph the pair lived in: the decider's own, or the shared space. A
     # rule learned from these decisions applies to that graph only.
     graph_owner: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # An agent settles only on the person's own words (commitment 2): those
+    # words, and whether a button ("session") or an agent ("api_key") applied
+    # them. Null on decisions made before this was recorded.
+    said: Mapped[str | None] = mapped_column(Text, nullable=True)
+    settled_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     __table_args__ = (Index("ix_resolution_labels_user_created", "user_id", "created_at"),)
 

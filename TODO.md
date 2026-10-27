@@ -93,22 +93,31 @@ vegetarian", "budget is now 10000") come back as "conflict".
 - [x] Measure and record p50 / p95 latency per chat turn —
       `scripts/chat_latency.py`: done p50 12.4 s / p95 24.6 s, against 21.5 s /
       40.9 s when it waited for memory
-- [ ] Follow-up: one turn in 24 lost its write to a bge-m3 NaN the nudge did
-      not fix
+- [x] Follow-up: one turn in 24 lost its write to a bge-m3 NaN the nudge did
+      not fix — the GPU, not the text: bge-m3 is pinned to the CPU (FINDINGS §17)
 
-## Iteration 6 — Let other agents use it
+## Iteration 6 — Let other agents use it — done, FINDINGS §18
 
-- [ ] **MCP server** for Continuum (remember, recall, list disputes, settle)
-- [ ] Small Python SDK over the HTTP API, with an example agent
-- [ ] Docs: "add long-term memory to your agent in 5 minutes"
+- [x] **MCP server** for Continuum (remember, recall, list disputes, settle) —
+      `continuum-sdk`, `continuum-mcp`; settle only on the person's words
+- [x] Small Python SDK over the HTTP API, with an example agent —
+      `Continuum` / `AsyncContinuum`, `examples/agent.py`
+- [x] Docs: "add long-term memory to your agent in 5 minutes" —
+      `continuum-sdk/README.md`
+- [ ] Publish the SDK to PyPI (installed from the repository today)
 
 ## Iteration 7 — Production readiness
 
-- [ ] Move rate limits and sign-in lockout to Redis (needed for >1 worker)
-- [ ] Observability: escalation rate, decisions per day, judge confidence over
-      time — one small dashboard
-- [ ] Prompt-injection test: a memory saying "ignore previous instructions…"
-      must stay data in the chat prompt
+- [x] Move rate limits and sign-in lockout to Redis (needed for >1 worker) —
+      `REDIS_URL`, `production.yml --profile scale` (FINDINGS §20)
+- [ ] Before more than one worker: the chat's per-graph write lock, the decay
+      scheduler and the startup re-embedding are still per process
+- [x] Observability: escalation rate, decisions per day, judge confidence over
+      time — one small dashboard: the Inbox's Activity panel (FINDINGS §20)
+- [x] Prompt-injection test: a memory saying "ignore previous instructions…"
+      must stay data in the chat prompt — 15/18 obeyed → 0/18 (FINDINGS §19)
+- [ ] Memory does not shape how chat answers: a recorded "short answers" or
+      "reply in Spanish" is ignored 3/3 (FINDINGS §19 cost cases)
 - [x] A production compose file: reverse proxy, HTTPS, built frontend served
       same-origin, `AUTH_ALLOW_WEB_SETUP=false`, `TRUST_PROXY_HEADERS=true`
       (`production.yml`, `continuum-fe/Dockerfile` + `Caddyfile`, `DEPLOY.md`)
@@ -118,10 +127,17 @@ vegetarian", "budget is now 10000") come back as "conflict".
 
 ## Iteration 8 — Interface at scale
 
-- [ ] Graph beyond a few hundred nodes: cluster by subject, filter by category /
-      status / date
-- [ ] Mobile layout for the chat and inbox
-- [ ] Accessibility pass (keyboard, screen-reader labels on the graph's lists)
+- [x] Graph beyond a few hundred nodes: cluster by subject, filter by category /
+      status / date — `lib/graph-view.ts`; grouped by subject above 300 (32 vs 8
+      fps at 600 in software rendering); a filter never hides half a dispute; the
+      UI loads up to 2000 and says when the graph is larger (`truncated`)
+- [ ] Past 2000 memories: filter on the server, not only in the browser
+- [x] Mobile layout for the chat and inbox — the panel is a full-width sheet
+      below 640 px; the header compacts and scrolls within itself
+- [x] Accessibility pass (keyboard, screen-reader labels on the graph's lists) —
+      the graph as a list (one tab stop, arrows, Enter), legend rows as toggles,
+      every icon-only button named
+- [ ] Touch targets: inbox buttons are ~23 px tall on a phone (WCAG 2.2: 24)
 
 ## Iteration 9 — Showcase
 

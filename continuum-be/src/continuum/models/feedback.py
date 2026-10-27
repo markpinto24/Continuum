@@ -5,7 +5,7 @@ Pure models, no I/O — the same rule as `memory.py`.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -68,6 +68,9 @@ class ResolutionLabel(BaseModel):
     # The graph the pair lived in (a user id or the shared space); "cross" for a
     # private belief settled against team knowledge.
     graph_owner: str | None = None
+    # The person's own words deciding it — required when an agent settles.
+    said: str | None = None
+    settled_via: str | None = None  # "session" (a button) | "api_key" (an agent)
 
 
 class GateBand(BaseModel):
@@ -209,3 +212,37 @@ class FeedbackSummary(BaseModel):
     answers_up: int
     answers_down: int
     missing_memories: int
+
+
+class ActivityDay(BaseModel):
+    """One day of what the resolver did and what people decided (UTC)."""
+
+    day: date
+    remembered: int = Field(0, description="Memories created: what was taken in.")
+    escalated: int = Field(0, description="Times the resolver asked a person instead of deciding.")
+    auto_retired: int = Field(
+        0, description="Beliefs the resolver retired on its own — no person's decision behind it."
+    )
+    decided: int = Field(0, description="Disputes a person settled.")
+    decided_by_agent: int = Field(
+        0, description="Of those, settled through an agent on the person's words."
+    )
+    judge_confidence: float | None = Field(
+        None,
+        description="Median judge probability of the day's supersedes the gate sent to a "
+        "person instead (policy-forced ones aside): how close it came to retiring on its own.",
+    )
+
+
+class ActivityReport(BaseModel):
+    """The resolver over time, for one graph — the observability dashboard."""
+
+    days: list[ActivityDay]
+    gate: float = Field(..., description="auto_supersede_confidence now.")
+    remembered: int
+    escalated: int
+    auto_retired: int
+    decided: int
+    escalation_rate: float | None = Field(
+        None, description="Escalations per memory taken in, over the whole window."
+    )

@@ -37,12 +37,12 @@ class LabelStore:
             await s.execute(
                 update(ResolutionLabelRow)
                 .where(ResolutionLabelRow.existing_memory_id == memory_id)
-                .values(existing_content="[forgotten]", existing_subject=None)
+                .values(existing_content="[forgotten]", existing_subject=None, said=None)
             )
             await s.execute(
                 update(ResolutionLabelRow)
                 .where(ResolutionLabelRow.incoming_memory_id == memory_id)
-                .values(incoming_content="[forgotten]", incoming_subject=None)
+                .values(incoming_content="[forgotten]", incoming_subject=None, said=None)
             )
 
     async def list_for_user(self, user_id: str, *, limit: int = 1000) -> list[ResolutionLabel]:

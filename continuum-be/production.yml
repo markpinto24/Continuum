@@ -53,6 +53,22 @@ services:
       retries: 10
       start_period: 10s
 
+  # Opt-in, for more than one API worker: the sign-in lockout and rate limits
+  # then count here, shared, instead of once per process. One worker (the
+  # default) needs none of it. Enable with `--profile scale` and set
+  # REDIS_URL=redis://redis:6379/0 in .envs/.production/.api.
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    profiles: ["scale"]
+    # Counters only — nothing to keep across a restart.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   ollama:
     # The version this project is developed and measured against: the judge's
     # confidence comes from token probabilities, which older releases did not
@@ -86,15 +102,28 @@ services:
     command:
       - |
         set -e
+        # POST a JSON body to Ollama; fail the job unless it reports success.
+        ask() {
+          result=$$(wget -qO- -T 7200 --header="Content-Type: application/json" \
+            --post-data="$$2" "$${OLLAMA_URL}/api/$$1")
+          case "$${result}" in
+            *success*) ;;
+            *) echo "  $$1 failed: $${result}"; exit 1 ;;
+          esac
+        }
         for model in "$${LLM_MODEL}" "$${EMBEDDING_MODEL}"; do
           echo "ensuring $${model} ..."
-          result=$$(wget -qO- -T 7200 --header="Content-Type: application/json" \
-            --post-data="{\"model\":\"$${model}\",\"stream\":false}" \
-            "$${OLLAMA_URL}/api/pull")
-          case "$${result}" in
-            *success*) echo "  $${model}: ready" ;;
-            *) echo "  $${model}: pull failed: $${result}"; exit 1 ;;
+          case "$${model}" in
+            # "<model>-cpu" is <model> pinned to the CPU: pulled, then aliased
+            # (FINDINGS §17 — bge-m3 returns NaN on some GPUs). Same weights.
+            *-cpu)
+              base="$${model%-cpu}"
+              ask pull "{\"model\":\"$${base}\",\"stream\":false}"
+              ask create "{\"model\":\"$${model}\",\"from\":\"$${base}\",\"parameters\":{\"num_gpu\":0},\"stream\":false}"
+              ;;
+            *) ask pull "{\"model\":\"$${model}\",\"stream\":false}" ;;
           esac
+          echo "  $${model}: ready"
         done
         echo "models ready"
     restart: "no"

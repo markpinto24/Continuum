@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 
 from qdrant_client import AsyncQdrantClient, models
 
-from continuum.config import Settings, get_settings
+from continuum.config import Settings, embedding_weights, get_settings
 from continuum.core.logger import get_logger
 
 log = get_logger(__name__)
@@ -39,9 +39,11 @@ def collection_for(settings: Settings) -> str:
     created: a 768-dim nomic collection cannot hold 1024-dim bge-m3 vectors.
     Encoding the model in the name means switching models never writes into a
     collection built for another one. `reindex.EmbeddingMigration` copies the
-    memories across on startup.
+    memories across on startup. A CPU-pinned alias of a model is that model — the
+    same vectors — so it shares its collection (`embedding_weights`).
     """
-    slug = re.sub(r"[^a-z0-9]+", "-", settings.embedding_model.lower()).strip("-")
+    model = embedding_weights(settings.embedding_model)
+    slug = re.sub(r"[^a-z0-9]+", "-", model.lower()).strip("-")
     return f"{settings.qdrant_collection}__{slug}-{settings.embedding_dim}"
 
 

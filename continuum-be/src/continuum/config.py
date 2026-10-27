@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     trust_proxy_headers: bool = False
     password_min_length: int = 10
     # Failed sign-ins allowed per email and per client address before a lockout.
+    # Where the sign-in lockout and per-user rate limits count. Unset: in this
+    # process — right for the one uvicorn worker this project ships. Set it
+    # (redis://host:6379/0) before running more than one worker, or each would
+    # count on its own and every limit would multiply by the worker count.
+    redis_url: str | None = None
     login_max_failures: int = 5
     login_lockout_minutes: int = 15
     # While no account exists, the web UI offers "create the first admin". Turn
@@ -324,22 +329,33 @@ class Settings(BaseSettings):
         were never calibrated against anything — run
         `scripts/run_eval.py --calibrate` and add the model to the table.
         """
-        duplicate, conflict = CALIBRATED_THRESHOLDS.get(
-            self.embedding_model.split(":")[0], UNCALIBRATED_THRESHOLDS
-        )
+        family = embedding_weights(self.embedding_model).split(":")[0]
+        duplicate, conflict = CALIBRATED_THRESHOLDS.get(family, UNCALIBRATED_THRESHOLDS)
         if self.duplicate_similarity_threshold is None:
             self.duplicate_similarity_threshold = duplicate
         if self.conflict_similarity_threshold is None:
             self.conflict_similarity_threshold = conflict
         if self.subject_similarity_threshold is None:
-            self.subject_similarity_threshold = CALIBRATED_SUBJECT_THRESHOLDS.get(
-                self.embedding_model.split(":")[0]
-            )
+            self.subject_similarity_threshold = CALIBRATED_SUBJECT_THRESHOLDS.get(family)
         return self
 
     @property
     def is_local(self) -> bool:
         return self.environment.lower() in {"local", "dev", "development"}
+
+
+#: An embedding model named "<model>-cpu" is <model> pinned to the CPU — an
+#: Ollama alias the compose `models` job creates (FROM <model>, num_gpu 0). On
+#: this machine's GPU, bge-m3 returns NaN for any text over ~90 characters while
+#: the CPU embeds it exactly (FINDINGS §17). Same weights, same vectors: it shares
+#: the model's calibration and its collection, so switching re-embeds nothing.
+CPU_PINNED_SUFFIX = "-cpu"
+
+
+def embedding_weights(model: str) -> str:
+    """The model whose weights `model` runs: "bge-m3-cpu" -> "bge-m3", tag kept."""
+    name, colon, tag = model.partition(":")
+    return name.removesuffix(CPU_PINNED_SUFFIX) + colon + tag
 
 
 #: (duplicate, conflict) per embedding model, from `run_eval.py --calibrate` on

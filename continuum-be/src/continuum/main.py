@@ -9,6 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis
 
 from continuum.api.router import api_router
 from continuum.clients.authdb import AuthDB
@@ -20,6 +21,7 @@ from continuum.config import get_settings
 from continuum.core.logger import configure_logging, get_logger
 from continuum.core.middleware import RequestContextMiddleware
 from continuum.db.engine import make_engine, migrate
+from continuum.services.activity import ActivityService
 from continuum.services.auth import AuthService
 from continuum.services.chat import ChatService
 from continuum.services.corrections import CorrectionService
@@ -27,7 +29,7 @@ from continuum.services.decay import DecayService
 from continuum.services.extraction import FactExtractor
 from continuum.services.feedback import Calibration, FeedbackService
 from continuum.services.ingest import IngestService
-from continuum.services.limits import SlidingWindow
+from continuum.services.limits import LoginThrottle, build_window
 from continuum.services.memory_store import MemoryStore
 from continuum.services.pending import PendingService
 from continuum.services.reindex import EmbeddingMigration
@@ -91,7 +93,19 @@ async def lifespan(app: FastAPI):
     engine = make_engine(settings)
     await migrate(engine)
     authdb = AuthDB(engine)
-    auth = AuthService(authdb, settings)
+    # Where the limits count: Redis when configured (several workers share it),
+    # this process otherwise. Connecting is lazy; an unreachable Redis fails open.
+    redis = Redis.from_url(settings.redis_url) if settings.redis_url else None
+    auth = AuthService(
+        authdb,
+        settings,
+        throttle=LoginThrottle(
+            build_window(
+                redis, "login", settings.login_max_failures,
+                settings.login_lockout_minutes * 60,
+            )
+        ),
+    )
     await auth.bootstrap_from_settings()
 
     # What people have taught it: decisions, rules, the judge's calibration.
@@ -132,8 +146,9 @@ async def lifespan(app: FastAPI):
     app.state.chat = ChatService(retrieval, ingest, llm, settings)
     app.state.authdb = authdb
     app.state.auth = auth
-    app.state.llm_limiter = SlidingWindow(settings.llm_requests_per_minute, 60)
+    app.state.llm_limiter = build_window(redis, "llm", settings.llm_requests_per_minute, 60)
     app.state.feedback = feedback
+    app.state.activity = ActivityService(memories, feedback, settings.auto_supersede_confidence)
     app.state.learning = learning
     app.state.summaries = summaries
     app.state.corrections = CorrectionService(
@@ -146,7 +161,7 @@ async def lifespan(app: FastAPI):
     app.state.speech = speech
     voice = SynthesisService(settings)
     app.state.voice = voice
-    app.state.tts_limiter = SlidingWindow(settings.tts_requests_per_minute, 60)
+    app.state.tts_limiter = build_window(redis, "tts", settings.tts_requests_per_minute, 60)
     # Background, not awaited: a first-run model download must not hold up the
     # API's healthcheck. Dictation before it finishes just waits for the load.
     # Pass the methods, not coroutines: a coroutine created for a preload that
@@ -188,6 +203,8 @@ async def lifespan(app: FastAPI):
         await llm.aclose()
         await qdrant.aclose()
         await engine.dispose()
+        if redis is not None:
+            await redis.aclose()
         log.info("continuum.stopped")
 
 

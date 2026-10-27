@@ -9,21 +9,32 @@ import { BeliefGraph } from '@/components/belief-graph'
 import { ChatPanel, type ChatControl } from '@/components/chat-panel'
 import { ContradictionInbox } from '@/components/contradiction-inbox'
 import { GraphLegend } from '@/components/graph-legend'
+import { GraphList } from '@/components/graph-list'
+import { type Grouping, GraphViewBar } from '@/components/graph-view-bar'
 import { MemoryDetail } from '@/components/memory-detail'
 import { PanelResizer } from '@/components/panel-resizer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipProvider } from '@/components/ui/tooltip'
+import { NARROW, useMediaQuery } from '@/hooks/use-media-query'
 import { useResizablePanel } from '@/hooks/use-resizable-panel'
 import { usePanelOpen } from '@/hooks/use-panel-open'
 import { cn } from '@/lib/utils'
 import { useMode } from '@/hooks/use-mode'
 import { useResource } from '@/hooks/use-resource'
 import { ApiError, api, onUnauthorized, setMode } from '@/lib/api'
-import type { GraphResponse, Me, MemoryStatus, Mode } from '@/lib/types'
+import {
+  AUTO_CLUSTER_ABOVE,
+  CLUSTER_PREFIX,
+  clusterBySubject,
+  filterGraph,
+  isCluster,
+} from '@/lib/graph-view'
+import type { GraphResponse, Me, MemoryCategory, MemoryStatus, Mode } from '@/lib/types'
 
 const EMPTY_GRAPH: GraphResponse = { nodes: [], edges: [] }
 /** Gap between the floating sidebar and the window edges, in pixels. */
 const PANEL_MARGIN = 12
+const NARROW_MARGIN = 8
 /** Width of the collapsed rail. */
 const RAIL_WIDTH = 48
 
@@ -160,6 +171,12 @@ function Workspace({
   // The end of that day, so everything recorded on it counts.
   const asOf = asOfDay ? new Date(`${asOfDay}T23:59:59`).toISOString() : null
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // What the graph shows (lib/graph-view). Statuses are hidden from the legend.
+  const [hiddenStatuses, setHiddenStatuses] = useState<ReadonlySet<MemoryStatus>>(new Set())
+  const [category, setCategory] = useState<MemoryCategory | 'all'>('all')
+  const [sinceDays, setSinceDays] = useState<number | null>(null)
+  const [grouping, setGrouping] = useState<Grouping>('auto')
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [tab, setTab] = useState('chat')
   const panel = useResizablePanel()
   const [panelOpen, setPanelOpen] = usePanelOpen()
@@ -180,7 +197,14 @@ function Workspace({
     if (!started) openOn('chat')
   }, [openOn])
   // What the floating panel covers, so the graph centres on the rest.
-  const covered = panelOpen ? panel.width + PANEL_MARGIN * 2 : RAIL_WIDTH + PANEL_MARGIN * 2
+  // On a phone the open panel is a sheet over the whole graph: nothing to centre
+  // the graph beside, so it covers no strip of it.
+  const narrow = useMediaQuery(NARROW)
+  const covered = panelOpen
+    ? narrow
+      ? 0
+      : panel.width + PANEL_MARGIN * 2
+    : RAIL_WIDTH + PANEL_MARGIN * 2
 
   const [accountOpen, setAccountOpen] = useState(false)
   // Loaded once; Settings → Voice refreshes it, and Lumen uses the new voice
@@ -207,6 +231,41 @@ function Workspace({
 
   const data = graph.data ?? EMPTY_GRAPH
   const counts = useMemo(() => tallyByStatus(data), [data])
+  const filtered = useMemo(
+    () =>
+      filterGraph(data, {
+        hiddenStatuses,
+        categories: new Set(category === 'all' ? [] : [category]),
+        sinceDays,
+      }),
+    [data, hiddenStatuses, category, sinceDays],
+  )
+  const grouped =
+    grouping === 'on' || (grouping === 'auto' && filtered.nodes.length > AUTO_CLUSTER_ABOVE)
+  const view = useMemo(
+    () => (grouped ? clusterBySubject(filtered, expanded) : filtered),
+    [grouped, filtered, expanded],
+  )
+  const presentCategories = useMemo(
+    () => [...new Set(data.nodes.map((n) => n.category))].sort() as MemoryCategory[],
+    [data],
+  )
+  /** A cluster opens into its memories; a memory opens its detail. */
+  const selectNode = useCallback((id: string | null) => {
+    if (id && isCluster(id)) {
+      const subject = id.slice(CLUSTER_PREFIX.length)
+      setExpanded((was) => new Set([...was, subject]))
+      return
+    }
+    setSelectedId(id)
+  }, [])
+  const toggleStatus = useCallback((status: MemoryStatus) => {
+    setHiddenStatuses((was) => {
+      const next = new Set(was)
+      if (!next.delete(status)) next.add(status)
+      return next
+    })
+  }, [])
   const conflictCount = conflicts.data?.total ?? 0
 
   return (
@@ -242,14 +301,45 @@ function Workspace({
               </Centered>
             ) : (
               <>
+                {/* The canvas, as a list: the way into the graph by keyboard
+                    or screen reader. Hidden until it has focus. */}
+                <GraphList nodes={view.nodes} onSelect={selectNode} />
                 <BeliefGraph
-                  data={data}
+                  data={view}
                   selectedId={selectedId}
-                  onSelect={setSelectedId}
+                  onSelect={selectNode}
                   rightInset={covered}
                   mode={mode}
                 />
-                {data.nodes.length > 0 && <GraphLegend counts={counts} />}
+                {data.nodes.length > 0 && (
+                  // One column at the bottom left, clear of the banners at the top.
+                  <div
+                    className="pointer-events-none absolute bottom-4 left-4 flex flex-col items-start gap-2"
+                    style={{ maxWidth: `calc(100% - ${covered}px - 2rem)` }}
+                  >
+                    <GraphLegend
+                      counts={counts}
+                      hidden={hiddenStatuses}
+                      onToggle={toggleStatus}
+                    />
+                    <GraphViewBar
+                      category={category}
+                      onCategory={setCategory}
+                      categories={presentCategories}
+                      sinceDays={sinceDays}
+                      onSinceDays={setSinceDays}
+                      grouping={grouping}
+                      grouped={grouped}
+                      onGrouping={setGrouping}
+                      shown={filtered.nodes.length}
+                      total={data.nodes.length}
+                      pulledIn={filtered.pulledIn}
+                      expandedCount={expanded.size}
+                      onCollapseAll={() => setExpanded(new Set())}
+                      truncated={data.truncated}
+                    />
+                  </div>
+                )}
                 {!graph.loading && data.nodes.length === 0 && (
                   <div
                     className="pointer-events-none absolute inset-y-0 left-0 flex items-center justify-center px-8 text-center"
@@ -295,21 +385,23 @@ function Workspace({
               'liquid-glass absolute flex flex-col rounded-2xl transition-[transform,opacity] duration-300 ease-out',
               !panelOpen && 'pointer-events-none translate-x-[calc(100%+24px)] opacity-0',
             )}
-            style={{
-              width: panel.width,
-              top: PANEL_MARGIN,
-              right: PANEL_MARGIN,
-              bottom: PANEL_MARGIN,
-            }}
+            style={
+              narrow
+                ? { left: NARROW_MARGIN, right: NARROW_MARGIN, top: NARROW_MARGIN, bottom: NARROW_MARGIN }
+                : { width: panel.width, top: PANEL_MARGIN, right: PANEL_MARGIN, bottom: PANEL_MARGIN }
+            }
           >
-            {/* The resize handle rides the panel's left edge. */}
-            <div className="absolute inset-y-6 -left-1.5 z-20 flex">
-              <PanelResizer
-                width={panel.width}
-                dragging={panel.dragging}
-                {...panel.handleProps}
-              />
-            </div>
+            {/* The resize handle rides the panel's left edge — not on a phone,
+                where the panel is the width of the screen. */}
+            {!narrow && (
+              <div className="absolute inset-y-6 -left-1.5 z-20 flex">
+                <PanelResizer
+                  width={panel.width}
+                  dragging={panel.dragging}
+                  {...panel.handleProps}
+                />
+              </div>
+            )}
             <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center gap-1.5 px-3 pt-3 pb-1">
                 <TabsList className="glass-inset flex-1 bg-transparent">

@@ -126,5 +126,5 @@ async def test_a_summary_is_marked_in_the_chat_prompt():
     prompt = build_system_prompt(ChatContext(query="q", memories=[
         RetrievedMemory(memory=summary, similarity=0.8, recency=1.0, score=0.5)
     ]))
-    assert "[SUMMARY of 3 memories] Atlas in brief" in prompt
+    assert '[SUMMARY of 3 memories] "Atlas in brief"' in prompt
 

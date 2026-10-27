@@ -17,6 +17,7 @@ from continuum.config import Settings, get_settings
 from continuum.core import logger as clog
 from continuum.models.auth import Principal
 from continuum.models.memory import Mode
+from continuum.services.activity import ActivityService
 from continuum.services.auth import AuthService
 from continuum.services.chat import ChatService
 from continuum.services.corrections import CorrectionService
@@ -95,6 +96,10 @@ def get_feedback_service(request: Request) -> FeedbackService:
     return request.app.state.feedback
 
 
+def get_activity_service(request: Request) -> ActivityService:
+    return request.app.state.activity
+
+
 def get_correction_service(request: Request) -> CorrectionService:
     return request.app.state.corrections
 
@@ -121,6 +126,7 @@ AuthDep = Annotated[AuthService, Depends(get_auth_service)]
 AuthDBDep = Annotated[AuthDB, Depends(get_authdb)]
 SpeechDep = Annotated[SpeechService, Depends(get_speech_service)]
 FeedbackDep = Annotated[FeedbackService, Depends(get_feedback_service)]
+ActivityDep = Annotated[ActivityService, Depends(get_activity_service)]
 VoiceDep = Annotated[SynthesisService, Depends(get_synthesis_service)]
 SharingDep = Annotated[SharingService, Depends(get_sharing_service)]
 CorrectionDep = Annotated[CorrectionService, Depends(get_correction_service)]
@@ -263,7 +269,7 @@ AdminUser = Annotated[Principal, Depends(get_admin)]
 async def limit_llm_requests(request: Request, principal: CurrentUser) -> None:
     """Per-user cap on endpoints that spend an LLM or embedding call."""
     limiter: SlidingWindow = request.app.state.llm_limiter
-    wait = limiter.hit(principal.user_id)
+    wait = await limiter.hit(principal.user_id)
     if wait is not None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -276,7 +282,7 @@ async def limit_tts_requests(request: Request, principal: CurrentUser) -> None:
     """Per-user cap on speech synthesis. Separate from the LLM limit: autopilot
     asks for one sentence at a time, and each is cheap."""
     limiter: SlidingWindow = request.app.state.tts_limiter
-    wait = limiter.hit(principal.user_id)
+    wait = await limiter.hit(principal.user_id)
     if wait is not None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

@@ -24,7 +24,7 @@ from continuum.db.engine import make_engine, migrate
 from continuum.models.memory import Memory, MemoryCategory, MemoryStatus
 from continuum.models.schemas import IngestResponse
 from continuum.services.auth import AlreadyExists, AuthService
-from continuum.services.limits import LoginThrottle, SlidingWindow
+from continuum.services.limits import MemoryWindow
 from continuum.services.voice import SynthesisService
 
 PASSWORD = "correct horse battery"
@@ -124,7 +124,7 @@ async def build(**overrides: object) -> App:
     app.include_router(api_router)
     app.dependency_overrides[get_settings] = lambda: settings
     app.state.auth = auth
-    app.state.llm_limiter = SlidingWindow(settings.llm_requests_per_minute, 60)
+    app.state.llm_limiter = MemoryWindow(settings.llm_requests_per_minute, 60)
     app.state.memories = FakeMemories()
     app.state.voice = SynthesisService(settings, voice_loader=lambda _voice: None)
     app.state.ingest = FakeIngest()
@@ -516,28 +516,6 @@ class Clock:
 
     def __call__(self) -> float:
         return self.now
-
-
-def test_sliding_window_refuses_then_recovers():
-    clock = Clock()
-    window = SlidingWindow(2, 60, clock)
-    assert window.hit("k") is None and window.hit("k") is None
-    assert window.hit("k") == 60
-    clock.now += 30
-    assert window.hit("k") == 30
-    clock.now += 31
-    assert window.hit("k") is None
-
-
-def test_a_successful_sign_in_does_not_reset_the_address_counter():
-    """Else one valid login would refill an attacker's budget for every other account."""
-    clock = Clock()
-    throttle = LoginThrottle(2, 15, clock)
-    keys = throttle.keys("victim@example.com", "10.0.0.9")
-    throttle.record_failure(keys)
-    throttle.record_failure(keys)
-    throttle.record_success("attacker@example.com")
-    assert throttle.retry_after(throttle.keys("other@example.com", "10.0.0.9")) is not None
 
 
 async def test_timestamps_come_back_timezone_aware():

@@ -39,6 +39,15 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U continuum -d continuum_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
+      # The limits' Redis backend: one count shared by several workers is the
+      # property a single process can never show (tests/test_limits.py).
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
 
     steps:
       - uses: actions/checkout@v4
@@ -63,4 +72,5 @@ jobs:
       - name: Test
         env:
           TEST_DATABASE_URL: postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test
+          TEST_REDIS_URL: redis://localhost:6379/0
         run: uv run pytest

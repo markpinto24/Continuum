@@ -118,6 +118,8 @@ export interface GraphEdge {
 export interface GraphResponse {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  /** More memories matched than were sent: the graph is not the whole of it. */
+  truncated?: boolean
 }
 
 // --- Conflicts -------------------------------------------------------------
@@ -146,6 +148,11 @@ export interface ConflictResolutionRequest {
   winner_id: string
   loser_ids: string[]
   keep_both: boolean
+  /**
+   * The person's own words deciding it. Required of an agent (API key); a
+   * button in this UI is the person deciding, so the UI sends none.
+   */
+  said?: string | null
 }
 
 export interface ConflictResolutionResponse {
@@ -458,4 +465,31 @@ export interface AnswerRating {
 export interface VoiceChoice {
   voice?: string
   speed?: number
+}
+
+// --- Activity (the observability dashboard) ---------------------------------------
+
+/** One UTC day of what the resolver did and what the person decided. */
+export interface ActivityDay {
+  day: string
+  /** Memories created: what was taken in. */
+  remembered: number
+  /** Times the resolver asked instead of deciding. */
+  escalated: number
+  /** Beliefs it retired on its own — no person's decision behind it. */
+  auto_retired: number
+  decided: number
+  decided_by_agent: number
+  /** Median judge probability of supersedes the gate held for a person: near misses. */
+  judge_confidence: number | null
+}
+
+export interface ActivityReport {
+  days: ActivityDay[]
+  gate: number
+  remembered: number
+  escalated: number
+  auto_retired: number
+  decided: number
+  escalation_rate: number | null
 }

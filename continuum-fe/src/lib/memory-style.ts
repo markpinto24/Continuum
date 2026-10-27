@@ -79,6 +79,19 @@ export function nodeVolume(confidence: number): number {
   return radius ** 3
 }
 
+/**
+ * A node's volume as drawn: a memory by its confidence; a subject's cluster by
+ * how many memories it holds — the cube root, so forty reads larger than four
+ * without swamping the scene.
+ */
+export function nodeSize(node: { confidence: number; members?: number }): number {
+  if (node.members && node.members > 1) {
+    const radius = Math.min(6, 1.6 + 0.9 * Math.cbrt(node.members))
+    return radius ** 3
+  }
+  return nodeVolume(node.confidence)
+}
+
 export function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
 }

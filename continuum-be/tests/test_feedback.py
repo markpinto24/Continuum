@@ -245,3 +245,62 @@ async def test_a_failed_recording_never_fails_the_decision():
     service = FeedbackService(BrokenStore(), Settings(_env_file=None))  # type: ignore[arg-type]
     old, new = pair()
     assert await service.record_resolution("mark", new, [old], keep_both=False) == []
+
+
+# --- An agent settles only on the person's words (commitment 2) ---------------------
+
+
+async def _resolve_as(feedback, via: str, body: dict):  # noqa: ANN001, ANN202
+    from continuum.api.deps import get_principal
+    from continuum.api.routes import conflicts
+    from continuum.models.auth import Principal
+
+    old, new = pair()
+    app = FastAPI()
+    app.include_router(conflicts.router)
+    app.state.memories = FakeMemories(old, new)
+    app.state.feedback = feedback
+    app.dependency_overrides[get_settings] = lambda: feedback.settings
+    sign_in_as(app)
+    app.dependency_overrides[get_principal] = lambda: Principal(
+        user_id="mark", email="m@example.com", via=via,
+        api_key_id="k1" if via == "api_key" else None,
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/conflicts/resolve", json={"winner_id": new.id, "loser_ids": [old.id], **body}
+        )
+    return response, app.state.memories
+
+
+@pytest.mark.parametrize("said", [None, "", "   "])
+async def test_an_agent_cannot_settle_a_dispute_without_the_persons_words(feedback, said):
+    body = {} if said is None else {"said": said}
+    response, memories = await _resolve_as(feedback, "api_key", body)
+    assert response.status_code == 422 and "own decision" in response.json()["detail"]
+    assert memories.saved == [] and await feedback.labels("mark") == []  # nothing changed
+
+
+async def test_an_agent_settles_on_the_persons_words_and_they_are_kept(feedback):
+    response, _ = await _resolve_as(feedback, "api_key", {"said": "Mongo now, we moved"})
+    assert response.status_code == 200
+    [label] = await feedback.labels("mark")
+    assert label.said == "Mongo now, we moved" and label.settled_via == "api_key"
+
+
+async def test_a_button_in_the_web_ui_needs_no_words(feedback):
+    response, _ = await _resolve_as(feedback, "session", {})
+    assert response.status_code == 200
+    [label] = await feedback.labels("mark")
+    assert label.said is None and label.settled_via == "session"
+
+
+async def test_forgetting_a_memory_forgets_the_words_that_settled_it(feedback):
+    old, new = pair()
+    await feedback.record_resolution(
+        "mark", new, [old], keep_both=False, said="the new one", settled_via="api_key"
+    )
+    await feedback.store.redact_memory(old.id)
+    [label] = await feedback.labels("mark")
+    assert label.said is None and label.existing_content == "[forgotten]"

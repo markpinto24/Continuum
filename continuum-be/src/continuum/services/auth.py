@@ -105,7 +105,7 @@ class AuthService:
         self.db = db
         self.settings = settings
         self.hasher = hasher or PasswordHasher()
-        self.throttle = throttle or LoginThrottle(
+        self.throttle = throttle or LoginThrottle.in_memory(
             settings.login_max_failures, settings.login_lockout_minutes
         )
         # Verified against when the email is unknown, so a miss costs the same
@@ -259,7 +259,7 @@ class AuthService:
     ) -> User:
         email = normalise_email(email)
         keys = self.throttle.keys(email, client)
-        wait = self.throttle.retry_after(keys)
+        wait = await self.throttle.retry_after(keys)
         if wait is not None:
             log.warning("auth.login_locked_out", retry_after=wait)
             raise LockedOut(wait)
@@ -275,11 +275,11 @@ class AuthService:
         # A disabled account fails exactly like a wrong password: the sign-in
         # form should not confirm which accounts exist.
         if not ok or user is None or user.disabled:
-            self.throttle.record_failure(keys)
+            await self.throttle.record_failure(keys)
             log.info("auth.login_failed")
             raise InvalidCredentials("Wrong email or password.")
 
-        self.throttle.record_success(email)
+        await self.throttle.record_success(email)
         if stored and self.hasher.check_needs_rehash(stored):
             await self.db.set_password_hash(user.id, await self._hash(password))
         log.info("auth.login_succeeded", user_id=user.id)

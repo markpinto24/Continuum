@@ -15,6 +15,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import Field
 
 from continuum.api.deps import (
+    ActivityDep,
     CurrentUser,
     FeedbackDep,
     MemoryStoreDep,
@@ -22,6 +23,7 @@ from continuum.api.deps import (
     SettingsDep,
 )
 from continuum.models.feedback import (
+    ActivityReport,
     AnswerFeedback,
     CalibrationReport,
     FeedbackSummary,
@@ -223,6 +225,18 @@ async def rate_answer(
     )
     await feedback.record_answer(item)
     return {"missing": len(item.missing_ids)}
+
+
+@router.get("/activity", response_model=ActivityReport)
+async def activity(
+    principal: CurrentUser,
+    activity: ActivityDep,
+    days: int = Query(30, ge=1, le=365),
+) -> ActivityReport:
+    """The resolver over time in your current graph: memories taken in, how often
+    it asked instead of deciding, what it retired on its own, what you decided,
+    and how sure the judge was. Your graph only — never the team's."""
+    return await activity.report(user_id=principal.user_id, owner=principal.owner, days=days)
 
 
 @router.get("/summary", response_model=FeedbackSummary)

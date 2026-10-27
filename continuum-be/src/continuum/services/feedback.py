@@ -68,6 +68,8 @@ def build_labels(
     *,
     keep_both: bool,
     now: datetime | None = None,
+    said: str | None = None,
+    settled_via: str | None = None,
 ) -> list[ResolutionLabel]:
     """One label per pair the person ruled on, oriented older -> newer.
 
@@ -121,6 +123,8 @@ def build_labels(
                 decision=decision,
                 expected_action=EXPECTED_ACTION[decision],
                 graph_owner=older.user_id if older.user_id == newer.user_id else "cross",
+                said=said,
+                settled_via=settled_via,
             )
         )
     return labels
@@ -494,10 +498,19 @@ class FeedbackService:
         return {r.subject for r in await self.learning.rules([owner]) if r.kind == "compatible"}
 
     async def record_resolution(
-        self, user_id: str, winner: Memory, losers: list[Memory], *, keep_both: bool
+        self,
+        user_id: str,
+        winner: Memory,
+        losers: list[Memory],
+        *,
+        keep_both: bool,
+        said: str | None = None,
+        settled_via: str | None = None,
     ) -> list[ResolutionLabel]:
         """Label a decision the person just made. Never fails the decision itself."""
-        labels = build_labels(user_id, winner, losers, keep_both=keep_both)
+        labels = build_labels(
+            user_id, winner, losers, keep_both=keep_both, said=said, settled_via=settled_via
+        )
         try:
             await self.store.add_many(labels)
         except Exception:  # noqa: BLE001 - the graph change is already applied

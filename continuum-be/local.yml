@@ -114,15 +114,28 @@ services:
           echo "Is it running on the host, and listening beyond 127.0.0.1?"
           exit 1
         fi
+        # POST a JSON body to Ollama; fail the job unless it reports success.
+        ask() {
+          result=$$(wget -qO- -T 3600 --header="Content-Type: application/json" \
+            --post-data="$$2" "$${OLLAMA_URL}/api/$$1")
+          case "$${result}" in
+            *success*) ;;
+            *) echo "  $$1 failed: $${result}"; exit 1 ;;
+          esac
+        }
         for model in "$${LLM_MODEL}" "$${EMBEDDING_MODEL}"; do
           echo "ensuring $${model} ..."
-          result=$$(wget -qO- -T 3600 --header="Content-Type: application/json" \
-            --post-data="{\"model\":\"$${model}\",\"stream\":false}" \
-            "$${OLLAMA_URL}/api/pull")
-          case "$${result}" in
-            *success*) echo "  $${model}: ready" ;;
-            *) echo "  $${model}: pull failed: $${result}"; exit 1 ;;
+          case "$${model}" in
+            # "<model>-cpu" is <model> pinned to the CPU: pulled, then aliased
+            # (FINDINGS §17 — bge-m3 returns NaN on some GPUs). Same weights.
+            *-cpu)
+              base="$${model%-cpu}"
+              ask pull "{\"model\":\"$${base}\",\"stream\":false}"
+              ask create "{\"model\":\"$${model}\",\"from\":\"$${base}\",\"parameters\":{\"num_gpu\":0},\"stream\":false}"
+              ;;
+            *) ask pull "{\"model\":\"$${model}\",\"stream\":false}" ;;
           esac
+          echo "  $${model}: ready"
         done
         echo "models ready"
     restart: "no"

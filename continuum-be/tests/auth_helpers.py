@@ -12,7 +12,7 @@ from fastapi import FastAPI
 
 from continuum.api.deps import get_principal
 from continuum.models.auth import Principal
-from continuum.services.limits import SlidingWindow
+from continuum.services.limits import MemoryWindow
 
 
 def sign_in_as(app: FastAPI, user_id: str = "mark", *, is_admin: bool = False) -> Principal:
@@ -20,5 +20,5 @@ def sign_in_as(app: FastAPI, user_id: str = "mark", *, is_admin: bool = False) -
         user_id=user_id, email=f"{user_id}@example.com", is_admin=is_admin, via="session"
     )
     app.dependency_overrides[get_principal] = lambda: principal
-    app.state.llm_limiter = SlidingWindow(1000, 60)
+    app.state.llm_limiter = MemoryWindow(1000, 60)
     return principal

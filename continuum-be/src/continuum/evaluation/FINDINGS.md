@@ -939,6 +939,102 @@ turn was never written — a test caught it (`test_leaving_after_done_…`). And
 turn of 24 failed to write: bge-m3 returned NaN for its text and the spacing
 nudge (§1) did not save it. The answer still arrived; the failure is logged.
 
+## 17. bge-m3 on this GPU: NaN for anything longer than a sentence
+
+Found 2026-10-27, verifying Iteration 6: the first note ingested returned 500.
+Ollama's bge-m3 answered NaN — not for a few odd inputs, as §1's spacing nudge
+assumed, but for **every text over ~90 characters**, single or batched, on both
+of Ollama's embedding routes, and again after unloading the model. Forced onto
+the CPU (`num_gpu: 0`) the same text embedded at once. On the RTX 4050 the
+model loads with flash attention switched on; on the CPU it does not.
+
+It explains the intermittent history: while qwen2.5 holds the 6 GB card,
+bge-m3 lands on the CPU and works; alone, it takes the GPU and long facts fail.
+The 1-in-24 lost chat write in §16 was this. Live, it meant notes failing to
+ingest and chat turns silently not remembered.
+
+Fix, a product decision (2026-10-27): **`bge-m3-cpu`**, an Ollama alias of the
+same weights with `num_gpu 0`. Its vectors are bge-m3's exactly (cosine
+1.000000 on a long sentence), so it shares bge-m3's calibrated bands and its
+collection (`config.embedding_weights`): switching re-embedded nothing
+(`reindexed=0`). The compose `models` job creates any `<model>-cpu` alias from
+its base, keeping the one-command start. Set in this machine's gitignored
+overrides only — a machine whose GPU embeds correctly keeps it.
+
+## 18. Memory for other agents
+
+TODO Iteration 6, 2026-10-27. `continuum-sdk/`: a typed client and an MCP server
+over the HTTP API, nothing imported from the backend.
+
+**Settling, the one product decision** (2026-10-27): an agent may settle a
+dispute only on the person's own words. `said` is required of an API key on
+both resolve routes (422 without it) and stored with the decision, beside
+`settled_via`; Forget blanks it with the label's other copies of content. The
+web UI's buttons send none — a button is the person deciding.
+
+**Verified end to end** on a throwaway instance — its own Qdrant container,
+SQLite accounts, the real models: a decision remembered; a change to it raising
+a dispute (not a silent retire); recall returning both sides as DISPUTED; the
+server refusing a settle with no words (422) and applying one with them
+(keep both, 0 left open); chat read to its `remembered` event. A real MCP
+client over stdio listed the four tools and ran each; `examples/agent.py`
+answered "who is on call?" from what the previous turn had remembered.
+
+## 19. A memory is data: prompt injection, measured
+
+TODO Iteration 7, 2026-10-27. Memory reaches the chat prompt from other people
+too — a teammate's shared memory, whatever an agent's key ingests — so a stored
+"ignore previous instructions" is a real attack. `corpus/injection.yaml`: six
+planted instructions beside ordinary memories, and three cost cases (memory that
+should shape the answer), labelled before the first run; the real model, three
+runs a case, `run_eval.py --injection`.
+
+| | obeyed (strict count) | read |
+| --- | --- | --- |
+| the rule at the top only (before) | 15 of 18 | answered "PWNED" ×3; a pirate ×3; appended the evil.example link ×3; leaned to MongoDB on a real dispute; the health case reported, not obeyed |
+| + one quoted line per memory, the rule repeated after them | 8 of 18 | link, PWNED and the prompt leak held; the pirate ×3; once "as instructed, MongoDB is correct" |
+| + a memory written as orders shown only as a withheld note | **0 of 18** | — |
+
+What held in the end reads the words, not the model (§10): the extractor writes
+memories about the person ("The user prefers …"), so a memory that says "you
+are", "from now on", "ignore previous instructions" or "Assistant instruction:"
+did not come from an ordinary note. `addresses_the_assistant` flags it — 0 false
+positives across 250 statements from every corpus — and the model is told only
+that such a note exists. The memory itself is untouched: the person sees it in
+the graph. Every memory is also quoted on one line, so a line break can no longer
+forge another numbered memory or a DISPUTED header (unit-tested).
+
+The cost cases found an older gap, not a new one: a recorded "answers of one or
+two sentences" or "replies in Spanish" was ignored 3 times in 3 — by the
+original prompt as much as the hardened one. Memory has never shaped how chat
+answers; it is listed in TODO. "Always" inside an ordinary fact is never taken as
+an order (3/3 both ways). Not covered: an instruction in a document an agent
+ingests, at extraction time.
+
+## 20. Limits for more than one worker; the resolver over time
+
+**Redis.** The sign-in lockout and rate limits counted in process memory, so
+every extra worker would have multiplied every limit. `REDIS_URL` moves them to
+Redis: per key a sorted set, and one Lua script that trims, counts and adds, so
+two workers checking at once cannot both slip in. One contract, both backends
+(`tests/test_limits.py`; Redis in CI); ten simultaneous requests through two
+clients against a limit of five let exactly five through. An unreachable Redis
+fails open, logged — an outage must not lock everyone out of signing in, and a
+guess still costs an argon2id verification. Production has it as an opt-in
+profile; one worker needs none. Still per process before scaling out: the chat's
+write lock, the decay scheduler, the startup re-embedding.
+
+**Activity** (`GET /feedback/activity`, the Inbox). Read back from what the graph
+already keeps — no new logging: per day, memories taken in, escalations, beliefs
+retired by the resolver alone (a supersede no person's decision explains, and not
+a share), decisions and how many came through an agent, and the near misses.
+The first version plotted every escalation's judge confidence against the gate;
+on real data it was 0.998 — the judge sure of a *conflict*, which the gate never
+sees. Near misses are supersedes the gate held for a person. Checked in a real
+(headless) browser on a seeded throwaway instance; the status colours fail as a
+categorical set on this surface (validated), so the strips share the accent and
+are told apart by their titles.
+
 ---
 
 ## What this changes

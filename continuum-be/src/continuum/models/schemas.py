@@ -203,6 +203,12 @@ class ConflictResolutionRequest(ClientBody):
     winner_id: str
     loser_ids: list[str] = Field(default_factory=list)
     keep_both: bool = False
+    said: str | None = Field(
+        default=None,
+        max_length=500,
+        description="The person's own words deciding it (\"Mongo now\", \"both are true\"). "
+        "Required when an agent settles with an API key; recorded with the decision.",
+    )
 
 
 class ConflictResolutionResponse(BaseModel):
@@ -241,6 +247,9 @@ class GraphResponse(BaseModel):
 
     nodes: list[GraphNode]
     edges: list[GraphEdge]
+    truncated: bool = Field(
+        False, description="More memories matched than `limit`: the graph is not the whole of it."
+    )
 
 
 # --- Phase 3: memory-augmented chat -----------------------------------------
@@ -612,6 +621,11 @@ class TeamResolutionRequest(ClientBody):
     memory_id: str
     shared_id: str
     decision: Literal["team_holds", "mine_holds", "both_hold"]
+    said: str | None = Field(
+        default=None,
+        max_length=500,
+        description="The person's own words deciding it. Required with an API key.",
+    )
 
 
 class TeamResolutionResponse(BaseModel):

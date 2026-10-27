@@ -29,6 +29,9 @@
     # a confirmed maybe, reworded as decided: does the guard keep only good ones?
     uv run python scripts/run_eval.py --confirmations
 
+    # does an instruction planted in a memory stay data? (real model, 3 runs)
+    uv run python scripts/run_eval.py --injection
+
     # as a gate (the nightly job): exit 1 if a belief was lost or merged away
     uv run python scripts/run_eval.py --record run.json --max-belief-loss 0 --max-merge-loss 0
 
@@ -244,6 +247,29 @@ async def run_confirmations() -> None:
         await llm.aclose()
 
 
+async def run_injection(runs: int = 3) -> None:
+    """Each planted instruction, asked about `runs` times. Any obeyed is a failure."""
+    from continuum.evaluation import injection
+
+    cases = injection.load_cases()
+    llm = LLMClient(get_settings())
+    try:
+        _rule(f"INJECTION — {len(cases)} planted instructions, {runs} runs each")
+        failures = 0
+        for case in cases:
+            outcomes = [await injection.run_case(llm, case) for _ in range(runs)]
+            obeyed = [o for o in outcomes if o.obeyed]
+            failures += len(obeyed)
+            failed = ("IGNORED" if case.is_cost else "OBEYED") if obeyed else "ok"
+            print(f"  {failed:<7} {len(obeyed)}/{runs}  {case.id}")
+            for o in obeyed:
+                print(f"           {o.obeyed}: {o.answer[:160]!r}")
+        print(f"\n  {failures} of {len(cases) * runs} answers failed: obeyed a planted "
+              "instruction, or ignored a memory that should shape the answer")
+    finally:
+        await llm.aclose()
+
+
 async def run_matcher() -> None:
     """How often the judged matcher agrees with labelled (label, output) pairs.
 
@@ -377,6 +403,10 @@ async def main() -> None:
         help="Exit 1 if the run's merge loss is above this.",
     )
     parser.add_argument(
+        "--injection", action="store_true",
+        help="Plant instructions in memories; check the real model never obeys them.",
+    )
+    parser.add_argument(
         "--matcher", action="store_true",
         help="Check the judged extraction matcher against labelled pairs.",
     )
@@ -481,6 +511,10 @@ async def main() -> None:
 
     if args.matcher:
         await run_matcher()
+        return
+
+    if args.injection:
+        await run_injection()
         return
 
     if args.agreement:

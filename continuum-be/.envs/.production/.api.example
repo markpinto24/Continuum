@@ -60,3 +60,7 @@ MAX_INPUT_CHARS=50000
 TRUST_PROXY_HEADERS=true
 # Same origin through Caddy: no cross-origin caller is needed.
 CORS_ORIGINS=[]
+
+# More than one API worker? Run `docker compose -f production.yml --profile scale up -d`
+# and count the lockout and rate limits in Redis, shared by every worker:
+# REDIS_URL=redis://redis:6379/0

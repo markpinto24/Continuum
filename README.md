@@ -125,10 +125,10 @@ Oracle Cloud VM, with HTTPS from Caddy and your data staying on that machine.
 
 ## Repository layout
 
-One repository, two independent projects, no workspace tool. The backend is a
-self-contained `uv` project and knows nothing about the frontend; their only
-relationship is an HTTP contract. CI runs each only when its own directory
-changes.
+One repository, three independent projects, no workspace tool. The backend is
+a self-contained `uv` project and knows nothing about the frontend or the SDK;
+their only relationship is an HTTP contract. CI runs each only when its own
+directory changes.
 
 ```
 Continuum/
@@ -136,8 +136,13 @@ Continuum/
 ├── .env.example             every setting, with provider presets
 ├── CLAUDE.md                the engineering brief
 ├── continuum-be/            FastAPI + Qdrant + the resolution layer
-└── continuum-fe/            React + Three.js — the belief graph UI
+├── continuum-fe/            React + Three.js — the belief graph UI
+└── continuum-sdk/           memory for other agents: Python client + MCP server
 ```
+
+**Give your own agent this memory:** [`continuum-sdk/README.md`](continuum-sdk/README.md)
+— an MCP server for Claude Code / Claude Desktop, or a Python client, in five
+minutes.
 
 | | |
 | --- | --- |

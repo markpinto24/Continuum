@@ -25,9 +25,10 @@ import {
   STATUS_COLOR,
   STATUS_LABEL,
   SUMMARY_COLOR,
-  nodeVolume,
+  nodeSize,
 } from '@/lib/memory-style'
-import type { GraphEdgeKind, GraphNode, GraphResponse, Mode } from '@/lib/types'
+import type { ViewGraph, ViewNode } from '@/lib/graph-view'
+import type { GraphEdgeKind, Mode } from '@/lib/types'
 
 /**
  * The belief graph, rendered in three dimensions.
@@ -52,7 +53,7 @@ import type { GraphEdgeKind, GraphNode, GraphResponse, Mode } from '@/lib/types'
  */
 
 /** `react-force-graph` mutates what you hand it, so these carry its extra fields. */
-interface SceneNode extends GraphNode {
+interface SceneNode extends ViewNode {
   x?: number
   y?: number
   z?: number
@@ -66,7 +67,8 @@ interface SceneLink {
 }
 
 export interface BeliefGraphProps {
-  data: GraphResponse
+  /** What to draw: the graph after filtering and grouping (lib/graph-view). */
+  data: ViewGraph
   selectedId: string | null
   onSelect: (id: string | null) => void
   /** Pixels on the right covered by a floating panel: the view centres on the rest. */
@@ -298,7 +300,7 @@ export function BeliefGraph({
         }
         const sx = ((point.x + 1) / 2) * width
         const sy = ((1 - point.y) / 2) * height
-        const radius = Math.cbrt(nodeVolume(node.confidence)) * NODE_REL_SIZE
+        const radius = Math.cbrt(nodeSize(node)) * NODE_REL_SIZE
         const offset = Math.max(8, (radius * focal) / Math.max(depth, 1)) + LABEL_GAP
         const priority =
           (node.id === selectedId ? 1e6 : 0) +
@@ -385,7 +387,7 @@ export function BeliefGraph({
           {...({ controlType: 'orbit' } as object)}
           nodeId="id"
           nodeLabel={nodeTooltip}
-          nodeVal={(node) => nodeVolume(node.confidence)}
+          nodeVal={(node) => nodeSize(node)}
           nodeColor={(node) =>
             isMuted(node.id) ? withAlpha(STATUS_COLOR[node.status], 0.14) : STATUS_COLOR[node.status]
           }
@@ -434,7 +436,7 @@ function nodeDecoration(
   { muted, selected }: { muted: boolean; selected: boolean },
 ): Object3D {
   const group = new Group()
-  const radius = Math.cbrt(nodeVolume(node.confidence)) * NODE_REL_SIZE
+  const radius = Math.cbrt(nodeSize(node)) * NODE_REL_SIZE
   const color = STATUS_COLOR[node.status]
 
   // Soft light around the node, in its status colour — the glow, without a
@@ -588,6 +590,17 @@ function nodeTooltip(node: SceneNode): string {
     node.kind === 'summary'
       ? `<div style="color:${SUMMARY_COLOR};font-size:11px;margin-top:.2rem">Summary of a subject — derived, not evidence</div>`
       : ''
+  if (node.members > 1) {
+    return `
+    <div style="max-width:20rem;padding:.55rem .7rem;border-radius:.6rem;
+                background:rgba(10,18,26,.92);border:1px solid #1f2d3a;color:#e6edf3;
+                font-family:'Inter Variable',system-ui,sans-serif;font-size:12px;line-height:1.45">
+      <div style="margin-bottom:.35rem">${escapeHtml(node.label)}</div>
+      <div style="color:#8b9aa8;font-size:11px">
+        ${node.status === 'contradicted' ? 'Holds a dispute · ' : ''}click to show each memory
+      </div>
+    </div>`
+  }
   return `
     <div style="max-width:20rem;padding:.55rem .7rem;border-radius:.6rem;
                 background:rgba(10,18,26,.92);border:1px solid #1f2d3a;color:#e6edf3;

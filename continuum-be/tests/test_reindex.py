@@ -157,3 +157,18 @@ def test_each_model_gets_its_own_collection():
     assert collection_for(settings_for("qwen3-embedding:0.6b", 1024)) == (
         "continuum_memories__qwen3-embedding-0-6b-1024"
     )
+
+
+def test_a_cpu_pinned_alias_is_its_model_calibration_and_collection_alike():
+    # bge-m3-cpu runs bge-m3's weights on the CPU (FINDINGS §17): the same
+    # vectors, so the same bands, and the same collection — nothing to re-embed.
+    from continuum.config import Settings
+
+    gpu = Settings(_env_file=None, embedding_model="bge-m3")
+    cpu = Settings(_env_file=None, embedding_model="bge-m3-cpu")
+    assert collection_for(cpu) == collection_for(gpu)
+    assert (cpu.duplicate_similarity_threshold, cpu.conflict_similarity_threshold) == (0.86, 0.45)
+    assert cpu.subject_similarity_threshold == gpu.subject_similarity_threshold == 0.67
+    # Only the suffix means it: another model keeps its own collection.
+    other = Settings(_env_file=None, embedding_model="nomic-embed-text", embedding_dim=768)
+    assert collection_for(other) != collection_for(gpu)

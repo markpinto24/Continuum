@@ -15,6 +15,7 @@ from continuum.api.deps import (
     SettingsDep,
     SharingDep,
 )
+from continuum.models.auth import Principal
 from continuum.models.memory import SHARED_SPACE
 from continuum.models.schemas import (
     ConflictListResponse,
@@ -84,6 +85,7 @@ async def resolve_conflict(
     losers are marked superseded by the winner — an edge, never a delete, so the
     decision stays auditable and reversible.
     """
+    said = _person_decided(principal, request.said)
     owners = principal.owners(shared=settings.shared_space_enabled)
     winner = await memories.get(request.winner_id)
     if not winner or winner.user_id not in owners:
@@ -107,7 +109,8 @@ async def resolve_conflict(
             winner.clear_conflict_with(loser.id)
         await memories.save(winner)
         await feedback.record_resolution(
-            principal.user_id, seen_winner, seen_losers, keep_both=True
+            principal.user_id, seen_winner, seen_losers, keep_both=True,
+            said=said, settled_via=principal.via,
         )
         return ConflictResolutionResponse(winner=winner, losers=losers, action="kept_both")
 
@@ -122,7 +125,10 @@ async def resolve_conflict(
 
     winner.reinforce()
     await memories.save(winner)
-    await feedback.record_resolution(principal.user_id, seen_winner, seen_losers, keep_both=False)
+    await feedback.record_resolution(
+        principal.user_id, seen_winner, seen_losers, keep_both=False,
+        said=said, settled_via=principal.via,
+    )
 
     return ConflictResolutionResponse(winner=winner, losers=losers, action="superseded")
 
@@ -141,6 +147,7 @@ async def resolve_team_conflict(
     the team is out of date, `mine_holds` shares yours, and the team graph's own
     resolver — or the team, if it is unsure — decides.
     """
+    said = _person_decided(principal, request.said)
     memory = await memories.get(request.memory_id)
     if not memory or memory.user_id != principal.owner:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Memory not found")
@@ -162,7 +169,8 @@ async def resolve_team_conflict(
         except SharingError as exc:
             raise HTTPException(exc.status, detail=str(exc)) from exc
         await feedback.record_resolution(
-            principal.user_id, seen_memory, [seen_team], keep_both=False
+            principal.user_id, seen_memory, [seen_team], keep_both=False,
+            said=said, settled_via=principal.via,
         )
         return TeamResolutionResponse(memory=shared.original, action="mine_holds", shared=shared)
 
@@ -174,6 +182,25 @@ async def resolve_team_conflict(
         winner, losers = seen_memory, [seen_team]
     await memories.save(memory)
     await feedback.record_resolution(
-        principal.user_id, winner, losers, keep_both=request.decision == "both_hold"
+        principal.user_id, winner, losers, keep_both=request.decision == "both_hold",
+        said=said, settled_via=principal.via,
     )
     return TeamResolutionResponse(memory=memory, action=request.decision)
+
+
+def _person_decided(principal: Principal, said: str | None) -> str | None:
+    """The person's words, required when an agent settles (commitment 2).
+
+    A button press in the web UI is the person deciding. An API key is an agent,
+    and an agent deciding a real contradiction on its own judgement is the
+    second-LLM-call arbitration the project exists to prevent — so it may only
+    pass on a decision the person stated, in their words, which are kept with it.
+    """
+    words = (said or "").strip() or None
+    if principal.via == "api_key" and words is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="An agent settles a dispute only on the person's own decision: "
+            "pass their words in `said`.",
+        )
+    return words

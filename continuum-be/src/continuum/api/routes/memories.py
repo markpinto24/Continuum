@@ -185,13 +185,18 @@ async def memory_graph(
         # only with include_archived, like everything else no longer in play.
         MemoryStatus.PENDING,
     ]
+    # One more than asked for, to know whether the graph was cut — a cut graph
+    # must say so, not pass itself off as everything.
     items = await memories.list_all(
         user_id=principal.owners(shared=settings.shared_space_enabled),
-        limit=limit if not as_of else 100_000,
+        limit=limit + 1 if not as_of else 100_000,
         statuses=statuses,
     )
     if as_of is not None:
-        items = [m for m in items if m.believed_at(as_of)][:limit]
+        items = [m for m in items if m.believed_at(as_of)]
+    truncated = len(items) > limit
+    items = items[:limit]
+    if as_of is not None:
         for m in items:
             if m.status in (MemoryStatus.SUPERSEDED, MemoryStatus.ARCHIVED):
                 m.status = MemoryStatus.ACTIVE
@@ -246,7 +251,7 @@ async def memory_graph(
             seen_conflicts.add(key)
             edges.append(GraphEdge(source=m.id, target=other_id, kind="conflicts_with"))
 
-    return GraphResponse(nodes=nodes, edges=edges)
+    return GraphResponse(nodes=nodes, edges=edges, truncated=truncated)
 
 
 @router.post("/{memory_id}/reinforce", response_model=Memory)

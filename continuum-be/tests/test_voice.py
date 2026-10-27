@@ -17,7 +17,7 @@ from fastapi import FastAPI
 
 from continuum.api.routes import speech as speech_route
 from continuum.config import Settings, get_settings
-from continuum.services.limits import SlidingWindow
+from continuum.services.limits import MemoryWindow
 from continuum.services.speech import SpeechDisabled, SpeechService
 from continuum.services.voice import (
     InvalidText,
@@ -116,7 +116,7 @@ def app_with(synth: SynthesisService, *, per_minute: int = 1000) -> FastAPI:
     app.state.speech = SpeechService(settings(speech_enabled=False))
     app.dependency_overrides[get_settings] = lambda: settings()
     sign_in_as(app)
-    app.state.tts_limiter = SlidingWindow(per_minute, 60)
+    app.state.tts_limiter = MemoryWindow(per_minute, 60)
     return app
 
 

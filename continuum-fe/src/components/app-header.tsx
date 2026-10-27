@@ -45,7 +45,7 @@ export function AppHeader({
 }) {
   const today = localDay(new Date())
   return (
-    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border/60 px-4">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-2 sm:gap-4 sm:px-4">
       <Wordmark />
 
       <ModeSwitch mode={mode} onMode={onMode} />
@@ -55,7 +55,8 @@ export function AppHeader({
         {nodeCount} beliefs · {edgeCount} edges
       </span>
 
-      <div className="ml-auto flex items-center gap-1">
+      {/* On a phone the controls scroll within the header rather than spill off it. */}
+      <div className="scrollbar-slim ml-auto flex min-w-0 items-center gap-1 overflow-x-auto">
         <Tooltip label="See what was believed on a past day. The graph and the chat both go back; nothing said meanwhile is remembered.">
           <label
             className={cn(
@@ -124,6 +125,8 @@ export function AppHeader({
           <button
             type="button"
             onClick={onAccount}
+            // The email is hidden on a phone; the name must not be.
+            aria-label={`Account and settings — ${me.email}`}
             className="flex h-8 max-w-60 items-center gap-2 rounded-lg pr-2.5 pl-1 text-xs text-muted transition-colors hover:bg-surface-raised hover:text-foreground"
           >
             <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-accent/15 text-[11px] font-semibold text-accent uppercase">
@@ -187,7 +190,7 @@ function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (mode: Mode) => void
               )}
             >
               <Icon className="size-3.5" />
-              {label}
+              <span className="sr-only sm:not-sr-only">{label}</span>
             </button>
           </Tooltip>
         )

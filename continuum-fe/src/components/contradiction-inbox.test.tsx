@@ -21,6 +21,11 @@ vi.mock('@/lib/api', () => ({
     resolveConflict: (...args: unknown[]) => resolveConflict(...args),
     resolveTeamConflict: (...args: unknown[]) => resolveTeamConflict(...args),
     feedbackEvidence: (...args: unknown[]) => feedbackEvidence(...args),
+    feedbackActivity: () =>
+      Promise.resolve({
+        days: [], gate: 0.8, remembered: 0, escalated: 0, auto_retired: 0, decided: 0,
+        escalation_rate: null,
+      }),
     feedbackExportUrl: () => '/api/v1/feedback/export',
     feedbackExportUrlFor: (kind: string) => `/api/v1/feedback/export?kind=${kind}`,
     rules: () => rules(),

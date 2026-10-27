@@ -28,7 +28,7 @@ from continuum.models.memory import (
 from continuum.models.schemas import ChatContext, IngestRequest
 from continuum.services.chat import build_system_prompt
 from continuum.services.decay import DecayService
-from continuum.services.limits import SlidingWindow
+from continuum.services.limits import MemoryWindow
 from continuum.services.memory_store import MemoryStore
 from continuum.services.pending import PendingError, PendingService
 from continuum.services.retrieval import RetrievalService
@@ -287,7 +287,7 @@ def test_the_prompt_lists_pending_items_apart_and_never_numbers_them():
     item = Memory(user_id="m:personal", content=SPLIT, status=MemoryStatus.PENDING)
     prompt = build_system_prompt(ChatContext(query="q", pending=[item]), mode=Mode.PERSONAL)
     assert "PENDING — said, not decided:" in prompt
-    assert f"- {SPLIT} (said" in prompt and f"] {SPLIT}" not in prompt
+    assert f'- "{SPLIT}" (said' in prompt and f'] "{SPLIT}"' not in prompt
     assert "never state one as true" in prompt
 
 
@@ -299,7 +299,7 @@ async def _client(memories, pending, principal):  # noqa: ANN001, ANN202
     app.include_router(memories_route.router)
     app.state.memories = memories
     app.state.pending = pending
-    app.state.llm_limiter = SlidingWindow(1000, 60)
+    app.state.llm_limiter = MemoryWindow(1000, 60)
     app.dependency_overrides[get_principal] = lambda: principal
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 

@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import { EmptyPanel } from '@/components/memory-detail'
 import { Badge } from '@/components/ui/badge'
+import { ActivityPanel } from '@/components/activity-panel'
 import { type EvidenceScope, LearningPanel } from '@/components/learning-panel'
 import { Button } from '@/components/ui/button'
 import { PendingQuestionCard } from '@/components/turn-outcome'
@@ -58,14 +59,17 @@ export function ContradictionInbox({
     [resource.data, evidenceScope],
   )
   const learning = (
-    <LearningPanel
-      evidence={evidence}
-      scope={mode === 'workspace' ? scope : 'mine'}
-      onScope={mode === 'workspace' ? setScope : undefined}
-      isAdmin={isAdmin}
-      version={resource.data}
-      mode={mode}
-    />
+    <>
+      <LearningPanel
+        evidence={evidence}
+        scope={mode === 'workspace' ? scope : 'mine'}
+        onScope={mode === 'workspace' ? setScope : undefined}
+        isAdmin={isAdmin}
+        version={resource.data}
+        mode={mode}
+      />
+      <ActivityPanel version={resource.data} />
+    </>
   )
 
   const settleTeam = async (pair: ConflictPair, decision: TeamDecision) => {

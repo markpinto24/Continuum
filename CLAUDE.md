@@ -2,10 +2,11 @@
 
 Project brief for Claude Code. Read this before touching anything.
 
-This file lives at the **repo root**. Continuum is one repository with two
-projects under it — `continuum-be` and `continuum-fe` — and no workspace tool
-binding them. They build, test and deploy independently; this brief, the
-ignore rules and CI are the only things that span both.
+This file lives at the **repo root**. Continuum is one repository with three
+projects under it — `continuum-be`, `continuum-fe` and `continuum-sdk` (the
+agent client and MCP server) — and no workspace tool binding them. They build,
+test and deploy independently; this brief, the ignore rules and CI are the only
+things that span them.
 
 ---
 
@@ -98,10 +99,19 @@ Continuum/                            ← git root
 ├── TODO.md                           the improvement backlog, in iterations
 ├── DEPLOY.md                         free public deployment: one Oracle VM, Caddy, HTTPS
 ├── .env.example                      template for continuum-be/.env (uv run)
-├── .gitignore                        covers both projects
+├── .gitignore                        covers every project
 ├── .github/workflows/
 │   ├── backend.yml                   paths: ['continuum-be/**']
-│   └── frontend.yml                  paths: ['continuum-fe/**']
+│   ├── frontend.yml                  paths: ['continuum-fe/**']
+│   ├── sdk.yml                       paths: ['continuum-sdk/**']
+│   └── nightly-eval.yml              the resolution corpora on real models; gates belief loss
+├── continuum-sdk/                    ← memory for other agents (HTTP only)
+│   ├── src/continuum_sdk/client.py   Continuum / AsyncContinuum: remember, recall,
+│   │                                 disputes, settle (the person's words), chat
+│   ├── src/continuum_sdk/mcp_server.py ★ `continuum-mcp`: four tools over stdio
+│   ├── src/continuum_sdk/prompt.py   recall as text a model reads: disputes, maybes marked
+│   ├── examples/agent.py             any OpenAI-compatible model + Continuum, one loop
+│   └── README.md                     long-term memory for your agent in 5 minutes
 ├── continuum-be/
 │   ├── pyproject.toml                uv project, deps, ruff + pytest config
 │   ├── local.yml                     ★ the Docker stack: qdrant, postgres, api
@@ -255,10 +265,11 @@ server, so `local.yml`, its `.envs/`, the `Dockerfile` and `.dockerignore` all
 live in `continuum-be/`.
 
 **There is deliberately no workspace tool.** No Nx, no Turborepo, no uv
-workspace. Two independent projects under one root is the design: the backend is
-a uv project and knows nothing about the frontend, and CI runs each only when its
-own directory changes. Adding a workspace layer would couple two things whose
-only real relationship is an HTTP contract.
+workspace. Independent projects under one root is the design: the backend is
+a uv project and knows nothing about the frontend or the SDK, and CI runs each
+only when its own directory changes. Adding a workspace layer would couple
+things whose only real relationship is an HTTP contract. The SDK imports
+nothing from the backend — not even its models — for the same reason.
 
 ### Layering rules
 
@@ -339,8 +350,13 @@ that touches memories takes `principal: CurrentUser` and passes
 - `User.id` is the memory owner id and is **never derived from the email**.
   Random by default; set explicitly (setup, `ADMIN_USER_ID`, admin create) only
   to adopt memories stored before authentication existed.
-- Lockout and rate limits count in process memory. Correct for one uvicorn
-  process; with several workers, move them to Redis rather than raising limits.
+- Lockout and rate limits count in process memory by default — correct for one
+  uvicorn process. `REDIS_URL` moves them to Redis (`RedisWindow`: one Lua
+  script trims, counts and adds, so two workers cannot both slip under a limit),
+  shared by every worker; `production.yml --profile scale` adds the Redis. An
+  unreachable Redis fails open, logged. Not yet multi-worker safe: the chat's
+  per-graph write lock, the decay scheduler and the startup re-embedding are
+  all per process (TODO).
 - Deployment: Qdrant and the api bind to 127.0.0.1 in compose. The UI reaches
   the api through the Vite dev server's proxy; agents call `:8000` directly
   (change the port mapping in `local.yml` for remote ones). There is no reverse proxy, so
@@ -715,6 +731,70 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   synthesis; the server accepts only catalogued voices — it never downloads a
   name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
 - API keys panel now says what a key is for, in plain words
+
+### ✅ Phase 23 — The interface at scale (done, this release)
+
+TODO Iteration 8, checked in headless Brave on 600 synthetic memories.
+
+- **What the graph shows** (`lib/graph-view.ts`, pure): filter by status (the
+  legend's rows are toggles), kind and age (`GraphViewBar`), and group by subject
+  — on by itself above 300 nodes, a cluster disputed if anything in it is,
+  clicking one opens it. 600 nodes: 32 fps grouped against 8 flat (software
+  rendering). **A filter never shows half a dispute**: the hidden side of a
+  visible disagreement comes back, counted in the bar
+- The UI asks for up to 2000 memories and the API now says when there were
+  more (`GraphResponse.truncated`) — it used to cut at 500 without a word
+- **Phones**: below 640 px the panel is a full-width sheet with no resize handle,
+  the header shows icons with their names for screen readers, and its controls
+  scroll inside it
+- **Keyboard and screen readers**: `GraphList` is the canvas as a list — hidden
+  until focused, disputes first, one tab stop, arrows and Enter; every
+  icon-only button has a name
+
+### ✅ Phase 22 — Production readiness, in part (done, this release)
+
+TODO Iteration 7 (FINDINGS §19–§20). Off-machine backups and the VM deploy wait
+on the person.
+
+- **A memory is data, never an instruction.** Measured first on the real model
+  (`corpus/injection.yaml`, `run_eval.py --injection`, 3 runs a case): with only
+  the old rule at the top it answered "PWNED", spoke as a pirate, appended an
+  exfiltration link and — once in three — declared a real dispute settled "as
+  instructed". Now each memory is quoted on one line (no forged entries or
+  headers), the rule is repeated after the memories, and a memory written as
+  orders to the assistant (`addresses_the_assistant`, 0 false positives on 250
+  corpus statements) reaches the model only as a withheld note. 0 of 18 attacks
+  obeyed. Cost cases: a recorded reply-language or answer-length preference is
+  not honoured — but it was not before either (3/3 both ways)
+- **Limits in Redis** when `REDIS_URL` is set: a contract test runs both
+  backends (Redis with `TEST_REDIS_URL`, in CI); ten simultaneous requests
+  through two clients let exactly five through
+- **Activity** (`GET /feedback/activity`, the Inbox's Activity panel): per day,
+  memories taken in, times it asked, beliefs it retired on its own (no person's
+  decision behind them), decisions (and how many via an agent), and the near
+  misses — supersedes the gate held for a person, their confidence against the
+  gate. Small multiples in the accent, titled, a shared hover readout, a table
+  view; checked in headless Brave on a seeded throwaway instance
+
+### ✅ Phase 21 — Memory for other agents (done, this release)
+
+TODO Iteration 6 (FINDINGS §18).
+
+- **`continuum-sdk/`**, a third independent project: `Continuum` and
+  `AsyncContinuum` over the HTTP API (remember, recall, disputes, settle, chat)
+  and **`continuum-mcp`**, an MCP server (mcp 2.x `MCPServer`) with four tools.
+  Recall reads as text for a model: confidence and date per belief, DISPUTED
+  with both sides, UNDECIDED marked — `prompt.py`, shared with the example agent
+- **An agent settles only on the person's words.** `/conflicts/resolve` and
+  `/resolve-team` take `said`; an API key without it is a 422. The words and
+  `settled_via` (session | api_key) are kept on the label (migration 0006), and
+  Forget blanks them with the rest
+- Verified end to end on a throwaway instance (its own Qdrant, SQLite accounts,
+  real Ollama): SDK, a real MCP client over stdio, and `examples/agent.py`
+- **bge-m3 is pinned to the CPU on this machine** (FINDINGS §17): on the RTX
+  4050 it returned NaN for any text over ~90 characters. `EMBEDDING_MODEL=
+  bge-m3-cpu` in the gitignored override; the `models` job creates the alias;
+  it shares bge-m3's calibration and collection (`embedding_weights`)
 
 ### ✅ Phase 20 — The answer does not wait for memory (done, this release)
 
@@ -1192,7 +1272,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 581 tests, no services needed
+uv run pytest                          # 603 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -1206,8 +1286,17 @@ uv run python scripts/run_eval.py --crowded     # right memory judged in a crowd
 uv run python scripts/run_eval.py --subjects    # when do two slugs name one thing?
 uv run python scripts/run_eval.py --confirmations   # a confirmed maybe, reworded
 uv run python scripts/run_eval.py --matcher     # the judged extraction matcher vs labels
+uv run python scripts/run_eval.py --injection   # planted instructions in memory, real model
+TEST_REDIS_URL=redis://localhost:6379/0 uv run pytest tests/test_limits.py   # Redis backend
 uv run python scripts/run_eval.py --record r.json --max-belief-loss 0   # as a gate
 uv run python scripts/chat_latency.py           # p50/p95 per chat turn, real models
+```
+
+```bash
+# all from continuum-sdk/ — the agent client and MCP server, HTTP only
+uv sync --extra mcp --extra dev && uv run pytest
+CONTINUUM_API_KEY=ck_... uv run continuum-mcp            # MCP over stdio
+CONTINUUM_API_KEY=ck_... uv run python examples/agent.py
 uv run python scripts/run_eval.py --record eval-run.json
 uv run python scripts/run_eval.py --replay eval-run.json
 # decisions from real use, exported from the Inbox → learning panel:
@@ -1324,7 +1413,7 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
 - **Replacing the Qdrant layer with a framework facade to "reduce code".** See
   above.
 - **Adding a workspace tool to "tie the monorepo together".** Nx, Turborepo and
-  uv workspaces all solve shared-dependency problems these two projects do not
+  uv workspaces all solve shared-dependency problems these projects do not
   have. Their only relationship is an HTTP contract.
 - **Running the stack with Compose v1 (`docker-compose` 1.29).** It cannot parse
   `local.yml` (`name:`, optional env file), and it crashes with
@@ -1400,6 +1489,30 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
 - **Adding the unprompted-maybe rule to the extraction system prompts.** It cost
   Work F1 0.74 → 0.56–0.64 and framing in the turn cannot beat them; a hedged
   turn that yielded nothing gets its own prompt instead (FINDINGS §14).
+- **Filtering one side of a dispute out of the graph.** The view would show
+  half an open disagreement as settled; `filterGraph` brings the other side
+  back. Same rule as the chat's disputed counterpart.
+- **Drawing every memory at once in a big graph.** 600 labelled nodes are an
+  unreadable wall at 8 fps; grouping by subject is automatic above 300.
+- **Showing the model a memory's text when it is written as orders to the
+  assistant.** Told not to obey, the 7B model still spoke as a pirate 3 times in
+  3 and once settled a real dispute "as instructed". It sees only that such a
+  note exists (FINDINGS §19); the person still sees the memory in the graph.
+- **Putting memory text into the chat prompt unquoted, or across lines.** A
+  line break in a memory can forge another numbered memory or a DISPUTED header.
+- **Plotting the judge's confidence on every escalation against the gate.** A
+  "conflict" is the judge sure there is a dispute — near 1.0, and nothing to do
+  with the gate. Near misses are supersedes the gate held for a person.
+- **Letting an agent settle a dispute without the person's words, "since the
+  web UI's button needs none".** A button is the person deciding; an API key is
+  an agent, and an agent deciding a contradiction is commitment 2 broken. The
+  words are the audit trail of every agent-made change.
+- **Importing the backend's models into the SDK "to avoid duplication".** The
+  HTTP API is the contract; the SDK parses only what an agent needs, so a
+  backend refactor cannot break it, and it installs with httpx alone.
+- **Pointing Continuum at GPU bge-m3 again on this laptop.** It returns NaN for
+  any text over ~90 characters (FINDINGS §17) — notes fail to ingest, chat turns
+  are silently not remembered. `bge-m3-cpu` is the same weights on the CPU.
 - **Making the chat's `done` wait for memory again "so the outcome is in one
   event".** It held the input and Lumen for the whole write — p95 41 s against
   25 s. The outcome comes in `remembered`; agents read the stream to its end.

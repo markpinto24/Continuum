@@ -7,6 +7,7 @@
  */
 
 import type {
+  ActivityReport,
   ApiKeyCreated,
   ApiKeySummary,
   AuthStatus,
@@ -161,7 +162,9 @@ export const api = {
   graph: (opts: { limit?: number; includeArchived?: boolean; asOf?: string | null } = {}) =>
     request<GraphResponse>(
       `/memories/graph?${new URLSearchParams({
-        limit: String(opts.limit ?? 500),
+        // The API's ceiling. Grouping by subject keeps this many drawable; a
+        // graph cut below it says so (`truncated`).
+        limit: String(opts.limit ?? 2000),
         include_archived: String(opts.includeArchived ?? false),
         ...(opts.asOf ? { as_of: opts.asOf } : {}),
       })}`,
@@ -292,6 +295,8 @@ export const api = {
   revokeRule: (id: string) => request<void>(`/feedback/rules/${id}`, { method: 'DELETE' }),
   rateAnswer: (body: AnswerRating) => request<{ missing: number }>('/feedback/answer', post(body)),
   feedbackSummary: () => request<FeedbackSummary>('/feedback/summary'),
+  /** The resolver over time, in the current graph. */
+  feedbackActivity: (days: number) => request<ActivityReport>(`/feedback/activity?days=${days}`),
 
   // --- Dictation ------------------------------------------------------------
 
