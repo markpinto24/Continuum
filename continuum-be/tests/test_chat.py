@@ -107,6 +107,17 @@ async def collect(service: ChatService, request: ChatRequest) -> list:
     return [event async for event in service.stream(request)]
 
 
+def done_of(events: list) -> dict:
+    [done] = [e.data for e in events if e.event == "done"]
+    return done
+
+
+def remembered_of(events: list) -> dict | None:
+    """The `remembered` event's write-back, or None if there was no such event."""
+    found = [e.data for e in events if e.event == "remembered"]
+    return found[0]["remembered"] if found else None
+
+
 def request(text: str = "what database does atlas use?", **kwargs) -> ChatRequest:
     return ChatRequest(user_id="mark", messages=[Message(role="user", content=text)], **kwargs)
 
@@ -119,7 +130,7 @@ async def test_context_is_sent_before_the_first_token(settings):
     context = ChatContext(query="q", memories=retrieved(memory()))
     events = await collect(build(context, StubLLM(["Post", "gres"]), settings), request())
 
-    assert [e.event for e in events] == ["context", "delta", "delta", "done"]
+    assert [e.event for e in events] == ["context", "delta", "delta", "done", "remembered"]
     assert events[0].data["memories"][0]["memory"]["content"] == "Atlas runs on Postgres"
 
 
@@ -128,7 +139,7 @@ async def test_done_reports_which_memories_were_used(settings):
     context = ChatContext(query="q", memories=retrieved(used))
     events = await collect(build(context, StubLLM(["ok"]), settings), request())
 
-    assert events[-1].data["memory_ids"] == [used.id]
+    assert done_of(events)["memory_ids"] == [used.id]
 
 
 async def test_citations_are_mapped_back_to_memory_ids(settings):
@@ -138,7 +149,7 @@ async def test_citations_are_mapped_back_to_memory_ids(settings):
 
     events = await collect(build(context, llm, settings), request())
 
-    assert events[-1].data["cited_ids"] == [first.id, second.id]
+    assert done_of(events)["cited_ids"] == [first.id, second.id]
 
 
 async def test_an_out_of_range_citation_is_ignored(settings):
@@ -147,7 +158,7 @@ async def test_an_out_of_range_citation_is_ignored(settings):
 
     events = await collect(build(context, llm, settings), request())
 
-    assert events[-1].data["cited_ids"] == []
+    assert done_of(events)["cited_ids"] == []
 
 
 async def test_a_broken_stream_ends_with_an_error_event(settings):
@@ -233,7 +244,7 @@ async def test_done_reports_the_dispute_count(settings):
 
     events = await collect(build(context, StubLLM(["x"]), settings), request())
 
-    assert events[-1].data["disagreements"] == 1
+    assert done_of(events)["disagreements"] == 1
 
 
 # --- Prompt rendering -------------------------------------------------------
@@ -276,7 +287,8 @@ async def test_the_turn_goes_back_through_ingest(settings):
     )
 
     assert len(ingest.requests) == 1
-    assert events[-1].data["remembered"]["reinforced"] == ["m1"]
+    assert done_of(events)["remembering"] is True
+    assert remembered_of(events)["reinforced"] == ["m1"]
 
 
 async def test_only_the_user_turn_is_remembered(settings):
@@ -311,7 +323,8 @@ async def test_remember_can_be_turned_off_per_request(settings):
     )
 
     assert ingest.requests == []
-    assert events[-1].data["remembered"] is None
+    assert done_of(events)["remembering"] is False
+    assert [e.event for e in events][-1] == "done"  # nothing more is coming
 
 
 async def test_a_failed_write_back_does_not_fail_the_answer(settings):
@@ -323,8 +336,8 @@ async def test_a_failed_write_back_does_not_fail_the_answer(settings):
         build(context, StubLLM(["ok"]), settings, ingest=ingest), request()
     )
 
-    assert [e.event for e in events] == ["context", "delta", "done"]
-    assert events[-1].data["remembered"] is None
+    assert [e.event for e in events] == ["context", "delta", "done", "remembered"]
+    assert remembered_of(events) is None
 
 
 async def test_retrieval_uses_the_latest_user_message_not_the_whole_history(settings):
@@ -381,6 +394,7 @@ async def test_the_route_frames_events_as_server_sent_events(settings):
         "event: delta",
         "event: delta",
         "event: done",
+        "event: remembered",
     ]
     assert 'data: {"text": "Post"}' in frames[1]
 
@@ -445,7 +459,7 @@ async def test_a_question_about_the_past_says_so_and_is_never_remembered(setting
     )
     assert "AS OF 2026-03-15" in llm.system_prompt
     assert events[0].data["as_of"].startswith("2026-03-15")
-    assert ingest.requests == [] and events[-1].data["remembered"] is None
+    assert ingest.requests == [] and [e.event for e in events][-1] == "done"
 
 
 # --- Each mode's assistant ----------------------------------------------------------
@@ -473,15 +487,25 @@ async def test_personal_mode_gets_the_personal_assistant_and_work_keeps_its_own(
 class SavingIngest(StubIngest):
     """A StubIngest whose memory store records what was saved."""
 
-    def __init__(self, response: IngestResponse | None = None) -> None:
+    def __init__(
+        self, response: IngestResponse | None = None, stored: dict[str, Memory] | None = None
+    ) -> None:
         super().__init__(response)
         self.saved: list[Memory] = []
         outer = self
 
         class Store:
+            async def get(self, memory_id: str) -> Memory | None:
+                # As stored; by default, exactly what was retrieved.
+                return (stored or {}).get(memory_id) or next(
+                    (m for m in outer.retrieved if m.id == memory_id), None
+                )
+
             async def save(self, memory: Memory) -> Memory:
                 outer.saved.append(memory)
                 return memory
+
+        self.retrieved: list[Memory] = []
 
         self.memories = Store()
 
@@ -493,10 +517,10 @@ def pending_item(content: str = "The user is considering a Sunday long run") -> 
 async def test_a_pending_item_that_comes_up_is_asked_about_with_fixed_options(settings):
     maybe = pending_item()
     ingest = SavingIngest()
+    ingest.retrieved = [maybe]  # still pending when read again
     service = build(ChatContext(query="q", pending=[maybe]), StubLLM(["ok"]), settings, ingest)
 
-    done = (await collect(service, request()))[-1].data
-    [question] = done["questions"]
+    [question] = done_of(await collect(service, request()))["questions"]
 
     assert question["memory_id"] == maybe.id and maybe.content in question["text"]
     assert [o["action"] for o in question["options"]] == ["confirm", "unsure", "decline"]
@@ -504,13 +528,27 @@ async def test_a_pending_item_that_comes_up_is_asked_about_with_fixed_options(se
     assert ingest.saved == [maybe] and maybe.reminders == 1
 
 
-async def test_a_turn_that_settles_the_item_is_not_asked_about_it(settings):
+async def test_a_turn_that_settles_the_item_names_it_so_its_question_is_dropped(settings):
+    # `done` cannot wait for the write to know; the write says what it settled.
     maybe = pending_item()
     ingest = SavingIngest(IngestResponse(source_id="s", extracted=1, confirmed=[maybe.id]))
+    ingest.retrieved = [maybe]
     service = build(ChatContext(query="q", pending=[maybe]), StubLLM(["ok"]), settings, ingest)
 
-    done = (await collect(service, request()))[-1].data
-    assert done["questions"] == [] and maybe.reminders == 0
+    events = await collect(service, request())
+    assert [q["memory_id"] for q in done_of(events)["questions"]] == [maybe.id]
+    assert remembered_of(events)["confirmed"] == [maybe.id]
+
+
+async def test_an_item_settled_since_it_was_retrieved_is_not_asked_about(settings):
+    # An earlier turn's write confirmed it while this answer was streaming.
+    maybe = pending_item()
+    settled = maybe.model_copy(update={"status": MemoryStatus.ACTIVE})
+    ingest = SavingIngest(stored={maybe.id: settled})
+    service = build(ChatContext(query="q", pending=[maybe]), StubLLM(["ok"]), settings, ingest)
+
+    assert done_of(await collect(service, request()))["questions"] == []
+    assert ingest.saved == []  # and never put back to pending by a reminder
 
 
 async def test_the_prompt_asks_for_the_assistants_own_view_and_buttons(settings):
@@ -539,7 +577,7 @@ async def test_a_reminder_that_cannot_be_saved_does_not_lose_the_answer(settings
     service = build(ChatContext(query="q", pending=[pending_item()]), StubLLM(["ok"]), settings,
                     StubIngest())  # no store at all
     events = await collect(service, request())
-    assert events[-1].event == "done" and len(events[-1].data["questions"]) == 1
+    assert len(done_of(events)["questions"]) == 1
 
 
 # --- Replying to the last answer: keep it short ---------------------------------------------
@@ -580,3 +618,64 @@ def test_how_a_reply_answers_the_answer():
     assert reply_kind("hmm, I'll think about it") == "undecided"
     assert reply_kind("no thanks") == "declined"
     assert reply_kind("what about swimming?") is None
+
+
+# --- The answer does not wait for memory (TODO Iteration 5) --------------------------
+
+
+class SlowIngest(StubIngest):
+    """Takes its time, and records whether two writes ever overlapped."""
+
+    def __init__(self) -> None:
+        super().__init__(IngestResponse(source_id="s", extracted=1))
+        self.running = 0
+        self.overlapped = False
+        self.finished: list[str] = []
+
+    async def ingest(self, request):  # noqa: ANN001
+        import asyncio
+
+        self.running += 1
+        self.overlapped |= self.running > 1
+        await asyncio.sleep(0.05)
+        self.running -= 1
+        self.finished.append(request.messages[0].content)
+        return await super().ingest(request)
+
+
+async def test_done_goes_out_before_the_turn_is_written(settings):
+    ingest = SlowIngest()
+    service = build(ChatContext(query="q"), StubLLM(["ok"]), settings, ingest)
+    stream = service.stream(request("we use Postgres"))
+    async for event in stream:
+        if event.event == "done":
+            assert ingest.finished == []  # the answer did not wait
+            assert event.data["remembering"] is True
+            break
+    await stream.aclose()
+
+
+async def test_leaving_after_done_does_not_cancel_the_write(settings):
+    import asyncio
+
+    ingest = SlowIngest()
+    service = build(ChatContext(query="q"), StubLLM(["ok"]), settings, ingest)
+    stream = service.stream(request("we use Postgres"))
+    async for event in stream:
+        if event.event == "done":
+            break
+    # Leave the moment the answer is in, as a closed tab does.
+    await stream.aclose()
+    await asyncio.gather(*service._background)
+    assert ingest.finished == ["we use Postgres"]
+
+
+async def test_one_graphs_writes_run_one_at_a_time_in_order(settings):
+    import asyncio
+
+    ingest = SlowIngest()
+    service = build(ChatContext(query="q"), StubLLM(["ok"]), settings, ingest)
+    await asyncio.gather(
+        collect(service, request("first")), collect(service, request("second"))
+    )
+    assert not ingest.overlapped and ingest.finished == ["first", "second"]

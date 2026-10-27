@@ -14,6 +14,7 @@ import yaml
 from continuum.evaluation.types import (
     ConfirmationCase,
     ExtractionCase,
+    MatcherPair,
     ResolutionCase,
     RetrievalCase,
     SubjectPair,
@@ -27,6 +28,7 @@ PERSONAL_RESOLUTION_CORPUS = CORPUS_DIR / "resolution-personal.yaml"
 AGREEMENT_EXTRACTION_CORPUS = CORPUS_DIR / "extraction-agreement.yaml"
 SUBJECT_CORPUS = CORPUS_DIR / "subjects.yaml"
 CONFIRMATION_CORPUS = CORPUS_DIR / "confirmations.yaml"
+MATCHER_CORPUS = CORPUS_DIR / "matcher.yaml"
 
 
 class CorpusError(ValueError):
@@ -92,6 +94,12 @@ def load_confirmation_cases(path: Path | None = None) -> list[ConfirmationCase]:
     cases = [ConfirmationCase.model_validate(r) for r in _read(path or CONFIRMATION_CORPUS)]
     _check_unique(case.id for case in cases)
     return cases
+
+
+def load_matcher_pairs(path: Path | None = None) -> list[MatcherPair]:
+    pairs = [MatcherPair.model_validate(r) for r in _read(path or MATCHER_CORPUS)]
+    _check_unique(pair.id for pair in pairs)
+    return pairs
 
 
 def _read(path: Path) -> list[dict]:

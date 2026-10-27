@@ -350,8 +350,17 @@ event: delta
 data: {"text":"The record disagrees here"}
 
 event: done
-data: {"memory_ids":[...],"cited_ids":[...],"disagreements":1,"remembered":{...}}
+data: {"memory_ids":[...],"cited_ids":[...],"disagreements":1,"remembering":true,"questions":[...]}
+
+event: remembered
+data: {"remembered":{"extracted":1,"created":[...],"reinforced":[],...}}
 ```
+
+**The answer does not wait for memory.** `done` arrives when the answer is
+complete; the turn is written in the background and reported in `remembered`
+when it lands (`null` if writing it failed). An agent that needs the write-back
+reads the stream to its end. The write survives the client leaving after `done`,
+and one graph's turns are written one at a time, in order.
 
 **Ranking.** `similarity × confidence^w × recency^w`. Multiplicative, so a memory
 that fails badly on any one factor falls — a stale belief does not outrank a

@@ -74,18 +74,27 @@ vegetarian", "budget is now 10000") come back as "conflict".
 
 ## Iteration 4 — Evaluation you can quote
 
-- [ ] **Public benchmark**: LongMemEval or LoCoMo
-- [ ] **Head-to-head** with Mem0 and Zep on the same data
-- [ ] Better matcher: embedding similarity (threshold validated) beside the token
-      score — today correct but longer answers count as misses
-- [ ] Grow the corpora from exported inbox decisions (`--add-cases`)
-- [ ] Nightly CI job running the corpora; fail if belief loss rises above 0%
+- [ ] **Public benchmark**: LongMemEval or LoCoMo *(deferred 2026-10-27)*
+- [ ] **Head-to-head** with Mem0 and Zep on the same data *(deferred 2026-10-27)*
+- [x] Better matcher beside the token score — FINDINGS §15. Embedding similarity
+      was tried and dropped (held out, it matched tea to coffee); a model's
+      reading behind a number/negation guard is kept: held out 11/12, one partial
+      fact matched. Reported as "+ judged" beside the token figures
+- [ ] Grow the corpora from exported inbox decisions (`--add-cases`) *(waiting on
+      an export from the live account)*
+- [x] Nightly CI job running the corpora; fail if belief loss rises above 0% —
+      `nightly-eval.yml`, belief and merge loss gated; not yet run on GitHub
 
-## Iteration 5 — Speed
+## Iteration 5 — Speed — done, FINDINGS §16
 
-- [ ] Send the chat's `done` event first, write memory in the background, and
-      update the turn when it lands (confirming a maybe took ~8 s live)
-- [ ] Measure and record p50 / p95 latency per chat turn
+- [x] Send the chat's `done` event first, write memory in the background, and
+      update the turn when it lands (confirming a maybe took ~8 s live) — a new
+      `remembered` event; shielded, in order per graph
+- [x] Measure and record p50 / p95 latency per chat turn —
+      `scripts/chat_latency.py`: done p50 12.4 s / p95 24.6 s, against 21.5 s /
+      40.9 s when it waited for memory
+- [ ] Follow-up: one turn in 24 lost its write to a bge-m3 NaN the nudge did
+      not fix
 
 ## Iteration 6 — Let other agents use it
 

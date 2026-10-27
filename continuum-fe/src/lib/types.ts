@@ -230,9 +230,18 @@ export interface ChatDone {
   memory_ids: string[]
   cited_ids: string[]
   disagreements: number
+  /** Null in `done`; filled in from the `remembered` event when it lands. */
   remembered: IngestResponse | null
+  /** The turn is being written to memory; a `remembered` event follows. */
+  remembering: boolean
   /** Pending items this answer raised. */
   questions: Question[]
+}
+
+/** What the turn did to the graph — sent after `done`, once it has landed. */
+export interface ChatRemembered {
+  /** Null when writing the turn back failed. */
+  remembered: IngestResponse | null
 }
 
 export interface ChatMessage {

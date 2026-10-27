@@ -29,6 +29,9 @@
     # a confirmed maybe, reworded as decided: does the guard keep only good ones?
     uv run python scripts/run_eval.py --confirmations
 
+    # as a gate (the nightly job): exit 1 if a belief was lost or merged away
+    uv run python scripts/run_eval.py --record run.json --max-belief-loss 0 --max-merge-loss 0
+
 The split matters. Resolution needs a judge call per ambiguous case, which is the
 slow and non-deterministic part; the gate sweep needs none, because the recorded
 outcome holds the judge's answer from *before* the gate was applied. Run the
@@ -56,7 +59,13 @@ from continuum.evaluation import corpus, metrics, report
 from continuum.evaluation import retrieval as retrieval_eval
 from continuum.evaluation.calibrate import calibrate, render_calibration
 from continuum.evaluation.crowded import load_crowded, render_crowded, run_crowded
-from continuum.evaluation.extraction import overlap, score_extraction, subjects_that_meet
+from continuum.evaluation.extraction import (
+    judged_matches,
+    overlap,
+    score_extraction,
+    states_label,
+    subjects_that_meet,
+)
 from continuum.evaluation.preflight import render_preflight, run_preflight
 from continuum.evaluation.runner import EVAL_USER, ResolutionRunner
 from continuum.evaluation.subjects import derive as derive_subjects
@@ -185,7 +194,8 @@ async def run_agreement(before: bool) -> None:
         _rule(f"EXTRACTION — agreement corpus, {'before (reply only)' if before else 'after'}")
         relations = SubjectRelations(llm, settings.subject_similarity_threshold)
         meeting = await subjects_that_meet(relations, results)
-        scored = score_extraction(results, meeting=meeting)
+        judged = await judged_matches(llm, results)
+        scored = score_extraction(results, meeting=meeting, judged=judged)
         print(report.render_extraction(scored, label="continuum"))
         extracted = [f for _, facts in results for f in facts]
         on_self = sum(f.subject == "self" for f in extracted)
@@ -234,6 +244,31 @@ async def run_confirmations() -> None:
         await llm.aclose()
 
 
+async def run_matcher() -> None:
+    """How often the judged matcher agrees with labelled (label, output) pairs.
+
+    A false match — a different fact read as the label — flatters the extractor,
+    so it is counted on its own. Held-out pairs were labelled before the matcher
+    first saw them.
+    """
+    pairs = corpus.load_matcher_pairs()
+    llm = LLMClient(get_settings())
+    try:
+        got = [await states_label(llm, p.label, p.output) for p in pairs]
+    finally:
+        await llm.aclose()
+    _rule("MATCHER — does the extraction state the labelled fact?")
+    for held in (False, True):
+        group = [(p, g) for p, g in zip(pairs, got, strict=True)
+                 if ("held-out" in p.tags) is held]
+        false_match = [p.id for p, g in group if g and not p.same]
+        missed = [p.id for p, g in group if p.same and not g]
+        print(f"  {'held-out' if held else 'training'}: "
+              f"{sum(g == p.same for p, g in group)}/{len(group)} agree · "
+              f"false matches {len(false_match)}/{sum(not p.same for p, _ in group)} "
+              f"{false_match} · missed {len(missed)}/{sum(p.same for p, _ in group)} {missed}")
+
+
 async def run_extraction(
     with_baseline: bool, extra: list[Path], personal: bool = False, prompt: str | None = None
 ) -> None:
@@ -255,7 +290,10 @@ async def run_extraction(
         ours = [(case, await native.extract(case.text, mode=mode)) for case in cases]
 
         _rule(f"EXTRACTION — {'personal' if personal else 'work'} corpus, {mode.value} prompt")
-        print(report.render_extraction(score_extraction(ours), label=f"continuum ({mode.value})"))
+        judged = await judged_matches(llm, ours)
+        print(report.render_extraction(
+            score_extraction(ours, judged=judged), label=f"continuum ({mode.value})"
+        ))
 
         if with_baseline:
             baseline = []
@@ -329,6 +367,18 @@ async def main() -> None:
         "--subjects",
         action="store_true",
         help="Derive the subject-meaning threshold from the subject-pair corpus. No LLM calls.",
+    )
+    parser.add_argument(
+        "--max-belief-loss", type=float, metavar="RATE",
+        help="Exit 1 if the run's belief loss is above this (0 in the nightly job).",
+    )
+    parser.add_argument(
+        "--max-merge-loss", type=float, metavar="RATE",
+        help="Exit 1 if the run's merge loss is above this.",
+    )
+    parser.add_argument(
+        "--matcher", action="store_true",
+        help="Check the judged extraction matcher against labelled pairs.",
     )
     parser.add_argument(
         "--confirmations",
@@ -429,6 +479,10 @@ async def main() -> None:
         await run_confirmations()
         return
 
+    if args.matcher:
+        await run_matcher()
+        return
+
     if args.agreement:
         await run_agreement(args.before)
         return
@@ -449,6 +503,17 @@ async def main() -> None:
         )
     )
     present(outcomes, show_cases=args.cases)
+
+    breaches = metrics.safety_breaches(
+        metrics.score(outcomes),
+        max_belief_loss=args.max_belief_loss,
+        max_merge_loss=args.max_merge_loss,
+    )
+    if breaches:
+        _rule("SAFETY BUDGET BROKEN")
+        print("  " + "\n  ".join(breaches))
+        print("  every case off its label: " + ", ".join(metrics.score(outcomes).failures))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

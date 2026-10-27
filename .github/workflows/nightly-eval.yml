@@ -1,0 +1,95 @@
+name: nightly-eval
+
+# The resolution corpora against a real judge and embedder, every night, and on
+# demand. Fails if any case retires a belief that should have lived, or folds a
+# distinct fact into another (`--max-belief-loss 0 --max-merge-loss 0`) — the
+# two ways a belief is lost silently. Stale beliefs and escalation are reported,
+# not gated: they trade against each other as the gate moves, and the corpus
+# keeps known-gap cases that are stale on purpose (FINDINGS §13).
+#
+# The same models as local development (qwen2.5:7b-instruct, bge-m3) on the
+# runner's CPU, so the numbers compare with the recorded baselines. Slow — a
+# judge call takes tens of seconds here — which is why it runs at night and not
+# on every push.
+on:
+  schedule:
+    - cron: '30 1 * * *'   # 01:30 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-eval
+  cancel-in-progress: false
+
+jobs:
+  resolution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: continuum-be
+    env:
+      # The version this project is developed against: the judge's confidence
+      # comes from logprobs, which older OpenAI-compatible endpoints do not return.
+      OLLAMA_VERSION: '0.20.7'
+      OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
+      LLM_MODEL: qwen2.5:7b-instruct
+      EMBEDDING_MODEL: bge-m3
+      # A judge timeout escalates — on a slow runner that would quietly change
+      # the numbers instead of failing. Give the CPU room.
+      LLM_TIMEOUT_SECONDS: '600'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: continuum-be/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # ~6 GB of weights; pulled once, then restored.
+      - name: Restore models
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ollama-models
+          key: ollama-models-qwen2.5-7b-instruct-bge-m3-v1
+
+      - name: Start Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          # The installer starts a system service with its own model directory;
+          # run our own server on the cached one instead.
+          sudo systemctl stop ollama || true
+          nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf localhost:11434/api/version && break
+            sleep 2
+          done
+          ollama pull "$LLM_MODEL"
+          ollama pull "$EMBEDDING_MODEL"
+
+      - name: Work corpus
+        run: >
+          uv run python scripts/run_eval.py --record work-run.json
+          --max-belief-loss 0 --max-merge-loss 0
+
+      # Runs even if Work broke its budget, so one night reports both.
+      - name: Personal corpus
+        if: success() || failure()
+        run: >
+          uv run python scripts/run_eval.py --personal --record personal-run.json
+          --max-belief-loss 0 --max-merge-loss 0
+
+      # Replayable at any gate with `run_eval.py --replay`.
+      - name: Keep the runs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-eval-${{ github.run_id }}
+          path: |
+            continuum-be/work-run.json
+            continuum-be/personal-run.json
+          if-no-files-found: ignore

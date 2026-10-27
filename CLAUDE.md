@@ -716,6 +716,37 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
 - API keys panel now says what a key is for, in plain words
 
+### ✅ Phase 20 — The answer does not wait for memory (done, this release)
+
+TODO Iteration 5 (FINDINGS §16).
+
+- `done` is sent when the answer is complete, with `remembering: true`; the turn
+  is written in a shielded background task and reported in a new **`remembered`**
+  SSE event. The task starts *before* `done` is sent — a client leaving at
+  `done` would otherwise close the stream before the write began
+- One graph's writes run one at a time, in order (`ChatService._writes`);
+  pending reminders are saved under the same lock, from a fresh read
+- The UI frees the input at `done`, shows "Remembering…", and patches each turn
+  by its own index, so a late write-back never lands on a newer turn; a
+  question the turn itself settled is dropped. Lumen speaks its last sentence
+  at `done` and never asks about an item the turn just confirmed
+- `scripts/chat_latency.py`: done p50 12.4 s / p95 24.6 s vs remembered 21.5 s /
+  40.9 s — what `done` used to wait for
+
+### ✅ Phase 19 — An instrument you can quote (done, this release)
+
+TODO Iteration 4, in part (FINDINGS §15); benchmarks and the head-to-head are
+deferred.
+
+- **"+ judged" beside the token matcher**: what the tokens leave unpaired is
+  read by a model ("does it state the labelled fact?") behind a number and
+  negation guard. Embedding similarity was tried first and matched tea to
+  coffee on held-out pairs. `corpus/matcher.yaml` (26 pairs, 12 held out),
+  `run_eval.py --matcher`; held out 11/12
+- **Nightly gate**: `.github/workflows/nightly-eval.yml` runs both resolution
+  corpora on Ollama on the runner and fails on belief or merge loss
+  (`--max-belief-loss 0 --max-merge-loss 0`)
+
 ### ✅ Phase 18 — Agreement and pending polish (done, this release)
 
 TODO Iteration 3 (FINDINGS §14). Each change measured three runs each side on
@@ -1161,7 +1192,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 568 tests, no services needed
+uv run pytest                          # 581 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -1174,6 +1205,9 @@ uv run python scripts/run_eval.py --preflight
 uv run python scripts/run_eval.py --crowded     # right memory judged in a crowded graph?
 uv run python scripts/run_eval.py --subjects    # when do two slugs name one thing?
 uv run python scripts/run_eval.py --confirmations   # a confirmed maybe, reworded
+uv run python scripts/run_eval.py --matcher     # the judged extraction matcher vs labels
+uv run python scripts/run_eval.py --record r.json --max-belief-loss 0   # as a gate
+uv run python scripts/chat_latency.py           # p50/p95 per chat turn, real models
 uv run python scripts/run_eval.py --record eval-run.json
 uv run python scripts/run_eval.py --replay eval-run.json
 # decisions from real use, exported from the Inbox → learning panel:
@@ -1366,6 +1400,15 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
 - **Adding the unprompted-maybe rule to the extraction system prompts.** It cost
   Work F1 0.74 → 0.56–0.64 and framing in the turn cannot beat them; a hedged
   turn that yielded nothing gets its own prompt instead (FINDINGS §14).
+- **Making the chat's `done` wait for memory again "so the outcome is in one
+  event".** It held the input and Lumen for the whole write — p95 41 s against
+  25 s. The outcome comes in `remembered`; agents read the stream to its end.
+- **Starting the background write after `done` is yielded.** A client that
+  leaves at `done` closes the generator at that yield, and the write never
+  begins. It is created first, then shielded.
+- **Scoring extraction with embedding similarity.** It matched tea to coffee and
+  Thursday to Friday on held-out pairs (FINDINGS §15). The judged matcher reads,
+  behind a number guard; the token figure stays beside it.
 - **Rewording a confirmed maybe without the guard.** It is a model changing a
   belief's words; a changed number, name or negation keeps the original.
 - **Declining a pending item from free text.** Only a button, or a spoken no

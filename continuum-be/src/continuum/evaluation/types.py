@@ -206,3 +206,14 @@ class ConfirmationCase(BaseModel):
     pending: str
     expect: str
     tags: list[str] = Field(default_factory=list)
+
+
+class MatcherPair(BaseModel):
+    """A labelled fact and an extraction: does the extraction state it?"""
+
+    id: str
+    why: str
+    label: str
+    output: str
+    same: bool
+    tags: list[str] = Field(default_factory=list)

@@ -713,3 +713,77 @@ def test_a_policy_escalation_is_never_promoted_by_a_lower_gate():
         judge_relation=Verdict.SUPERSEDES, judge_confidence=1.0, gate=0.8, forced_escalation=True,
     )
     assert metrics.replay(forced, 0.5) is Action.ESCALATE
+
+
+# --- The nightly gate --------------------------------------------------------
+
+
+def test_a_lost_or_merged_belief_breaks_the_budget_and_a_stale_one_does_not():
+    lost = outcome("lost", Action.STORE, Verdict.SUPERSEDES,
+                   judge=Verdict.SUPERSEDES, confidence=0.95)
+    merged = outcome("merged", Action.STORE, Verdict.DUPLICATE)
+    stale = outcome("stale", Action.RETIRE, Verdict.NEW)
+    fine = outcome("fine", Action.STORE, Verdict.NEW)
+
+    budget = {"max_belief_loss": 0.0, "max_merge_loss": 0.0}
+    assert metrics.safety_breaches(metrics.score([fine, stale]), **budget) == []
+    breaches = metrics.safety_breaches(metrics.score([fine, lost, merged]), **budget)
+    assert [b.split(" ")[0] for b in breaches] == ["belief", "merge"]
+    # No budget given, nothing to break: a plain run never fails on its numbers.
+    assert metrics.safety_breaches(metrics.score([lost])) == []
+
+
+# --- The judged matcher (FINDINGS §15) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "output", "kept"),
+    [
+        ("The user's mom's birthday is on 4 June", "The user's mother was born on June 4th", True),
+        ("The user wakes up at 6 am", "The user gets up at 6:00 a.m.", True),
+        ("The user trains six days a week", "The user trains 6 days a week", True),
+        ("The user runs 10 km on Sundays", "The user runs on Sundays", False),
+        ("The user trains six days a week", "The user trains five days a week", False),
+        ("The user is allergic to penicillin", "The user is not allergic to penicillin", False),
+    ],
+)
+def test_the_guard_keeps_numbers_and_negation(label, output, kept):
+    from continuum.evaluation.extraction import keeps_numbers_and_negation
+
+    assert keeps_numbers_and_negation(label, output) is kept
+
+
+class Reader:
+    """Says the same for any pair whose output contains `yes_if`."""
+
+    def __init__(self, yes_if: str) -> None:
+        self.yes_if, self.calls = yes_if, 0
+
+    async def complete_json(self, *, system: str, user: str):  # noqa: ARG002
+        self.calls += 1
+        return {"same": "yes" if self.yes_if in user.split("EXTRACTION:")[1] else "no"}
+
+
+async def test_the_judged_matcher_reads_only_what_the_tokens_left_and_pairs_once():
+    from continuum.evaluation.extraction import judged_matches
+    from continuum.evaluation.types import ExtractionCase
+
+    lives = ExpectedFact(content="Ana lives in Porto", category=MemoryCategory.PERSON)
+    sister = ExpectedFact(content="Ana is the user's sister", category=MemoryCategory.PERSON)
+    moved = ExtractedFact(content="Ana moved to Porto last month")
+    case = ExtractionCase(id="c", why="t", text="t", expect=[lives, sister])
+    reader = Reader(yes_if="Porto")
+    matched = await judged_matches(reader, [(case, [moved])])  # type: ignore[arg-type]
+    assert matched == {(id(lives), id(moved))}
+
+    report = score_extraction([(case, [moved])], judged=matched)
+    assert report.fact_recall == 0.0  # the token figure is untouched
+    assert report.judged_recall == 0.5 and report.judged_precision == 1.0
+
+
+async def test_the_guard_answers_before_any_model_is_asked():
+    from continuum.evaluation.extraction import states_label
+
+    reader = Reader(yes_if="")  # would say yes to anything
+    assert not await states_label(reader, "Runs 10 km", "Runs on Sundays")  # type: ignore[arg-type]
+    assert reader.calls == 0

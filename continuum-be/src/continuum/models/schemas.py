@@ -368,11 +368,25 @@ class ChatDone(BaseModel):
     )
     disagreements: int = 0
     remembered: IngestResponse | None = Field(
-        default=None, description="What this turn contributed back to the graph."
+        default=None,
+        description="What this turn contributed back to the graph. Always None now: "
+        "it arrives in the `remembered` event that follows when `remembering` is set.",
+    )
+    remembering: bool = Field(
+        default=False,
+        description="The turn is being written to memory; a `remembered` event follows.",
     )
     questions: list[Question] = Field(
         default_factory=list,
         description="Pending items this answer raised, to settle with a button.",
+    )
+
+
+class ChatRemembered(BaseModel):
+    """What the turn did to the graph — sent after `done`, once it has landed."""
+
+    remembered: IngestResponse | None = Field(
+        default=None, description="None when writing the turn back failed."
     )
 
 
@@ -383,7 +397,7 @@ class ChatEvent(BaseModel):
     rules.
     """
 
-    event: Literal["context", "delta", "done", "error"]
+    event: Literal["context", "delta", "done", "remembered", "error"]
     data: dict
 
 

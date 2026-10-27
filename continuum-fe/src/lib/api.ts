@@ -13,6 +13,7 @@ import type {
   ChatContext,
   ChatDone,
   ChatMessage,
+  ChatRemembered,
   Mode,
   ConflictListResponse,
   ConflictResolutionRequest,
@@ -331,7 +332,10 @@ export interface ChatHandlers {
   /** Retrieved memories + disagreements. Arrives before the first token. */
   onContext?: (context: ChatContext) => void
   onDelta?: (text: string) => void
+  /** The answer is complete. Memory may still be being written. */
   onDone?: (done: ChatDone) => void
+  /** The turn landed in memory (only when `done.remembering` was set). */
+  onRemembered?: (remembered: ChatRemembered) => void
   onError?: (message: string) => void
 }
 
@@ -403,6 +407,9 @@ function dispatch(event: string, data: string, handlers: ChatHandlers): void {
       break
     case 'done':
       handlers.onDone?.(payload as ChatDone)
+      break
+    case 'remembered':
+      handlers.onRemembered?.(payload as ChatRemembered)
       break
     case 'error':
       handlers.onError?.((payload as { message: string }).message)

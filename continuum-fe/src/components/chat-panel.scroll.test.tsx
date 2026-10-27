@@ -29,7 +29,10 @@ beforeEach(() => {
       new Promise<void>((resolve) => {
         handlers = h
         finish = () => {
-          h.onDone?.({ memory_ids: [], cited_ids: [], disagreements: 0, remembered: null, questions: [] })
+          h.onDone?.({
+            memory_ids: [], cited_ids: [], disagreements: 0, remembered: null, remembering: false,
+            questions: [],
+          })
           resolve()
         }
       }),

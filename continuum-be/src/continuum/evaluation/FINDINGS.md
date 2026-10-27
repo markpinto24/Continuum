@@ -871,6 +871,74 @@ check. The cost seen instead: the meal plan was filed under `gym`, the example
 word in the "never self" rule (§13) — `diet` was labelled. They meet (0.77), so
 it is compared; it is the second sign that the example anchors.
 
+## 15. A matcher that reads: extraction scores that count right, longer answers
+
+TODO Iteration 4, 2026-10-27. The token matcher pairs a label with an extraction
+by shared words, so a right answer worded longer than its label ("Ana moved to
+Porto last month" for "Ana lives in Porto") counted as a miss. `corpus/matcher.yaml`:
+14 real misses of the token matcher, labelled same or different (a lost reason,
+date or qualifier is different — the prompt keeps reasons), then 12 held-out
+pairs written and labelled before either candidate saw them.
+
+**Embedding similarity: tried and dropped.** Set precision-first — just above
+every different pair, including every two labels of one corpus case — the bar
+came out at 0.86 and rescued 2 of 8 true pairs ("The user is male" / "The user
+is a software engineer" scored 0.84). Held out, it then matched 4 of 7
+different pairs: tea for coffee, Thursday for Friday, reviews for owns, and a
+job without its title. Relatedness again, not identity (§13).
+
+**A model's reading, behind a number guard: kept.** qwen2.5:7b asked "does the
+extraction state the labelled fact?" (`states_label`), after a guard that every
+number in the label is in the output (4 June = June 4th, six = 6) and both or
+neither say no. Three runs each, identical:
+
+| | training (14) | held out (12, before the guard fix) |
+| --- | --- | --- |
+| agree | 13 | 10 |
+| false matches | 0 of 6 | 1 of 7 — "works at Initech" for "… as a backend engineer" |
+| true pairs missed | 1 of 8 | 2 of 5 — one is "6 am" / "6:00 a.m." split by the guard |
+
+The "6:00" split was a guard bug and is fixed (11 of 12 after); the partial
+fact is the matcher's measured error. Both figures are reported: the token
+matcher's, unchanged so every earlier run still compares, and beside it
+"+ judged" — the same draw with the model's pairs added, each listed to read.
+On one draw each: Work F1 0.69–0.74 → 0.81–0.85, Personal 0.77–0.78 → 0.81–0.84,
+agreement 0.80 → 0.92. Every judged pair read in two runs was right (the Lisbon
+move, the respelled birthday, the staging rollout).
+
+**A nightly gate** (`.github/workflows/nightly-eval.yml`): both resolution
+corpora against the same models on the runner's CPU, failing on any belief or
+merge loss (`run_eval.py --max-belief-loss 0 --max-merge-loss 0`). Stale beliefs
+are reported, not gated: one known-gap case is stale by design. Checked locally
+on recorded runs — a clean baseline exits 0, the old nomic run (3.6% belief
+loss, 10.7% merge loss) exits 1 — and not yet on GitHub.
+
+## 16. The answer no longer waits for memory
+
+TODO Iteration 5, 2026-10-27. `done` used to wait for the whole write-back —
+extraction, the resolver, sometimes a judge call — with the input locked and
+Lumen's last sentence held back. Now `done` is sent when the answer is complete,
+and the turn is written in a shielded background task reported in a new
+`remembered` event. Writes for one graph run one at a time, in order; pending
+questions are counted under the same lock, from a fresh read, so a reminder
+never puts back an item an earlier turn just confirmed.
+
+`scripts/chat_latency.py`: the real chat service on the real models against a
+throwaway in-memory graph, one 12-turn Personal conversation per pass, 2 passes:
+
+| 24 turns | p50 | p95 |
+| --- | --- | --- |
+| first token | 4.8 s | 7.2 s |
+| **done** — the input is free | **12.4 s** | **24.6 s** |
+| remembered — when `done` used to arrive | 21.5 s | 40.9 s |
+
+A turn now frees the input 9 s sooner at the median and 16 s at p95. Found on
+the way: the write was first started *after* `done` was sent, so a client
+leaving the moment it had the answer closed the stream at that point and the
+turn was never written — a test caught it (`test_leaving_after_done_…`). And one
+turn of 24 failed to write: bge-m3 returned NaN for its text and the spacing
+nudge (§1) did not save it. The answer still arrived; the failure is logged.
+
 ---
 
 ## What this changes

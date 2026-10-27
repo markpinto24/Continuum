@@ -217,3 +217,23 @@ def by_tag(outcomes: Sequence[CaseOutcome], *, gate: float | None = None) -> dic
 
 def _ratio(numerator: int, denominator: int) -> float:
     return 0.0 if denominator == 0 else round(numerator / denominator, 4)
+
+
+def safety_breaches(
+    report: Report, *, max_belief_loss: float | None = None, max_merge_loss: float | None = None
+) -> list[str]:
+    """Which safety budgets a run broke, worded for a failing job's log. Pure.
+
+    Only the two silent losses are budgeted: a retired belief that should have
+    lived, and a distinct fact folded into another. Stale beliefs and
+    escalation are trade-offs the gate moves, not breaches — and a corpus keeps
+    known-gap cases that are stale on purpose.
+    """
+    breaches = []
+    if max_belief_loss is not None and report.belief_loss_rate > max_belief_loss:
+        breaches.append(
+            f"belief loss {report.belief_loss_rate:.1%} > {max_belief_loss:.1%}"
+        )
+    if max_merge_loss is not None and report.merge_loss_rate > max_merge_loss:
+        breaches.append(f"merge loss {report.merge_loss_rate:.1%} > {max_merge_loss:.1%}")
+    return breaches

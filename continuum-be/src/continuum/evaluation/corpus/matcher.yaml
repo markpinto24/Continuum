@@ -1,0 +1,182 @@
+# Labelled (label, output) pairs for the extraction matcher (FINDINGS §15).
+#
+# same: true   the output states the labelled fact; extra detail is fine
+#              ("Ana moved to Porto last month" states "Ana lives in Porto").
+# same: false  it states something else, or only part: a lost reason, date or
+#              qualifier is a different fact — the extraction prompt keeps the
+#              reason because it is part of the memory.
+#
+# Every pair is a real miss of the token matcher: a labelled fact and an
+# extraction from the same case that it did not pair, taken from runs on
+# 2026-10-27 and labelled before either side was embedded. Beside these, every
+# two different labels within one corpus case are used as "different" pairs.
+
+- id: ana-moved-porto
+  why: Moving there is living there, plus when.
+  label: Ana lives in Porto
+  output: Ana moved to Porto last month.
+  same: true
+
+- id: atlas-chose-postgres
+  why: A choice of Postgres for the event store is Atlas using it, with the reason.
+  label: Atlas uses Postgres for its event store
+  output: Chose Postgres over MongoDB for Atlas event store due to transactional needs across aggregates
+  same: true
+
+- id: release-every-two-weeks
+  why: The same plan, said of the user rather than the team; still the labelled maybe.
+  label: The team is considering releasing every two weeks
+  output: The user will consider moving the release cadence from weekly to every two weeks.
+  same: true
+
+- id: staying-on-jenkins
+  why: Staying with Jenkins for CI, worded as a choice.
+  label: The team is staying on Jenkins for CI
+  output: The user chose to stay with Jenkins for CI
+  same: true
+
+- id: redis-for-caching
+  why: The choice plus what it beat and why.
+  label: The team chose Redis for caching
+  output: Chose Redis for caching over Memcached due to persistence and pub/sub capabilities.
+  same: true
+
+- id: atlas-to-staging
+  why: Shipped and rolled out to staging on the 14th are one event; the output joins a second.
+  label: Shipped Atlas v1 to staging on the 14th
+  output: Rolled out Atlas v1 to staging on the 14th and planned rollback if latency issues arise.
+  same: true
+
+- id: ana-moved-lisbon
+  why: Moving there is living there, plus why.
+  label: Ana lives in Lisbon
+  output: Ana moved to Lisbon for a teaching job.
+  same: true
+
+- id: mom-birthday
+  why: One date, two spellings of it.
+  label: The user's mom's birthday is on 4 June
+  output: The user's mother was born on June 4th.
+  same: true
+
+- id: ana-sister-vs-move
+  why: Who Ana is, against where she went. Two facts about one person.
+  label: Ana is the user's sister
+  output: Ana moved to Lisbon for a teaching job.
+  same: false
+
+- id: vegetarian-reason-lost
+  why: The reason was the point of the label; the output keeps the diet and loses why.
+  label: The user is vegetarian for ethical reasons
+  output: The user has been vegetarian for five years.
+  same: false
+
+- id: window-seat-reason-lost
+  why: The preference without its reason.
+  label: The user prefers window seats on flights to sleep against the wall
+  output: The user likes to book a window seat on flights.
+  same: false
+
+- id: rollback-qualifier-lost
+  why: '"Rather than hotfix forward" is the decision; the output only plans a rollback.'
+  label: Roll back to the previous release rather than hotfix forward if latency does not hold
+  output: Rolled out Atlas v1 to staging on the 14th and planned rollback if latency issues arise.
+  same: false
+
+- id: half-marathon-details-lost
+  why: The date and time were the fact; the output keeps only that it happened.
+  label: The user ran a first half marathon on 12 October in 2 hours 5 minutes
+  output: The user completed a half marathon.
+  same: false
+
+- id: half-marathon-time-only
+  why: Part of the fact — the time — without the race or the date.
+  label: The user ran a first half marathon on 12 October in 2 hours 5 minutes
+  output: The user's race time was 2 hours and 5 minutes.
+  same: false
+
+# --- Held out: written and labelled before either matcher saw them -----------
+
+- id: dog-named-biscuit
+  why: The name, in a longer sentence with a breed added.
+  label: The user's dog is called Biscuit
+  output: Biscuit is the name of the user's dog, a beagle.
+  same: true
+  tags: [held-out]
+
+- id: deploys-thursdays
+  why: Every Thursday, with a time and a reason added.
+  label: The team deploys on Thursdays
+  output: Deployments happen every Thursday afternoon after the freeze.
+  same: true
+  tags: [held-out]
+
+- id: sara-owns-billing-passive
+  why: The same ownership, said in the passive, with her team added.
+  label: Sara owns the billing service
+  output: The billing service is owned by Sara from the payments team.
+  same: true
+  tags: [held-out]
+
+- id: wakes-at-six
+  why: One time, two spellings — a test of the number guard as much as the matcher.
+  label: The user wakes up at 6 am on weekdays
+  output: On weekdays the user gets up at 6:00 a.m.
+  same: true
+  tags: [held-out]
+
+- id: partner-is-girlfriend
+  why: Partner and girlfriend, one relationship with one name.
+  label: The user's partner is Priya
+  output: Priya is the user's girlfriend
+  same: true
+  tags: [held-out]
+
+- id: dog-wanted-not-owned
+  why: Wanting a dog is not having Biscuit.
+  label: The user's dog is called Biscuit
+  output: The user wants to adopt a dog.
+  same: false
+  tags: [held-out]
+
+- id: deploys-thursday-vs-friday
+  why: One day swapped for another, no number for the guard to see.
+  label: The team deploys on Thursdays
+  output: The team deploys on Fridays.
+  same: false
+  tags: [held-out]
+
+- id: owns-vs-reviews
+  why: Reviewing is not owning.
+  label: Sara owns the billing service
+  output: Sara reviews the billing service.
+  same: false
+  tags: [held-out]
+
+- id: allergy-negated
+  why: The opposite claim; the negation guard's case.
+  label: The user is allergic to penicillin
+  output: The user is not allergic to penicillin.
+  same: false
+  tags: [held-out]
+
+- id: run-distance-lost
+  why: The distance was the fact.
+  label: The user runs 10 km on Sundays
+  output: The user runs on Sundays.
+  same: false
+  tags: [held-out]
+
+- id: tea-vs-coffee
+  why: One drink swapped for another.
+  label: The user prefers tea in the morning
+  output: The user prefers coffee in the morning.
+  same: false
+  tags: [held-out]
+
+- id: job-title-lost
+  why: Where without what — the title was part of the label.
+  label: The user works at Initech as a backend engineer
+  output: The user works at Initech.
+  same: false
+  tags: [held-out]

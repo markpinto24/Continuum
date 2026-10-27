@@ -49,6 +49,7 @@ import {
   type ChatDone,
   type ChatMessage,
   type Disagreement,
+  type IngestResponse,
   type Me,
   type Memory,
   type Mode,
@@ -79,8 +80,10 @@ interface SendOptions {
   via?: 'voice'
   /** The whole answer so far, on every chunk — autopilot speaks it as it grows. */
   onText?: (answer: string) => void
-  /** The finished turn — autopilot asks its questions aloud. */
+  /** The finished answer — autopilot asks its questions aloud. */
   onDone?: (done: ChatDone) => void
+  /** The turn landed in memory, after `onDone`. */
+  onRemembered?: (remembered: IngestResponse | null) => void
 }
 
 /**
@@ -220,7 +223,11 @@ export function ChatPanel({
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  /** Ask one question, typed or spoken. Resolves when the answer has finished. */
+  /**
+   * Ask one question, typed or spoken. Resolves when the answer has finished —
+   * not when memory has: the turn is written in the background, and its outcome
+   * patches this turn when it lands. The input is free again at `done`.
+   */
   const sendText = useCallback(
     async (question: string, options: SendOptions = {}): Promise<void> => {
       if (!question || abortRef.current) return
@@ -235,6 +242,9 @@ export function ChatPanel({
         { role: 'user', content: question },
       ]
 
+      // This answer's own turn. Not "the last one": once the answer is done the
+      // next question may be asked while this turn's memory is still landing.
+      const at = turnsRef.current.length + 1
       setTurns((prev) => [
         ...prev,
         { role: 'user', content: question, via: options.via },
@@ -246,41 +256,63 @@ export function ChatPanel({
       abortRef.current = controller
       let answer = ''
 
-      /** Mutate only the assistant turn we just appended — always the last one. */
       const patch = (change: Partial<Turn>) =>
-        setTurns((prev) =>
-          prev.map((turn, index) => (index === prev.length - 1 ? { ...turn, ...change } : turn)),
-        )
+        setTurns((prev) => prev.map((turn, index) => (index === at ? { ...turn, ...change } : turn)))
 
-      try {
-        await streamChat(
-          { messages: history, share: shareRef.current, as_of: asOfRef.current },
-          {
-            onContext: (context) => patch({ context }),
-            onDelta: (text) => {
-              answer += text
-              patch({ content: answer })
-              options.onText?.(answer)
-            },
-            onDone: (done) => {
-              patch({ done })
-              options.onDone?.(done)
-              // The turn was fed back through ingest, so the graph may have grown
-              // a node, an edge, or a fresh dispute. Pull it again.
-              if (done.remembered && done.remembered.extracted > 0) onGraphChanged()
-            },
-            onError: (message) => patch({ error: message }),
-          },
-          controller.signal,
-        )
-      } catch (cause) {
-        if (!controller.signal.aborted) {
-          patch({ error: cause instanceof Error ? cause.message : String(cause) })
-        }
-      } finally {
+      // Answered: the input is free, and the caller (autopilot) moves on.
+      let resolveAnswered!: () => void
+      const answered = new Promise<void>((resolve) => (resolveAnswered = resolve))
+      let finished = false
+      const finish = () => {
+        if (finished) return
+        finished = true
+        if (abortRef.current === controller) abortRef.current = null
         setStreaming(false)
-        abortRef.current = null
+        resolveAnswered()
       }
+
+      void (async () => {
+        try {
+          await streamChat(
+            { messages: history, share: shareRef.current, as_of: asOfRef.current },
+            {
+              onContext: (context) => patch({ context }),
+              onDelta: (text) => {
+                answer += text
+                patch({ content: answer })
+                options.onText?.(answer)
+              },
+              onDone: (done) => {
+                patch({ done })
+                options.onDone?.(done)
+                finish()
+              },
+              onRemembered: ({ remembered }) => {
+                setTurns((prev) =>
+                  prev.map((turn, index) =>
+                    index === at && turn.done
+                      ? { ...turn, done: { ...turn.done, remembered, remembering: false } }
+                      : turn,
+                  ),
+                )
+                options.onRemembered?.(remembered)
+                // The turn went through ingest, so the graph may have grown a
+                // node, an edge, or a fresh dispute. Pull it again.
+                if (remembered && remembered.extracted > 0) onGraphChanged()
+              },
+              onError: (message) => patch({ error: message }),
+            },
+            controller.signal,
+          )
+        } catch (cause) {
+          if (!controller.signal.aborted) {
+            patch({ error: cause instanceof Error ? cause.message : String(cause) })
+          }
+        } finally {
+          finish()
+        }
+      })()
+      await answered
     },
     [onGraphChanged],
   )
@@ -330,6 +362,8 @@ export function ChatPanel({
       setPilotAnswer(null)
       const speech = reader.stream(`pilot-${Date.now()}`)
       let questions: Question[] = []
+      // Settled by this very turn (said again as decided): never asked aloud.
+      const settledNow = new Set<string>()
       await sendText(said, {
         via: 'voice',
         onText: (answer) => {
@@ -341,12 +375,15 @@ export function ChatPanel({
         onDone: (done) => {
           questions = done.questions ?? []
         },
+        onRemembered: (remembered) => {
+          for (const id of remembered?.confirmed ?? []) settledNow.add(id)
+        },
       })
       setPilotStage('speaking')
       speech.end()
       await speech.done()
       // One question at a time, after the answer: a list read aloud is a nag.
-      const [first] = questions
+      const [first] = questions.filter((q) => !settledNow.has(q.memory_id))
       if (first) {
         askingRef.current = first
         await say(spokenQuestion(first.text))
@@ -847,7 +884,10 @@ function TurnView({
           onSelect={onSelectMemory}
         />
       )}
-      {(turn.done?.questions ?? []).map((q) => (
+      {(turn.done?.questions ?? [])
+        // A question this very turn settled, once its memory has landed.
+        .filter((q) => !turn.done?.remembered?.confirmed?.includes(q.memory_id))
+        .map((q) => (
         <PendingQuestionCard
           key={q.memory_id}
           question={q}
@@ -859,8 +899,15 @@ function TurnView({
         />
       ))}
       <div className="flex items-center gap-2">
-        {turn.done && describeWriteBack(turn.done.remembered) && (
-          <p className="flex-1 text-[11px] text-muted/70">{describeWriteBack(turn.done.remembered)}</p>
+        {turn.done?.remembering ? (
+          <p className="flex-1 text-[11px] text-muted/70">Remembering…</p>
+        ) : (
+          turn.done &&
+          describeWriteBack(turn.done.remembered) && (
+            <p className="flex-1 text-[11px] text-muted/70">
+              {describeWriteBack(turn.done.remembered)}
+            </p>
+          )
         )}
         {reader.supported && finished && turn.content && (
           <ReadAloud reader={reader} id={readId} text={turn.content} />

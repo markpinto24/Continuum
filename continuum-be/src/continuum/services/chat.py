@@ -22,12 +22,22 @@ Three decisions worth stating outright:
 3. **Only the user's turn is remembered.** The assistant's reply is assembled
    from memory; feeding it back would let a paraphrase re-enter the graph as an
    independent observation and reinforce itself.
+
+4. **The answer does not wait for memory.** `done` goes out when the answer is
+   complete; the turn is written in the background and reported in a
+   `remembered` event when it lands. Writing a turn is extraction plus the
+   resolver — confirming a maybe took ~8 s live, all of it spent with the input
+   locked. The write is shielded, so a client that leaves after `done` cannot
+   cancel it, and one graph's writes run one at a time, in the order said.
 """
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 import uuid
+from collections import defaultdict
 from collections.abc import AsyncIterator
 
 from continuum.clients.llm import LLMClient
@@ -39,6 +49,7 @@ from continuum.models.schemas import (
     ChatContext,
     ChatDone,
     ChatEvent,
+    ChatRemembered,
     ChatRequest,
     IngestRequest,
     IngestResponse,
@@ -119,6 +130,12 @@ class ChatService:
         self.ingest = ingest
         self.llm = llm
         self.settings = settings or get_settings()
+        # One graph's writes in the order they were said. Without it, a quick
+        # second message could reach the resolver while the first is still being
+        # judged, and two new facts about one thing would both be stored as new.
+        self._writes: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # Strong references: the event loop keeps only weak ones to its tasks.
+        self._background: set[asyncio.Task] = set()
 
     async def stream(self, request: ChatRequest) -> AsyncIterator[ChatEvent]:
         """Yield the events of one chat turn: context, deltas, then done.
@@ -127,6 +144,7 @@ class ChatService:
         service stays free of any HTTP concern.
         """
         clog.bind(user_id=request.user_id)
+        started = time.perf_counter()
 
         query = request.latest_user_message()
         if not query:
@@ -146,10 +164,13 @@ class ChatService:
         messages = self._build_messages(request, context)
 
         answer: list[str] = []
+        first_delta: float | None = None
         try:
             async for delta in self.llm.stream(
                 messages=messages, temperature=self.settings.chat_temperature
             ):
+                if first_delta is None:
+                    first_delta = time.perf_counter()
                 answer.append(delta)
                 yield ChatEvent(event="delta", data={"text": delta})
         except Exception as exc:  # noqa: BLE001 - a broken stream must close cleanly
@@ -165,7 +186,38 @@ class ChatService:
             if request.remember is None
             else request.remember
         ) and context.as_of is None
-        remembered = await self._remember(request, query) if should_remember else None
+
+        # Before the write starts: the write may confirm one of these, and a
+        # reminder saved after it would put it back to pending.
+        questions = await self._ask_about_pending(context, owner=request.user_id)
+        done = ChatDone(
+            memory_ids=[item.memory.id for item in context.memories],
+            cited_ids=cited,
+            disagreements=len(context.disagreements),
+            remembering=should_remember,
+            questions=questions,
+        )
+        # Started before `done` is sent: a client that leaves the moment it has
+        # the answer closes this generator at that yield, and a write begun
+        # after it would never start at all.
+        write: asyncio.Task | None = None
+        if should_remember:
+            write = asyncio.create_task(self._remember_in_order(request, query))
+            self._background.add(write)
+            write.add_done_callback(self._background.discard)
+
+        answered = time.perf_counter()
+        yield ChatEvent(event="done", data=done.model_dump(mode="json"))
+
+        remembered: IngestResponse | None = None
+        if write is not None:
+            # Shielded: if the client goes now, this generator is cancelled, but
+            # the turn is still written.
+            remembered = await asyncio.shield(write)
+            yield ChatEvent(
+                event="remembered",
+                data=ChatRemembered(remembered=remembered).model_dump(mode="json"),
+            )
 
         log.info(
             "chat.completed",
@@ -173,17 +225,11 @@ class ChatService:
             disagreements=len(context.disagreements),
             cited=len(cited),
             remembered=remembered.extracted if remembered else 0,
+            # Not "first_token": a key containing "token" is redacted as a secret.
+            first_delta_ms=_ms(started, first_delta),
+            done_ms=_ms(started, answered),
+            remembered_ms=_ms(started, time.perf_counter()) if should_remember else None,
         )
-
-        questions = await self._ask_about_pending(context, remembered)
-        done = ChatDone(
-            memory_ids=[item.memory.id for item in context.memories],
-            cited_ids=cited,
-            disagreements=len(context.disagreements),
-            remembered=remembered,
-            questions=questions,
-        )
-        yield ChatEvent(event="done", data=done.model_dump(mode="json"))
 
     # --- Prompt assembly ---------------------------------------------------
 
@@ -207,27 +253,46 @@ class ChatService:
             messages.append({"role": "system", "content": note})
         return messages
 
-    async def _ask_about_pending(
-        self, context: ChatContext, remembered: IngestResponse | None
-    ) -> list[Question]:
-        """A question per pending item this answer raised — unless the turn itself
-        just settled it by saying it again. Counted as a reminder now, when it is
-        actually put to the person, so an item nobody answers fades in the end."""
-        settled = set(remembered.confirmed) if remembered else set()
+    async def _ask_about_pending(self, context: ChatContext, *, owner: str) -> list[Question]:
+        """A question per pending item this answer raised. Counted as a reminder
+        now, when it is actually put to the person, so an item nobody answers
+        fades in the end.
+
+        A turn that settles one by saying it again is only known once it is
+        written; its `remembered` event lists it in `confirmed`, and the client
+        drops the question. Reminders are saved in the write order, from a fresh
+        read, so one never puts back an item an earlier turn just confirmed.
+        """
+        if not context.pending:
+            return []
         questions: list[Question] = []
-        for memory in context.pending:
-            if memory.id in settled:
-                continue
-            questions.append(pending_question(memory))
-            memory.remind()
-            try:
-                await self.ingest.memories.save(memory)
-            except Exception:  # noqa: BLE001
-                # The answer is delivered; a lost count only means one more ask.
-                log.exception("chat.reminder_not_recorded", memory_id=memory.id)
+        async with self._writes[owner]:
+            for memory in context.pending:
+                try:
+                    fresh = await self.ingest.memories.get(memory.id)
+                except Exception:  # noqa: BLE001
+                    log.exception("chat.reminder_not_read", memory_id=memory.id)
+                    fresh = memory  # ask anyway; only the count may be lost
+                if fresh is None or not fresh.is_pending:
+                    continue  # settled since it was retrieved
+                questions.append(pending_question(fresh))
+                fresh.remind()
+                try:
+                    await self.ingest.memories.save(fresh)
+                except Exception:  # noqa: BLE001
+                    # The answer is delivered; a lost count only means one more ask.
+                    log.exception("chat.reminder_not_recorded", memory_id=memory.id)
         return questions
 
     # --- Writing the turn back ---------------------------------------------
+
+    async def _remember_in_order(
+        self, request: ChatRequest, query: str
+    ) -> IngestResponse | None:
+        # The graph the turn is written to: the shared one when sharing.
+        owner = SHARED_SPACE if request.share else request.user_id
+        async with self._writes[owner]:
+            return await self._remember(request, query)
 
     async def _remember(self, request: ChatRequest, query: str) -> IngestResponse | None:
         """Feed the user's turn through the normal ingest path.
@@ -256,6 +321,10 @@ class ChatService:
             # not retroactively fail the response.
             log.exception("chat.remember_failed")
             return None
+
+
+def _ms(start: float, end: float | None) -> int | None:
+    return None if end is None else round((end - start) * 1000)
 
 
 # --- Pure prompt rendering ---------------------------------------------------

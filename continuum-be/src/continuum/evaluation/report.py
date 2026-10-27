@@ -135,6 +135,14 @@ def render_extraction(report: ExtractionReport, *, label: str) -> str:
         f"    facts        {report.extracted_facts} extracted vs {report.labelled_facts} labelled",
         f"    precision    {_pct(report.fact_precision)}",
         f"    recall       {_pct(report.fact_recall)}   (F1 {report.fact_f1:.2f})",
+    ]
+    if report.judged_recall is not None and report.judged_precision is not None:
+        lines.append(
+            f"    + judged     precision {_pct(report.judged_precision)}  recall "
+            f"{_pct(report.judged_recall)}   (F1 {report.judged_f1:.2f})  "
+            "token pairs, plus a model's reading of the rest"
+        )
+    lines += [
         f"    category     {_pct(report.category_accuracy)}   of matched facts",
         f"    subject      {_pct(report.subject_accuracy)}   of matched facts",
     ]
@@ -157,6 +165,9 @@ def render_extraction(report: ExtractionReport, *, label: str) -> str:
             "rejected-in-use statements extracted again"
         )
         lines += [f"      ! {hit}" for hit in report.forbidden_hits]
+    if report.judged_pairs:
+        lines += ["    judged the same (read them):"]
+        lines += [f"      ~ {pair}" for pair in report.judged_pairs]
     if report.missed:
         lines += ["    missed:", *(f"      - {m}" for m in report.missed)]
     if report.spurious:
