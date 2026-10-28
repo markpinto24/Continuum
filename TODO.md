@@ -14,7 +14,7 @@ Status keys: `[ ]` to do · `[~]` in progress · `[x]` done
 - [x] **Commit the uncommitted work**: short replies to agreements, naming
       "this workout" in full, graph centred on launch, chat scroll while
       streaming, graph re-framed after unselecting (`8acee10`)
-- [ ] Rebuild the API container so it runs the latest backend code
+- [x] Rebuild the API container so it runs the latest backend code
 - [ ] Settle the one false dispute in the live Personal graph
       ("coding and gym" vs the four-day split) with **Both are true**
 
@@ -41,9 +41,13 @@ filed as `gym` in one run and `workout` in another. That causes false disputes
 - [x] Success: no new false disputes (5 cost cases, all independent, 2 passes);
       belief loss 0% on both corpora; stale 0% except one known-gap case added
       this iteration, which was stale before too
-- [ ] Follow-ups found: a subject-first sentence ("Payments now run…") reads as
+- [x] Follow-ups found: a subject-first sentence ("Payments now run…") reads as
       a name and stays apart; the *spelling* rule renames `brother-in-law` to
-      `brother` (a qualified form, like sara / sara-chen)
+      `brother` (a qualified form, like sara / sara-chen) — both fixed, FINDINGS
+      §21: Work stale 1.7% → 0%, no new false disputes
+- [ ] Follow-up: the Personal single-holder rule (partner / home / job named two
+      ways) fires only on an exact slug — extend it to subjects that meet by
+      meaning (`partner-named-as-girlfriend` stored on one pass of two)
 
 ## Iteration 2 — A judge that asks less *(deferred 2026-10-26: needs a 14B–32B model download)*
 
@@ -68,9 +72,9 @@ vegetarian", "budget is now 10000") come back as "conflict".
       change how fast they fade (180 vs 45 days) — 90 days, decided 2026-10-26
 - [x] Long plans: store the shape (days, order), never the full exercise list
       — already true, 12/12 runs; held-out cases kept as a regression check
-- [ ] Follow-up: the "never self" rule's example word anchors (a long run and a
+- [x] Follow-up: the "never self" rule's example word anchors (a long run and a
       meal plan both filed under `gym`) — compared anyway, but worth a neutral
-      example
+      example — removed, FINDINGS §21: F1 0.80–0.84, meets 95–100%
 
 ## Iteration 4 — Evaluation you can quote
 
@@ -116,8 +120,10 @@ vegetarian", "budget is now 10000") come back as "conflict".
       time — one small dashboard: the Inbox's Activity panel (FINDINGS §20)
 - [x] Prompt-injection test: a memory saying "ignore previous instructions…"
       must stay data in the chat prompt — 15/18 obeyed → 0/18 (FINDINGS §19)
-- [ ] Memory does not shape how chat answers: a recorded "short answers" or
-      "reply in Spanish" is ignored 3/3 (FINDINGS §19 cost cases)
+- [~] Memory does not shape how chat answers: a recorded "short answers" or
+      "reply in Spanish" is ignored 3/3 (FINDINGS §19 cost cases) — read every
+      turn now (FINDINGS §21): language 0/3 → 3/3; length still 0/3 on the 7B
+      model, even placed after the question — retry with Iteration 2's judge
 - [x] A production compose file: reverse proxy, HTTPS, built frontend served
       same-origin, `AUTH_ALLOW_WEB_SETUP=false`, `TRUST_PROXY_HEADERS=true`
       (`production.yml`, `continuum-fe/Dockerfile` + `Caddyfile`, `DEPLOY.md`)
@@ -137,11 +143,45 @@ vegetarian", "budget is now 10000") come back as "conflict".
 - [x] Accessibility pass (keyboard, screen-reader labels on the graph's lists) —
       the graph as a list (one tab stop, arrows, Enter), legend rows as toggles,
       every icon-only button named
-- [ ] Touch targets: inbox buttons are ~23 px tall on a phone (WCAG 2.2: 24)
+- [x] Touch targets: inbox buttons are ~23 px tall on a phone (WCAG 2.2: 24) —
+      they were 28 px; 40–44 px under a coarse pointer now (FINDINGS §21)
 
 ## Iteration 9 — Showcase
 
 - [ ] 2-minute demo video: a belief changes, the dispute appears, it is settled,
       the history stays
-- [ ] README: lead with the problem, the measured results and the demo
+- [x] README: lead with the problem, the measured results and the demo
 - [ ] Public deployment — guide in `DEPLOY.md`
+
+## Iteration 10 — Found in use, 2026-10-28 *(do first: item 1 loses beliefs)*
+
+A Personal chat about a workout routine. The logs and three re-runs of the turn
+show what happened.
+
+- [ ] **A reply borrowed a number from the answer and was merged away.** "i do
+      push pull legs upper lower arms workout", replying to an answer that said
+      "four-day split", was extracted as "The user follows a **four-day** workout
+      split with push pull legs…" (3 runs in 3). Cosine 0.86–0.90 against the
+      stored "four-day workout split", no material difference, so DUPLICATE with
+      no judge call: the new routine was discarded and the stale belief
+      reinforced. `adopted_only` counts it as the user's own because most of its
+      words are in the reply. Fix: when an own fact carries a number, name or
+      negation that is in the answer but not in the reply, re-extract the reply
+      alone (it then differs by "four-day" and goes to the judge). Held-out cases
+      first, including one where the borrowed detail is right ("yes, the
+      four-day one"); agreement corpus ×3 and both resolution corpora ×2
+- [ ] **"Keep this" stores only the outline of a plan.** "it is perfect for me
+      keep this" after a push-day plan stored "decided on a Push Day workout plan
+      focusing on chest, shoulders, and triceps" — no exercises, sets or reps
+      (Iteration 3's "the shape, never the full exercise list"). The next answer
+      only looked right because the plan was still in the chat history; a new
+      session would invent one. Decide: store the plan as one memory when the
+      person explicitly says keep / save, or keep the rule and have "Remembered:"
+      say only the outline was kept
+- [ ] **Answer errors on the 7B model**: cited [1] (the four-day memory) for
+      push/pull/legs, called a stated routine "suggests you might be doing", and
+      listed five days, dropping arms. Recheck with Iteration 2's stronger model;
+      a citation that names something its memory does not say may be worth a check
+- [ ] Live Personal graph: the four-day split was reinforced and the six-session
+      routine is missing — the person corrects it ("I no longer do a four-day
+      split…"), or settles it after the fix

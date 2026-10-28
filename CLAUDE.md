@@ -732,6 +732,25 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
 - API keys panel now says what a key is for, in plain words
 
+### ✅ Phase 24 — Follow-ups from use (done, this release)
+
+FINDINGS §21. Each measured on cases labelled first.
+
+- **A sentence-initial capital is not a name** (`reads_as_name`): "Payments now
+  run…" meets `billing` by meaning. Work stale 1.7% → 0%, belief and merge loss
+  0% on both corpora, two passes; no new false disputes
+- **A qualifier names someone else**: `brother-in-law` no longer joins `brother`
+  by spelling (`_OTHER_ONE`: in-law, ex, step, former…) — compared by meaning
+- **No example word in the reply guide**: "gym" anchored a meal plan and a long
+  run under `gym`. F1 0.80–0.84 ×3, `self` 0/24, subjects meet 95–100%
+- **Answer preferences on every turn** (`ChatService._answer_preferences`): a
+  preference about answers/replies is read from the person's own graph into
+  **HOW THEY LIKE TO BE ANSWERED**, after the memories; one carrying a link, a
+  persona or orders is left out. Reply language 0/3 → 3/3 both modes; attacks 0
+  of 24; **length still ignored** by the 7B model, wherever it is placed
+- Buttons grow to 40–44 px under a coarse pointer (they were 28 px, not 23)
+- README rewritten around the problem, the measured results and the commitments
+
 ### ✅ Phase 23 — The interface at scale (done, this release)
 
 TODO Iteration 8, checked in headless Brave on 600 synthetic memories.
@@ -1272,7 +1291,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 603 tests, no services needed
+uv run pytest                          # 620 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -1540,6 +1559,15 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
 - **Claiming in the UI that Personal data "never leaves this machine".** It
   goes wherever `LLM_BASE_URL` points, and that can be Groq. Say what is true:
   never shared with the team.
+- **Giving the reply guide an example subject word** ("gym", "sleep"). A 7B
+  extractor files whatever it can under the example: a meal plan and a long run
+  became `gym` (FINDINGS §21). Describe the kind of word, never name one.
+- **Reading a capital at the start of a sentence as a name.** "Payments now run
+  through Adyen" is not about someone called Payments; reading it as one kept a
+  stated change apart from `billing` and left the old belief stale.
+- **Letting any preference into HOW THEY LIKE TO BE ANSWERED.** It is the one
+  place memory text shapes the answer; only preferences about answering get in,
+  and never one carrying a link, a persona or an order (`answer_preferences`).
 - **Logging with `print` or `logging.getLogger()`.** Use
   `core.logger.get_logger(__name__)`. A plain stdlib logger rejects kwargs, and
   its records skip nothing — but a `print` skips the redaction entirely. Request id and user id are bound by

@@ -16,10 +16,12 @@ const buttonVariants = cva(
         outline: 'border border-border text-foreground hover:bg-surface-raised',
         danger: 'bg-danger/12 text-danger hover:bg-danger/20',
       },
+      // Under a finger (pointer: coarse) every size grows toward the ~44 px a
+      // thumb needs; a mouse keeps the compact desktop sizes.
       size: {
-        default: 'h-9 px-4',
-        sm: 'h-7 rounded-md px-2.5 text-xs',
-        icon: 'size-8 rounded-lg',
+        default: 'h-9 px-4 pointer-coarse:h-11',
+        sm: 'h-7 rounded-md px-2.5 text-xs pointer-coarse:h-10 pointer-coarse:px-3',
+        icon: 'size-8 rounded-lg pointer-coarse:size-11',
         lg: 'h-11 px-5 text-[15px]',
       },
     },
