@@ -159,13 +159,16 @@ def test_one_word_inflected_or_two_words_are_not_look_alikes(a, b):
 @pytest.mark.parametrize(
     ("slug", "content", "expected"),
     [
-        ("atlas", "Atlas stores events in Postgres", True),
+        ("atlas", "The Atlas event store runs on Postgres", True),
         ("sarah-k", "Sarah K prefers a daily standup call", True),
         ("gym", "The user goes to the gym six days a week", False),
         ("workout", "The user trains four days a week", False),  # not in the words
-        # A sentence-initial capital reads as a name: wrong, and harmless — a
-        # name only matches by spelling, as every subject did before.
-        ("billing", "Billing runs through Stripe", True),
+        # A capital at the start of a sentence is grammar, not a name (§21)...
+        ("billing", "Billing runs through Stripe", False),
+        ("payments", "Payments now run through Adyen. They settle daily", False),
+        # ...but the same word capitalised mid-sentence is one.
+        ("atlas", "The Atlas team chose Postgres", True),
+        ("atlas", "Chose Postgres. Atlas needs transactions", False),
     ],
 )
 def test_a_subject_written_with_a_capital_reads_as_a_name(slug, content, expected):
@@ -309,3 +312,24 @@ async def test_an_extracted_subject_is_right_when_it_meets_the_label():
     assert report.subject_accuracy == 0.0
     # workout meets gym; no subject is compared with everything; self meets nothing.
     assert report.subject_meet_rate == round(2 / 3, 4)
+
+
+@pytest.mark.parametrize(
+    ("candidate", "known"),
+    [
+        ("brother-in-law", "brother"),
+        ("ex-partner", "partner"),
+        ("step-mother", "mother"),
+        ("vice-president", "president"),
+        ("old-flat", "flat"),
+    ],
+)
+def test_a_qualifier_that_names_someone_else_is_not_a_fuller_name(candidate, known):
+    # Renaming would file a belief about one person under another, for good.
+    assert canonical_subject(candidate, {known}) == candidate
+    assert canonical_subject(known, {candidate}) == known
+
+
+def test_a_plain_qualifier_still_joins_one_entity():
+    assert canonical_subject("sara-chen", {"sara"}) == "sara"
+    assert canonical_subject("atlas", {"atlas-project"}) == "atlas-project"

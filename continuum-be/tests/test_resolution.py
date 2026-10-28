@@ -113,6 +113,12 @@ async def test_different_category_never_reaches_the_judge(settings):
 
 async def test_different_subject_never_reaches_the_judge(settings):
     judge = ScriptedJudge("supersedes", 0.99)
+
+    async def embed(texts: list[str]) -> list[list[float]]:
+        # Two clients' slugs mean nothing alike (bge-m3 scores them 0.61).
+        return [[1.0, 0.0] if "acme" in t else [0.0, 1.0] for t in texts]
+
+    judge.embed = embed  # type: ignore[attr-defined]
     result = await service(judge, settings).resolve(
         fact(subject="acme"), [(memory(subject="globex"), 0.88)]
     )

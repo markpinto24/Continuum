@@ -58,7 +58,8 @@ _REPLY_GUIDE = """How to read this reply:
 - Name the choice in full. Never write "this", "that" or "it" for what the
   assistant suggested: write out what it is, with its structure (which days, in
   what order, how often), but not every exercise or step.
-- Give the choice the subject it is about ("gym", "sleep"), never "self".
+- Give the choice a subject: the activity, thing or place it is about, in a
+  word or two of its own - never "self".
 - A thank-you or a no takes nothing from the assistant's words.
 - Still record, as usual, anything new the user says in their own words.
 - Add "tentative": true to a memory the user has not decided on ("maybe", "I'll

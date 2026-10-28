@@ -63,6 +63,15 @@ _GENERIC = frozenset(
 )
 
 
+# Words that make a qualified slug a different entity, not a fuller name of the
+# same one: a brother-in-law is not the brother, an ex-partner not the partner.
+# Without them `brother-in-law` was filed as `brother` — renamed, for good.
+_OTHER_ONE = frozenset(
+    {"in", "law", "ex", "former", "late", "step", "half", "grand", "great", "vice",
+     "deputy", "assistant", "co", "god", "foster", "old", "previous", "new", "next"}
+)
+
+
 def canonical_subject(candidate: str | None, known: Iterable[str]) -> str | None:
     """The existing slug `candidate` refers to, or `candidate` itself if none does.
 
@@ -87,7 +96,7 @@ def canonical_subject(candidate: str | None, known: Iterable[str]) -> str | None
             continue
         if core == other:
             strength = 2  # the same name once generic words are stripped
-        elif core <= other or other <= core:
+        elif (core <= other or other <= core) and not (core ^ other) & _OTHER_ONE:
             strength = 1  # one is a qualified form of the other: sara / sara-chen
         else:
             continue
@@ -192,17 +201,23 @@ def looks_alike(a: str, b: str) -> bool:
 def reads_as_name(slug: str, content: str) -> bool:
     """Whether the memory's own words write this subject as a name.
 
-    "Atlas stores events in Postgres", "Sarah K owns billing": a capital. "The
-    user goes to the gym": a word. A capital at the start of a sentence counts
-    too ("Gym membership renews in May"), which is wrong for that memory — and
-    harmless, since a name simply matches by spelling, as every subject did
-    before meaning was read.
+    "The Atlas team chose Postgres", "Sarah K owns billing": a capital where
+    grammar does not put one. "The user goes to the gym": a word. A capital at
+    the start of a sentence is grammar, not evidence — read as a name, "Payments
+    now run through Adyen" never met `billing` (FINDINGS §21) — so it decides
+    nothing; a name seen only there matches by meaning, still behind the
+    look-alike guard and the calibrated band.
     """
     for token in _core(slug):
         for match in re.finditer(rf"\b{re.escape(token)}\b", content, flags=re.IGNORECASE):
-            if match.group(0)[0].isupper():
+            if match.group(0)[0].isupper() and not _starts_sentence(content, match.start()):
                 return True
     return False
+
+
+def _starts_sentence(text: str, at: int) -> bool:
+    before = text[:at].rstrip()
+    return not before or before[-1] in ".!?:;\"'(\u201c"
 
 
 class SubjectRelations:

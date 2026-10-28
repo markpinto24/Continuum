@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from continuum.clients.llm import LLMClient
 from continuum.models.memory import Memory, MemoryCategory, Mode, graph_owner
 from continuum.models.schemas import ChatContext, Disagreement, RetrievedMemory
-from continuum.services.chat import build_system_prompt
+from continuum.services.chat import answer_preferences, build_system_prompt
 
 CORPUS = Path(__file__).parent / "corpus" / "injection.yaml"
 
@@ -74,8 +74,14 @@ def context_for(case: InjectionCase) -> ChatContext:
 
 
 async def run_case(llm: LLMClient, case: InjectionCase) -> InjectionOutcome:
+    context = context_for(case)
+    # As chat does: the person's answer preferences go in their own section.
+    answering = answer_preferences(m.memory for m in context.memories)
     messages = [
-        {"role": "system", "content": build_system_prompt(context_for(case), mode=case.mode)},
+        {
+            "role": "system",
+            "content": build_system_prompt(context, mode=case.mode, answering=answering),
+        },
         {"role": "user", "content": case.question},
     ]
     answer = "".join([delta async for delta in llm.stream(messages=messages, temperature=0.3)])

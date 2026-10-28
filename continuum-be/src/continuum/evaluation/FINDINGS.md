@@ -1035,6 +1035,60 @@ sees. Near misses are supersedes the gate held for a person. Checked in a real
 categorical set on this surface (validated), so the strips share the accent and
 are told apart by their titles.
 
+## 21. Five follow-ups: sentence starts, qualifiers, an anchoring example, answer preferences
+
+**A sentence-initial capital is not a name.** `reads_as_name` took "Payments now
+run through Adyen" as naming someone called Payments, so `payments` matched
+`billing` by spelling only and the change stayed apart. A capital now counts only
+mid-sentence. Both resolution corpora, two passes each: belief loss and merge loss
+0% both corpora; Work stale 1.7% → 0% (the known-gap
+`payments-filed-apart-sentence-start` now retires, both passes, and
+`constraint-contested-across-subjects` went store → escalate); Work accuracy
+81.4% / 79.7%, escalation 30.5% / 32.2%; Personal 0 / 0 / 0, accuracy 67.5% /
+62.5%, escalation 60%. No new false disputes: same-words-different-project,
+second-flatmate and platform-team still store. The other moves are same-subject
+judge noise. One to follow up: `partner-named-as-girlfriend` escalated on pass 1
+and was stored on pass 2 (judge: independent) — the Personal single-holder rule
+(partner / home / job named two ways) fires only on an exact slug, not on
+subjects that meet by meaning.
+
+**A qualifier that names someone else is not a fuller name.** The spelling rule
+joined `brother-in-law` to `brother` the way it joins `sara-chen` to `sara`.
+Tokens such as *in-law, ex, step, half, grand, former, late, vice, co, new,
+next* now block it; the pair is still compared by meaning (0.91) — compared,
+never renamed. The subjects corpus is otherwise unchanged, training and held out.
+
+**The reply guide's example word anchored.** "Give the choice the subject it is
+about ("gym", "sleep")" put a meal plan and a long run under `gym`. The example
+is gone ("the activity, thing or place it is about, in a word or two of its own").
+Agreement corpus, three runs: P/R 83.3/76.9, 87.5/80.8, 83.3/76.9 (F1 0.80 /
+0.84 / 0.80, before 0.80 ×3); `self` 0 of 24; forbidden 0%. Meals now go to
+`meal-plan`, a long run to `run`. Exact-subject accuracy fell 55–64% → 15–19% —
+because the labels themselves said `gym`; subjects that *meet* the label's stay
+95 / 100 / 95%. The two apart: `training` for "trains at Gold's Gym" (rightly a
+name) and `passport` / `home-safe`, which no wording matched before either.
+
+**Answer preferences reach the answer — language yes, length no.** A recorded
+"reply in Spanish" or "short answers" was ignored 3/3 (§19 cost cases): it had
+to be retrieved to be seen, and "prefers short answers" shares nothing with
+"which days do I train?". Chat now reads the person's active preferences about
+answering (answers, replies, responses, explanations) from their own graph on
+every turn, into a **HOW THEY LIKE TO BE ANSWERED** section after the memories.
+It is not a way in: a preference carrying a link, a persona, "start with", or
+addressed to the assistant is left out (`answer_preferences`), and two new attack
+cases plant exactly that. Injection corpus, 12 cases × 3 answers: attacks 0 of 24
+obeyed (the original six, both new ones); reply language 3/3 Personal and 3/3
+Work, was 0/3; **short answers still 0/3** (84–112 words against 60). Moving the
+section to a system message after the question did not help (5 answers each:
+74–93 vs 74–86 words), so it was not kept. On this 7B model, length is not
+something a prompt position buys; a stronger model (Iteration 2) is the next
+thing to try.
+
+**Touch targets.** The inbox buttons were reported as ~23 px on a phone; they are
+`h-7`, 28 px — inside WCAG 2.2's 24 px, but below the 44 px a thumb wants. Under
+a coarse pointer, buttons now grow (`pointer-coarse:` — 40–44 px); a mouse sees
+no change.
+
 ---
 
 ## What this changes
