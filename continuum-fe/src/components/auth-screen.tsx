@@ -2,11 +2,14 @@ import { ArrowRight, Loader2 } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 
 import { BrandMark } from '@/components/brand'
+import Aurora from '@/components/reactbits/Aurora'
+import ShinyText from '@/components/reactbits/ShinyText'
 import { Button } from '@/components/ui/button'
 import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { api } from '@/lib/api'
 import { PASSWORD_MIN_LENGTH, newPasswordFeedback } from '@/lib/password'
 import type { Me, Mode } from '@/lib/types'
@@ -210,66 +213,59 @@ const USES: { value: Use; label: string; hint: string }[] = [
 /** Where the account opens. "Both" opens in Personal: an assistant for your life first. */
 const USE_MODE: Record<Use, Mode> = { personal: 'personal', work: 'workspace', both: 'personal' }
 
-/** The sign-in page: one calm card over a slow constellation of beliefs. */
+/**
+ * The sign-in page in Lumen's light: the aurora drifting from Work's cyan into
+ * Personal's rose — both memories, before you have chosen one — behind a single
+ * glass card.
+ */
 function Shell({ children }: { children: React.ReactNode }) {
+  const reduced = useMediaQuery('(prefers-reduced-motion: reduce)')
   return (
-    <div className="relative flex h-full items-center justify-center overflow-hidden px-4">
-      <Backdrop />
+    <div className="relative flex h-full items-center justify-center overflow-hidden bg-[#04060a] px-4">
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div className="absolute inset-0 opacity-70">
+          <Aurora
+            colorStops={['#0e7490', '#4f46e5', '#be185d']}
+            amplitude={1}
+            blend={0.6}
+            speed={0.45}
+            height={0.42}
+            paused={reduced}
+            mouseInteraction={false}
+            dpr={0.5}
+          />
+        </div>
+        <div
+          className="absolute inset-0 opacity-[0.05]"
+          style={{
+            backgroundImage:
+              'linear-gradient(#a5f3fc 1px, transparent 1px), linear-gradient(90deg, #a5f3fc 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+            maskImage: 'radial-gradient(ellipse at center, black 25%, transparent 75%)',
+          }}
+        />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,#000_100%)] opacity-80" />
+      </div>
+
       <div className="relative w-full max-w-[400px] animate-fade-up">
-        <div className="mb-6 flex flex-col items-center gap-3">
-          <span className="relative flex size-14 items-center justify-center rounded-2xl bg-accent/10 ring-1 ring-accent/25">
-            <span className="absolute inset-0 rounded-2xl bg-accent/20 blur-xl" />
+        <div className="mb-7 flex flex-col items-center gap-3">
+          <span className="relative flex size-14 items-center justify-center rounded-2xl bg-white/[0.05] ring-1 ring-white/15 backdrop-blur-md">
+            <span className="absolute inset-0 rounded-2xl bg-accent/25 blur-xl" />
             <BrandMark className="relative size-8 text-accent" />
           </span>
-          <span className="text-sm font-medium tracking-[0.2em] text-muted uppercase">
-            Continuum
-          </span>
+          <ShinyText
+            text="CONTINUUM"
+            color="#cbd5e1a6"
+            shineColor="#ffffff"
+            speed={4}
+            className="text-sm font-medium tracking-[0.35em]"
+          />
         </div>
-        <div className="glass rounded-2xl shadow-2xl shadow-black/40">{children}</div>
+        <div className="liquid-glass relative rounded-3xl">{children}</div>
         <p className="mt-5 text-center text-xs text-muted/70">
-          Runs on your own machine. Nothing leaves it.
+          Your memory, on your own server — never shared with the team unless you share it.
         </p>
       </div>
-    </div>
-  )
-}
-
-const NODES = [
-  [12, 18], [28, 72], [44, 30], [63, 82], [78, 24], [88, 60], [20, 46], [54, 56], [70, 44],
-] as const
-const LINKS = [
-  [0, 2], [2, 4], [4, 8], [8, 5], [1, 6], [6, 2], [7, 3], [7, 8], [6, 7],
-] as const
-
-function Backdrop() {
-  return (
-    <div aria-hidden className="pointer-events-none absolute inset-0">
-      <div className="absolute -top-1/3 left-1/2 size-[900px] -translate-x-1/2 rounded-full bg-accent/[0.07] blur-3xl" />
-      <div className="absolute -bottom-1/2 -left-1/4 size-[700px] rounded-full bg-emerald-500/[0.05] blur-3xl" />
-      {/* Lines stretch with the page; the dots are HTML so they stay round. */}
-      <svg className="absolute inset-0 size-full opacity-60" preserveAspectRatio="none" viewBox="0 0 100 100">
-        {LINKS.map(([a, b]) => (
-          <line
-            key={`${a}-${b}`}
-            x1={NODES[a][0]}
-            y1={NODES[a][1]}
-            x2={NODES[b][0]}
-            y2={NODES[b][1]}
-            stroke="var(--color-accent)"
-            strokeOpacity="0.14"
-            strokeWidth="1"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-      </svg>
-      {NODES.map(([x, y], index) => (
-        <span
-          key={index}
-          className="hud-breathe absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/70 shadow-[0_0_12px_var(--color-accent)]"
-          style={{ left: `${x}%`, top: `${y}%`, animationDelay: `${index * 0.37}s` }}
-        />
-      ))}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_40%,var(--color-background)_85%)]" />
     </div>
   )
 }

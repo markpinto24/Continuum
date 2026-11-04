@@ -9,6 +9,8 @@ export type PilotPhase = 'off' | 'starting' | 'listening' | 'hearing' | 'working
  *  that finally holds a question never carries minutes of silence before it. */
 const MAX_PREROLL_MS = 15_000
 const TICK_MS = 50
+/** Exact digital silence for this long means no microphone, not a quiet room. */
+const DEAD_INPUT_MS = 6_000
 
 /**
  * While Lumen is thinking or speaking, a second, warier listener runs — for its
@@ -94,6 +96,11 @@ export function useAutopilot({
     vad: ReturnType<typeof createVad>
     busy: boolean
     barge: { on: boolean; take: Take | null; vad: ReturnType<typeof createVad>; checking: boolean }
+    /** Since when every sample has been exactly zero — no sound reaching Lumen at all. */
+    silentSince: number | null
+    /** Any sound at all has arrived this session: then exact zeros are a noise gate in a pause. */
+    heard: boolean
+    warned: boolean
   } | null>(null)
 
   const listen = useCallback(() => {
@@ -206,6 +213,27 @@ export function useAutopilot({
     levelRef.current = rms
     const now = performance.now()
 
+    // A quiet room is never exactly zero; a muted input or a suspended audio
+    // context is. Say so, instead of listening to nothing for ever — but only
+    // if nothing has ever arrived: a noise gate also gives zeros between words.
+    if (rms > 0) {
+      state.silentSince = null
+      state.heard = true
+    } else state.silentSince ??= now
+    if (
+      !state.heard &&
+      !state.warned &&
+      state.silentSince !== null &&
+      now - state.silentSince > DEAD_INPUT_MS
+    ) {
+      state.warned = true
+      if (state.context.state !== 'running') void state.context.resume().catch(() => {})
+      handlers.current.onError(
+        'Lumen is getting no sound from your microphone. Check that the right input is ' +
+          'selected and not muted — in Brave, the microphone icon in the address bar.',
+      )
+    }
+
     if (state.busy) {
       tickBarge(rms, now)
       return
@@ -247,6 +275,13 @@ export function useAutopilot({
       return false
     }
     setPhase('starting')
+    // Created and resumed here, inside the click that started Lumen — before the
+    // first await. Made after the microphone prompt, the click had passed: with
+    // Brave's autoplay blocking the context stayed suspended, and a suspended
+    // context hears exact silence. Lumen spoke, listened, and never heard a word
+    // (2026-11-05: no transcription request reached the server).
+    const context = new AudioContext()
+    void context.resume().catch(() => {})
     let stream: MediaStream
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -254,12 +289,12 @@ export function useAutopilot({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
       })
     } catch (error) {
+      void context.close()
       setPhase('off')
       handlers.current.onError(describeMicError(error))
       return false
     }
-    const context = new AudioContext()
-    await context.resume().catch(() => {})
+    if (context.state !== 'running') await context.resume().catch(() => {})
     const analyser = context.createAnalyser()
     analyser.fftSize = 1024
     context.createMediaStreamSource(stream).connect(analyser)
@@ -275,6 +310,9 @@ export function useAutopilot({
       vad,
       busy: false,
       barge: { on: false, take: null, vad: createVad(BARGE_VAD), checking: false },
+      silentSince: performance.now(),
+      heard: false,
+      warned: false,
     }
     listen()
     setPhase('listening')

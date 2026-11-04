@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Poin
 
 import { PANEL_DEFAULT, clampPanelWidth } from '@/lib/panel-width'
 
-const STORAGE_KEY = 'continuum.panel_width'
 const KEY_STEP = 24
 
 /**
- * Width state for a right-hand sidebar resized by dragging its left edge.
+ * Width state for a column resized by dragging the divider on its left — the
+ * chat beside Lumen or the graph, and Lumen beside the graph. Each remembers its
+ * own width (`storageKey`).
+ *
  *
  * Pointer capture is what makes the drag reliable here: without it, moving the
  * cursor across the WebGL canvas hands the pointer events to three.js's orbit
@@ -15,9 +17,9 @@ const KEY_STEP = 24
  * The width is remembered per viewer in localStorage — a convenience, so every
  * access is guarded; a private window or blocked storage just means the default.
  */
-export function useResizablePanel() {
+export function useResizablePanel(storageKey = 'continuum.panel_width', fallback = PANEL_DEFAULT) {
   const [width, setWidth] = useState(() =>
-    clampPanelWidth(readStoredWidth() ?? PANEL_DEFAULT, window.innerWidth),
+    clampPanelWidth(readStoredWidth(storageKey) ?? fallback, window.innerWidth),
   )
   const [dragging, setDragging] = useState(false)
   const drag = useRef<{ startX: number; startWidth: number } | null>(null)
@@ -77,11 +79,11 @@ export function useResizablePanel() {
         event.currentTarget.releasePointerCapture(event.pointerId)
       }
       setWidth((w) => {
-        writeStoredWidth(w)
+        writeStoredWidth(storageKey, w)
         return w
       })
     },
-    [],
+    [storageKey],
   )
 
   const onKeyDown = useCallback(
@@ -89,15 +91,18 @@ export function useResizablePanel() {
       let next: number | null = null
       if (event.key === 'ArrowLeft') next = width + KEY_STEP
       else if (event.key === 'ArrowRight') next = width - KEY_STEP
-      else if (event.key === 'Home' || event.key === 'Enter') next = PANEL_DEFAULT
+      else if (event.key === 'Home' || event.key === 'Enter') next = fallback
       if (next === null) return
       event.preventDefault()
-      writeStoredWidth(commit(next))
+      writeStoredWidth(storageKey, commit(next))
     },
-    [commit, width],
+    [commit, fallback, storageKey, width],
   )
 
-  const reset = useCallback(() => writeStoredWidth(commit(PANEL_DEFAULT)), [commit])
+  const reset = useCallback(
+    () => writeStoredWidth(storageKey, commit(fallback)),
+    [commit, fallback, storageKey],
+  )
 
   return {
     width,
@@ -106,9 +111,9 @@ export function useResizablePanel() {
   }
 }
 
-function readStoredWidth(): number | null {
+function readStoredWidth(storageKey: string): number | null {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
+    const raw = window.localStorage.getItem(storageKey)
     const value = raw === null ? NaN : Number(raw)
     return Number.isFinite(value) ? value : null
   } catch {
@@ -116,9 +121,9 @@ function readStoredWidth(): number | null {
   }
 }
 
-function writeStoredWidth(width: number): void {
+function writeStoredWidth(storageKey: string, width: number): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, String(width))
+    window.localStorage.setItem(storageKey, String(width))
   } catch {
     // Storage unavailable (private window, blocked site data). The width still
     // applies for this session; it just will not be remembered.

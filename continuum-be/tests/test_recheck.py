@@ -115,6 +115,57 @@ async def test_a_placeholder_subject_is_treated_as_missing(store, settings):  # 
     assert (await memories.get(new.id)).subject == "atlas-project"
 
 
+async def test_a_choice_filed_under_self_meets_its_topic(store, settings):  # noqa: F811
+    """Live (FINDINGS §22): the old split sat on `self`, the routine on `workout`."""
+    old = make("The user will follow a four-day workout split", MemoryCategory.DECISION,
+               "self", 0)
+    new = make("The user does a push, pull, legs, upper, lower and arms workout",
+               MemoryCategory.ROUTINE, "workout", 9)
+    age = make("The user is 22 years old", MemoryCategory.FACT, "self", 1)
+    memories, service, _ = await setup(
+        store, settings, {"relation": "conflict", "confidence": 0.9, "reason": "split"},
+        old, new, age,
+    )
+    report = await service.run("mark", apply=True)
+    assert report.subjects_filled == [(old.id, "workout")]
+    assert (await memories.get(old.id)).subject == "workout"
+    # Nothing in its words names a thing the graph knows: it is about the user.
+    assert (await memories.get(age.id)).subject == "self"
+
+
+async def test_a_dry_run_reports_what_a_moved_subject_would_raise(store, settings):  # noqa: F811
+    """Live, 2026-11-04: the dry run moved the split and reported nothing; apply
+    re-embedded it, the pair met, and a dispute was raised nobody had seen."""
+    def pair():  # noqa: ANN202
+        return (make("The user will follow a four-day workout split", MemoryCategory.DECISION,
+                     "self", 0),
+                make("The user does a push, pull, legs and arms workout split",
+                     MemoryCategory.ROUTINE, "workout", 9))
+
+    judgement = {"relation": "conflict", "confidence": 0.9, "reason": "split"}
+    _, dry_service, _ = await setup(store, settings, judgement, *pair())
+    dry = await dry_service.run("mark", apply=False)
+    await store.client.delete_collection(store.collection)
+    await store.ensure_collection()
+    _, wet_service, _ = await setup(store, settings, judgement, *pair())
+    wet = await wet_service.run("mark", apply=True)
+
+    assert [a.verdict for a in dry.actions] == [a.verdict for a in wet.actions] == ["conflict"]
+
+
+async def test_self_naming_two_things_stays_self(store, settings):  # noqa: F811
+    both = make("The user's workout and diet are planned on Sundays", MemoryCategory.ROUTINE,
+                "self", 0)
+    memories, service, _ = await setup(
+        store, settings, {"relation": "independent", "confidence": 0.9, "reason": "-"},
+        both,
+        make("Push day on Monday", MemoryCategory.ROUTINE, "workout", 1),
+        make("High-protein meals", MemoryCategory.ROUTINE, "diet", 2),
+    )
+    report = await service.run("mark", apply=False)
+    assert report.subjects_filled == []
+
+
 async def test_a_failed_embedding_skips_the_memory_and_carries_on(store, settings):  # noqa: F811
     old, new = live_case()
     memories, service, llm = await setup(

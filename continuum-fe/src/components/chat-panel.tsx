@@ -16,9 +16,15 @@ import {
   X,
 } from 'lucide-react'
 import { type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { AnswerFeedback } from '@/components/answer-feedback'
-import { AutopilotOverlay, type PilotStage } from '@/components/autopilot-overlay'
+import {
+  AutopilotOverlay,
+  LumenStage,
+  type PilotStage,
+  type StageLayout,
+} from '@/components/autopilot-overlay'
 import { BrandMark } from '@/components/brand'
 import { Markdown } from '@/components/markdown'
 import { Badge } from '@/components/ui/badge'
@@ -98,7 +104,7 @@ interface SendOptions {
  */
 /** What the rest of the app may ask of the chat: start Lumen from elsewhere. */
 export interface ChatControl {
-  /** Resolves false when Lumen could not start; the reason is shown in the chat. */
+  /** Resolves false when Lumen could not start; the reason is shown with Lumen. */
   startLumen: () => Promise<boolean>
 }
 
@@ -112,14 +118,36 @@ export function ChatPanel({
   asOf = null,
   controlRef,
   onLumenAvailable,
+  lumenHost,
+  lumenLayout = 'full',
+  lumenAnswerBeside = false,
+  onTakeOver,
+  onShowLumen,
+  onLumenActive,
 }: {
   me: Me
   /** The graph this conversation reads and writes. Each mode has its own chat. */
   mode?: Mode
-  /** Lets the collapsed sidebar rail start Lumen. */
+  /** Lets the rest of the app start Lumen. */
   controlRef?: Ref<ChatControl>
   /** Whether the server offers voice — so a Lumen button elsewhere can hide. */
   onLumenAvailable?: (available: boolean) => void
+  /**
+   * Where Lumen is drawn. An element: always there, waiting for a tap when it is
+   * not running. Null: nowhere — the app is showing the text chat, and a running
+   * session shows as a bar above it. Left out: over the whole page while it runs,
+   * as when the chat is used on its own.
+   */
+  lumenHost?: HTMLElement | null
+  lumenLayout?: Exclude<StageLayout, 'overlay'>
+  /** Long answers in full beside Lumen — when the chat itself is not on screen. */
+  lumenAnswerBeside?: boolean
+  /** "Let Lumen take over": the app moves Lumen beside the graph and starts it. */
+  onTakeOver?: () => void
+  /** From the bar of a running session: back to Lumen's own screen. */
+  onShowLumen?: () => void
+  /** Whether a Lumen session is running, for the app's navigation. */
+  onLumenActive?: (active: boolean) => void
   /** Answer from what was believed then (ISO). Such turns are never remembered. */
   asOf?: string | null
   /** Unresolved disagreements, for the greeting. Null while still loading. */
@@ -512,21 +540,47 @@ export function ChatPanel({
   useEffect(() => {
     onLumenAvailable?.(dictationOffered)
   }, [dictationOffered, onLumenAvailable])
+  useEffect(() => {
+    onLumenActive?.(autopilot.active)
+  }, [autopilot.active, onLumenActive])
+
+  const stageProps = {
+    phase: autopilot.phase,
+    stage: pilotStage,
+    caption: pilotCaption,
+    answer: pilotAnswer,
+    levelRef: autopilot.levelRef,
+    needsTap: pilotNeedsTap && !autopilot.active,
+    mode,
+    onTap: () => void startAutopilot(),
+    onInterrupt: interruptAutopilot,
+    onThankYou: thankAndEnd,
+    onClose: endAutopilot,
+  }
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      {(autopilot.active || pilotNeedsTap) && (
-        <AutopilotOverlay
-          phase={autopilot.phase}
-          stage={pilotStage}
-          caption={pilotCaption}
-          answer={pilotAnswer}
-          levelRef={autopilot.levelRef}
-          needsTap={pilotNeedsTap && !autopilot.active}
-          onTap={() => void startAutopilot()}
-          onInterrupt={interruptAutopilot}
-          onThankYou={thankAndEnd}
-          onClose={endAutopilot}
+      {lumenHost === undefined
+        ? (autopilot.active || pilotNeedsTap) && <AutopilotOverlay {...stageProps} />
+        : lumenHost &&
+          createPortal(
+            <LumenStage
+              {...stageProps}
+              active={autopilot.active}
+              layout={lumenLayout}
+              greeting={greetingText}
+              canTalk={dictationOffered}
+              answerBeside={lumenAnswerBeside}
+              error={pilotError}
+              onDismissError={() => setPilotError(null)}
+            />,
+            lumenHost,
+          )}
+      {lumenHost === null && autopilot.active && (
+        <LumenBar
+          label={pilotStage ? STAGE_BAR[pilotStage] : 'Lumen is listening'}
+          onShow={onShowLumen}
+          onStop={thankAndEnd}
         />
       )}
       <div
@@ -614,7 +668,8 @@ export function ChatPanel({
             <Loader2 className="size-3 animate-spin" /> Transcribing on your server…
           </p>
         )}
-        {pilotError && (
+        {/* Lumen on screen says it itself; twice is noise. */}
+        {pilotError && !lumenHost && (
           <Notice onDismiss={() => setPilotError(null)}>{pilotError}</Notice>
         )}
         {dictation.error && <Notice onDismiss={dictation.dismissError}>{dictation.error}</Notice>}
@@ -688,17 +743,23 @@ export function ChatPanel({
               </Tooltip>
             )}
             {dictationOffered && (
-              <Tooltip label="Talk to Lumen — hands-free: speak, pause, hear the answer. Your voice stays on your own server.">
+              <Tooltip
+                label={
+                  onTakeOver
+                    ? 'Let Lumen take over — hands-free beside your memories: speak, pause, hear the answer. Your voice stays on your own server.'
+                    : 'Talk to Lumen — hands-free: speak, pause, hear the answer. Your voice stays on your own server.'
+                }
+              >
                 <button
                   type="button"
-                  aria-label="Talk to Lumen"
+                  aria-label={onTakeOver ? 'Let Lumen take over' : 'Talk to Lumen'}
                   disabled={dictation.state !== 'idle'}
-                  onClick={() => void startAutopilot()}
+                  onClick={() => (onTakeOver ? onTakeOver() : void startAutopilot())}
                   className="group relative flex h-8 items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-xs font-medium text-accent ring-1 ring-accent/30 transition-all hover:bg-accent/10 hover:ring-accent/60 disabled:opacity-40"
                 >
                   <span className="absolute inset-0 bg-gradient-to-r from-accent/0 via-accent/15 to-accent/0 opacity-0 transition-opacity group-hover:opacity-100" />
                   <AudioLines className="relative size-3.5" />
-                  <span className="relative">Lumen</span>
+                  <span className="relative">{onTakeOver ? 'Let Lumen take over' : 'Lumen'}</span>
                 </button>
               </Tooltip>
             )}
@@ -939,6 +1000,49 @@ function AssistantRow({ children }: { children: React.ReactNode }) {
 }
 
 /** A dismissible error above the composer. */
+const STAGE_BAR: Record<Exclude<PilotStage, null>, string> = {
+  greeting: 'Lumen is saying hello',
+  transcribing: 'Lumen is catching what you said',
+  thinking: 'Lumen is thinking',
+  speaking: 'Lumen is speaking',
+}
+
+/**
+ * A running Lumen session while the text chat is on screen. It keeps listening,
+ * and its turns land in this transcript; the bar says so, and offers the way
+ * back to it or out of it.
+ */
+function LumenBar({
+  label,
+  onShow,
+  onStop,
+}: {
+  label: string
+  onShow?: () => void
+  onStop: () => void
+}) {
+  return (
+    <div
+      role="status"
+      className="mx-3 mt-1 flex items-center gap-2 rounded-xl bg-accent/10 px-3 py-2 text-xs ring-1 ring-accent/25 animate-fade-up"
+    >
+      <span className="size-1.5 rounded-full bg-accent hud-breathe" />
+      <span className="font-medium text-foreground">{label}</span>
+      <span className="ml-auto flex gap-1">
+        {onShow && (
+          <Button type="button" size="sm" variant="ghost" onClick={onShow}>
+            <AudioLines />
+            Show Lumen
+          </Button>
+        )}
+        <Button type="button" size="sm" variant="secondary" onClick={onStop}>
+          Thank you, Lumen
+        </Button>
+      </span>
+    </div>
+  )
+}
+
 function Notice({ children, onDismiss }: { children: React.ReactNode; onDismiss: () => void }) {
   return (
     <p

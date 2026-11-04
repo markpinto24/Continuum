@@ -576,6 +576,12 @@ class ExtractedFact(BaseModel):
         description="Taken from the assistant's answer the user agreed to, not said in "
         "their own words. Never reinforces an existing belief: an echo is not evidence.",
     )
+    kept: bool = Field(
+        default=False,
+        description="An answer the person asked to keep, copied out in full. It says "
+        "what to keep, never that something else changed, so it never retires a belief "
+        "on its own. Read by the resolver only; not stored.",
+    )
 
     def to_memory(
         self,

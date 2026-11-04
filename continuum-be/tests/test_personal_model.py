@@ -269,6 +269,33 @@ async def test_two_homes_are_not_independent_but_a_detail_is():
     assert detail.verdict is Verdict.INDEPENDENT
 
 
+@pytest.mark.parametrize(
+    ("new_subject", "old_subject"),
+    [("girlfriend", "partner"), ("partner", "wife"), ("flat", "home"), ("employer", "job")],
+)
+async def test_one_relationship_under_two_words_is_still_one_at_a_time(
+    new_subject: str, old_subject: str
+):
+    """Corpus `partner-named-as-girlfriend`: judged independent two passes in two."""
+    service, _ = resolver("independent", 0.98)
+    result = await service.resolve(
+        fact("Sam is the user's one", C.PERSON, subject=new_subject),
+        [(mem("Priya is the user's one", C.PERSON, subject=old_subject), 0.85)],
+    )
+    assert result.verdict is Verdict.CONFLICT and result.forced_escalation
+
+
+@pytest.mark.parametrize("other", ["sister", "colleague", "friend", "roommate"])
+async def test_a_related_relationship_is_not_the_same_slot(other: str):
+    # "my sister" meets "my partner" at 0.77 by meaning; they are two people.
+    service, _ = resolver("independent", 0.98)
+    result = await service.resolve(
+        fact("Ana is the user's " + other, C.PERSON, subject=other),
+        [(mem("Priya is the user's partner", C.PERSON, subject="partner"), 0.85)],
+    )
+    assert result.verdict is Verdict.INDEPENDENT
+
+
 async def test_workspace_independents_are_untouched_by_the_home_rule():
     service, _ = resolver("independent", 1.0)
     old = mem("Atlas runs in Frankfurt", C.FACT, subject="home", owner="mark")

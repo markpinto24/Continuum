@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -103,6 +103,17 @@ vi.mock('@/lib/api', () => ({
     logout: () => Promise.resolve(),
     voiceSettings: () =>
       Promise.resolve({ voice: 'en_US-lessac-medium', speed: 1, default_voice: 'en_US-lessac-medium', voices: [] }),
+    // What the inbox and memory tabs ask for. Left loading: these tests only
+    // check which tab opens; the panels have tests of their own.
+    rules: () => new Promise(() => {}),
+    feedbackActivity: () => new Promise(() => {}),
+    feedbackEvidence: () => new Promise(() => {}),
+    feedbackSummary: () => new Promise(() => {}),
+    calibration: () => new Promise(() => {}),
+    pendingMemories: () => new Promise(() => {}),
+    memory: () => new Promise(() => {}),
+    feedbackExportUrl: () => '#',
+    feedbackExportUrlFor: () => '#',
     speechStatus: () =>
       Promise.resolve({
         enabled: true, ready: true, max_seconds: 120, language: 'en',
@@ -121,6 +132,21 @@ beforeEach(() => {
   localStorage.clear()
 })
 
+/** Lumen's stage — where every session opens. */
+const lumen = () => screen.queryByRole('region', { name: 'Lumen' })
+const chatColumn = () => screen.queryByRole('region', { name: 'Chat' })
+const memoriesColumn = () => screen.queryByRole('region', { name: 'Memories' })
+
+/** Through the dock, as a person would: each of the three is its own toggle. */
+async function toggle(place: 'Memories' | 'Chat' | 'Lumen') {
+  await userEvent.click(await screen.findByRole('button', { name: new RegExp(`^${place} — (show|hide)$`) }))
+}
+
+/** a comes before b in the page — left of it on screen. */
+function before(a: Element | null, b: Element | null): boolean {
+  return !!a && !!b && !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+}
+
 describe('the sign-in gate', () => {
   it('offers first-run setup when the instance has no account', async () => {
     auth.state.needsSetup = true
@@ -128,7 +154,7 @@ describe('the sign-in gate', () => {
     render(<App />)
 
     await waitFor(() => expect(screen.getByText('Create the admin account')).toBeDefined())
-    expect(screen.queryByTestId('graph')).toBeNull()
+    expect(lumen()).toBeNull()
   })
 
   it('prefills setup with the pre-auth user id, so the old graph is kept', async () => {
@@ -145,24 +171,24 @@ describe('the sign-in gate', () => {
     render(<App />)
 
     await waitFor(() => expect(screen.getByText('Sign in to Continuum')).toBeDefined())
-    expect(screen.queryByTestId('graph')).toBeNull()
+    expect(lumen()).toBeNull()
 
     await userEvent.type(screen.getByLabelText('Email'), 'mark@example.com')
     await userEvent.type(screen.getByLabelText('Password'), 'correct horse battery')
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect(auth.login).toHaveBeenCalledWith('mark@example.com', 'correct horse battery')
-    await waitFor(() => expect(screen.getByTestId('graph').textContent).toBe('2 nodes'))
+    await waitFor(() => expect(lumen()).not.toBeNull())
   })
 
   it('returns to sign-in when the session lapses mid-use', async () => {
     render(<App />)
-    await waitFor(() => expect(screen.getByTestId('graph')).toBeDefined())
+    await waitFor(() => expect(lumen()).not.toBeNull())
 
     act(() => auth.listener?.())
 
     await waitFor(() => expect(screen.getByText('Sign in to Continuum')).toBeDefined())
-    expect(screen.queryByTestId('graph')).toBeNull()
+    expect(lumen()).toBeNull()
   })
 
   it('shows who is signed in, not an editable user id', async () => {
@@ -173,79 +199,135 @@ describe('the sign-in gate', () => {
   })
 })
 
-describe('App', () => {
-  it('renders the graph and its counts', async () => {
+describe('opening on Lumen', () => {
+  it('opens on Lumen alone, waiting for a tap, with a greeting that mentions open disputes', async () => {
     render(<App />)
 
-    await waitFor(() => expect(screen.getByTestId('graph').textContent).toBe('2 nodes'))
-    expect(screen.getByText(/2 beliefs · 1 edges/)).toBeDefined()
+    await waitFor(() => expect(lumen()).not.toBeNull())
+    // The mocked inbox holds 2 conflicts; the user id 'mark' reads as a name.
+    await waitFor(() =>
+      expect(lumen()?.textContent).toMatch(/Mark\..*2 disagreements are waiting for your decision/),
+    )
+    // Browsers let the microphone and the voice start only from a click.
+    expect(screen.getByRole('button', { name: 'Talk to Lumen' })).toBeDefined()
+    expect(screen.queryByTestId('graph')).toBeNull()
+    expect(chatColumn()).toBeNull() // there, holding the conversation, but not on screen
   })
 
-  it('badges the inbox with the number of open disputes', async () => {
+  it('badges the inbox in the dock with the open disputes', async () => {
     // The count has to come from /conflicts, not from counting amber nodes —
     // a dispute whose counterpart is outside the graph window still needs a
     // decision.
     render(<App />)
 
-    await waitFor(() => expect(screen.getByText('2')).toBeDefined())
+    expect(await screen.findByRole('button', { name: 'Inbox — 2 open' })).toBeDefined()
   })
 
-  it('counts each status in the legend', async () => {
-    render(<App />)
-
-    await waitFor(() => expect(screen.getByText('Disputed')).toBeDefined())
-    expect(screen.getByText('Active')).toBeDefined()
-  })
-
-  it('opens on chat with a written greeting that mentions open disputes', async () => {
-    render(<App />)
-
-    // The mocked inbox holds 2 conflicts; the user id 'mark' reads as a name.
-    await waitFor(() =>
-      expect(screen.getByText(/, Mark\. 2 disagreements are waiting for your decision/)).toBeDefined(),
-    )
-    expect(screen.getByText(/What are you working on\?/)).toBeDefined()
+  it('wears the colours of the memory it talks from', async () => {
+    auth.me.default_mode = 'personal'
+    try {
+      render(<App />)
+      await waitFor(() => expect(lumen()).not.toBeNull())
+      // Rose in Personal (lib/lumen-theme), not Work's cyan.
+      expect(lumen()?.getAttribute('style')).toContain('--hud: #fda4af')
+    } finally {
+      auth.me.default_mode = 'workspace'
+    }
   })
 })
 
-describe('the side panel', () => {
-  beforeEach(() => localStorage.removeItem('continuum.panel_open'))
-
-  it('collapses to a rail and reopens on the tab you pick, remembering the choice', async () => {
+describe('memories, Lumen and chat, each on its own', () => {
+  it('puts the graph beside Lumen, on its left, with its counts', async () => {
     render(<App />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide panel' })).toBeDefined())
+    await toggle('Memories')
 
-    await userEvent.click(screen.getByRole('button', { name: 'Hide panel' }))
-    expect(screen.getByRole('navigation', { name: 'Open the panel' })).toBeDefined()
-    expect(localStorage.getItem('continuum.panel_open')).toBe('0')
-
-    expect(screen.getByRole('button', { name: 'Open inbox' })).toBeDefined() // with its badge
-    await userEvent.click(screen.getByRole('button', { name: 'Open memory' }))
-    expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull()
-    expect(screen.getByRole('tab', { name: /Memory/ }).getAttribute('data-state')).toBe('active')
+    await waitFor(() => expect(screen.getByTestId('graph').textContent).toBe('2 nodes'))
+    expect(lumen()).not.toBeNull()
+    expect(before(memoriesColumn(), lumen())).toBe(true)
+    expect(screen.getByText(/2 beliefs · 1 edges/)).toBeDefined()
+    expect(screen.getByRole('button', { name: /^Disputed: 1/ })).toBeDefined()
   })
 
-  it('offers Ask Lumen on the rail, and opens the chat to explain when it cannot start', async () => {
+  it('with all three open: memories, then Lumen, then the chat', async () => {
     render(<App />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide panel' })).toBeDefined())
-    await userEvent.click(screen.getByRole('button', { name: 'Hide panel' }))
+    await toggle('Chat')
+    await toggle('Memories')
 
-    // jsdom has no microphone, so Lumen refuses to start — and says why in the chat.
-    await userEvent.click(screen.getByRole('button', { name: 'Ask Lumen' }))
+    await waitFor(() => expect(chatColumn()).not.toBeNull())
+    expect(before(memoriesColumn(), lumen())).toBe(true)
+    expect(before(lumen(), chatColumn())).toBe(true)
+  })
+
+  it('closes any of them, but never the last one', async () => {
+    render(<App />)
+    await toggle('Chat')
+    await toggle('Lumen')
+    await waitFor(() => expect(lumen()).toBeNull())
+    expect(chatColumn()).not.toBeNull()
+
+    await toggle('Chat') // the only one open: it stays
+    expect(chatColumn()).not.toBeNull()
+  })
+
+  it('Ctrl+\\ brings the chat in and out', async () => {
+    render(<App />)
+    await waitFor(() => expect(lumen()).not.toBeNull())
+    await userEvent.keyboard('{Control>}\\{/Control}')
+    expect(chatColumn()).not.toBeNull()
+    await userEvent.keyboard('{Control>}\\{/Control}')
+    expect(chatColumn()).toBeNull()
+  })
+
+  it('the inbox opens as a popup over everything, and closes back to what was there', async () => {
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Inbox — 2 open' }))
+    expect(screen.getByRole('dialog', { name: /^Inbox/ }).textContent).toMatch(/2 open/)
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Inbox/ })).toBeNull())
+    expect(lumen()).not.toBeNull()
+  })
+
+  it('a divider between the graph and Lumen resizes Lumen, as the one before the chat does', async () => {
+    render(<App />)
+    await toggle('Memories')
+    await toggle('Chat')
+    expect(await screen.findByRole('separator', { name: 'Resize Lumen' })).toBeDefined()
+    expect(screen.getByRole('separator', { name: 'Resize the chat' })).toBeDefined()
+  })
+
+  it('a memory in the graph opens its detail in its own panel', async () => {
+    render(<App />)
+    await toggle('Memories')
+    await userEvent.click(await screen.findByRole('button', { name: /Atlas runs on Postgres/ }))
+    expect(screen.getByRole('dialog', { name: 'Memory' })).toBeDefined()
+  })
+
+  it('Lumen takes over from the chat — and says why when it cannot start', async () => {
+    render(<App />)
+    await toggle('Lumen') // nothing else open: Lumen stays
+    await toggle('Chat')
+    await toggle('Lumen')
+    await waitFor(() => expect(lumen()).toBeNull())
+
+    // jsdom has no microphone, so Lumen refuses to start — and says why, with Lumen.
+    await userEvent.click(screen.getByRole('button', { name: 'Let Lumen take over' }))
+    await waitFor(() => expect(lumen()).not.toBeNull())
+    expect(chatColumn()).toBeNull()
     await waitFor(() =>
-      expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull(),
+      expect(screen.getByRole('alert').textContent).toMatch(/Lumen needs a secure page|cannot record/),
     )
-    expect(screen.getByRole('tab', { name: /Chat/ }).getAttribute('data-state')).toBe('active')
-    expect(screen.getByRole('alert').textContent).toMatch(/Lumen needs a secure page|cannot record/)
   })
 
-  it('toggles with Ctrl+\\', async () => {
+  it("the dock's mode button switches on a click, and Settings opens on a click", async () => {
+    // React Bits' dock opens an item's menu only on a hold; a plain click did
+    // nothing for these two while they had no action of their own.
     render(<App />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide panel' })).toBeDefined())
-    await userEvent.keyboard('{Control>}\\{/Control}')
-    expect(screen.getByRole('navigation', { name: 'Open the panel' })).toBeDefined()
-    await userEvent.keyboard('{Control>}\\{/Control}')
-    expect(screen.queryByRole('navigation', { name: 'Open the panel' })).toBeNull()
+    await userEvent.click(await screen.findByRole('button', { name: 'Work — switch to Personal' }))
+    await waitFor(() => expect(lumen()?.textContent).toMatch(/What’s on your mind\?/))
+    expect(auth.modes.at(-1)).toBe('personal')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByRole('dialog', { name: /Settings/ })).toBeDefined()
   })
 })
 
@@ -254,10 +336,10 @@ describe('the two modes', () => {
     auth.me.default_mode = 'personal'
     try {
       render(<App />)
-      await waitFor(() => expect(screen.getByTestId('graph').textContent).toBe('2 nodes'))
+      await waitFor(() => expect(lumen()).not.toBeNull())
       expect(auth.modes[0]).toBe('personal')
       expect(screen.getByRole('radio', { name: 'Personal' }).getAttribute('aria-checked')).toBe('true')
-      expect(screen.getByText(/What’s on your mind\?/)).toBeDefined()
+      await waitFor(() => expect(lumen()?.textContent).toMatch(/What’s on your mind\?/))
       expect(document.documentElement.dataset.mode).toBe('personal')
     } finally {
       auth.me.default_mode = 'workspace'
@@ -266,13 +348,16 @@ describe('the two modes', () => {
 
   it('switches everything together, with a fresh conversation, and remembers the choice', async () => {
     render(<App />)
-    await waitFor(() => expect(screen.getByText(/What are you working on\?/)).toBeDefined())
+    await toggle('Chat')
+    await waitFor(() => expect(within(chatColumn()!).getByText(/What are you working on\?/)).toBeDefined())
     expect(screen.getByRole('button', { name: 'Share what I say with the team' })).toBeDefined()
 
     await userEvent.click(screen.getByRole('radio', { name: 'Personal' }))
 
-    await waitFor(() => expect(screen.getByText(/What’s on your mind\?/)).toBeDefined())
+    // A fresh workspace opens on Lumen again, in the other memory.
+    await waitFor(() => expect(lumen()?.textContent).toMatch(/What’s on your mind\?/))
     expect(screen.queryByText(/What are you working on\?/)).toBeNull() // no history carried across
+    await toggle('Chat')
     expect(screen.queryByRole('button', { name: 'Share what I say with the team' })).toBeNull()
     expect(auth.modes.at(-1)).toBe('personal')
     expect(localStorage.getItem('continuum.mode.mark')).toBe('personal')
@@ -300,11 +385,13 @@ describe('the two modes', () => {
 describe('the Personal hint for existing Work accounts', () => {
   it('shows once, and trying it switches and never shows again', async () => {
     render(<App />)
+    await toggle('Memories')
     await userEvent.click(await screen.findByRole('button', { name: 'Try Personal' }))
-    await waitFor(() => expect(screen.getByText(/What’s on your mind\?/)).toBeDefined())
+    await waitFor(() => expect(lumen()?.textContent).toMatch(/What’s on your mind\?/))
     expect(localStorage.getItem('continuum.personal_hint_seen')).toBe('1')
     await userEvent.click(screen.getByRole('radio', { name: 'Work' }))
-    await waitFor(() => expect(screen.getByText(/What are you working on\?/)).toBeDefined())
+    await waitFor(() => expect(lumen()?.textContent).toMatch(/What are you working on\?/))
+    await toggle('Memories')
     expect(screen.queryByRole('button', { name: 'Try Personal' })).toBeNull()
   })
 })

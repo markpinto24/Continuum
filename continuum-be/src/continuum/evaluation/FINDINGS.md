@@ -1089,6 +1089,114 @@ thing to try.
 a coarse pointer, buttons now grow (`pointer-coarse:` — 40–44 px); a mouse sees
 no change.
 
+## 22. A borrowed number, and "keep this"
+
+Found in use (2026-10-28), Personal chat. Asked "my current workout routine?",
+the assistant answered from memory: "you follow a four-day workout split [1]".
+The reply — "i do push pull legs upper lower arms workout" — was folded into that
+belief as a duplicate, with no judge call: the new routine was lost and the
+stale one reinforced. Then "it is perfect for me keep this", after a push-day
+plan, stored only "a Push Day plan focusing on chest, shoulders and triceps".
+
+**The borrowed number.** Re-run three times, the extractor wrote the answer's
+number into the user's fact — "follows a **four-day** workout split with push
+pull legs…" (live wording) or the four-day split alone (corpus wording). Within
+the duplicate band (0.86–0.90) and both saying "four-day", the duplicate guard
+had nothing to see. Now a fact may not carry a number, name or negation the
+reply never said: from anywhere in the answer when the fact is the user's own
+(most of its words are theirs), from a sentence the answer *cited* when it was
+adopted — a cited sentence is memory, not a suggestion, while a suggestion's own
+details ("ask Priya") are what adopting it means. Such a fact is read again,
+told which words were the assistant's — the reply alone is no fallback: the
+Personal extractor took nothing from a bare "i do push pull legs…", or "i run
+in the evenings now", three runs in three; the retry wrote the routine four in
+four. If the retry borrows again, the reply alone; if that is empty, nothing —
+safer than the echo.
+
+**"Keep this" keeps it in full** (decided 2026-11-02). Iteration 3's rule — a
+plan's shape, never its exercises — overrode an explicit request. A reply that
+asks for the answer to be kept ("keep this", "save this plan", "remember this
+checklist"; not "remember that I…", "keep it up", "keep that in mind", a hedge
+or a no) now gets its own small reading of the answer, written out in full, in
+place of the outline; everything else is still extracted from byte-identical
+text. The model copied plans out verbatim three runs in three, so a plan that
+does not say whose it is is prefixed ("The user's push day: …").
+
+Agreement corpus, 43 cases (9 new, labelled first; `ref-keep-this-workout`
+relabelled by the decision, not by a result), three runs each side: token F1
+0.82 / 0.75 / 0.78 → 0.91 / 0.85 / 0.88, judged 0.90–0.91 → 0.94 ×3. The live
+case: four-day echo 3/3 → the routine, without the number, 3/3. Kept plans in
+full with their numbers 0/4 → 4/4 ×3 (the Work checklist stored nothing 2/3
+before). Cost cases unchanged ×3: "perfect, I'll do this one" and "let's go
+with that meal plan" keep the outline; "the four-day one" keeps its number;
+"ask her" keeps Priya; "remember that I have a bad left knee" stores the knee,
+not the plan. Two forbids I wrote ("runs **5 km** in the evenings", "the
+**3-person** data team") matched the right answer on every run, before and
+after — token matching cannot see the number — and were removed; those cases are
+read, and neither run ever borrowed there.
+
+**A kept plan never retires a belief.** End to end on a throwaway graph (real
+models), the cost showed: judged against the routine, the kept push day came
+back *supersedes* at 0.80–0.98 — "a more detailed version of the general
+workout", a part retiring the whole. A kept plan's supersede is now a forced
+question (`ExtractedFact.kept`; the Inbox says why). Two end-to-end passes: the
+routine stored and disputed against the four-day split (the person decides),
+the plan stored in full, nothing retired. Left: the day plan is disputed
+against the whole routine, 2/2 — a false dispute, in the safe direction. And
+when the old belief sits under `self` (filed before §13's rule), the new
+routine never meets it: stored side by side, no dispute.
+
+## 23. Part of a whole; one relationship under two words; a dry run that told the truth
+
+**`self` subjects, and a dry run that missed a dispute.** The live four-day
+split sat on `self`, which meets only `self`, so the routine that replaced it
+was never compared (§22). `recheck.py` now moves a `self` memory onto a subject
+its words name, when they name exactly one the graph knows ("The user is 22"
+stays). On the live Personal graph the dry run proposed one move and nothing
+else; applied after a backup, it also raised a dispute (push-day outline vs the
+four-day split, conflict at 1.00). The dry run had searched with the moved
+memory's old vector, apply with its new one. The dispute was undone by hand —
+the edge each way and the one escalation, nothing else — and the dry run now
+scores moved memories with the vector apply would store (a test fails without
+it).
+
+**Part of a whole.** That dispute was the third live one of its kind: "goes to
+the gym", a day's plan, a kept push day, each judged a conflict with the
+routine it belongs to. One test was added to the judge prompt: is the EXISTING
+memory still true as written once the NEW one is? More detail about one part is
+independent; part still holding is conflict; none, supersedes; a detail that
+differs is a change. Nine held-out cases first (7 Personal, 2 Work, four
+labelled against it), then both corpora twice before and after:
+
+| | Before | After |
+| --- | --- | --- |
+| Personal right (47) | 30 / 29 | 35 / 37 |
+| Personal escalation | 57.5% / 59.6% | 48.9% / 44.7% |
+| Personal stale | 2.1% / 2.1% | 0% / 0% |
+| Work right (61) | 52 / 49 | 51 / 52 |
+| Work escalation | 34.4% / 36.1% | 45.9% / 44.3% |
+| Belief and merge loss | 0% everywhere | 0% everywhere |
+
+Personal: seven stated life changes that used to be asked about now retire
+(breakup, move, vegetarian, budget, a marriage, house to flat — which had been
+stale); the dog walk and both live workout cases store. Cost there: a day plan
+that changed is asked about rather than retired. Work: three disputes it had
+stored are now raised (a second reviewer, a carve-out from the deploy pipeline,
+a tool split by work type); four clear cases now ask ("billing runs on ECS ->
+EKS": "part of the EXISTING memory no longer holds" — the subject read as the
+part that survives). All in the safe direction. A wording without the part /
+none sentences was tried: Work 45–46 right with a stale case, Personal no
+better — dropped.
+
+**One relationship under two words.** With the test, `partner-named-as-girlfriend`
+went from asked to stored, two passes in two: "The user's girlfriend is Sam"
+beside "The user's partner is Priya", judged independent. The one-at-a-time
+rule fired only on one spelling of the subject. Meaning cannot widen it — "my
+sister" (0.77), "my colleague" (0.83) and "my friend" (0.85) all meet "my
+partner" — so it reads a list of words for the same slot (girlfriend, wife,
+spouse… for partner; flat, apartment, house for home; employer for job). Two
+passes: asked again, sister / brother cities still stored.
+
 ---
 
 ## What this changes

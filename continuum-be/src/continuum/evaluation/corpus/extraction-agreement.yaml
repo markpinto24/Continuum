@@ -404,8 +404,11 @@
     Legs: squats, leg press, calves. Day 4 Full body: compound lifts. Day 5 Push.
     Day 6 Pull. Day 7 rest.
   text: keep this workout as my active current workout
+  # Relabelled 2026-11-02, by decision, not by result: an explicit keep stores
+  # the plan in full (Iteration 10). Was: "follows a 6-day split of push, pull,
+  # legs, full body, push and pull".
   expect:
-    - content: The user follows a 6-day split of push, pull, legs, full body, push and pull
+    - content: The user follows a 6-day split - push (bench, incline dumbbell press, shoulder press), pull (deadlifts, rows, curls), legs (squats, leg press, calves), full body compound lifts, push, pull, then a rest day
       category: routine
       subject: gym
   forbid:
@@ -538,3 +541,155 @@
   forbid:
     - The user eats oats with whey, chicken rice bowl, paneer tikka, egg bhurji, dal and rice and grilled fish
   tags: [held-out, long-plan]
+
+# =============================================================================
+# Iteration 10 (2026-11-02) — labelled before the first run.
+# A reply that borrows a detail from the answer it replies to (found in use
+# 2026-10-28), and an explicit keep of a plan — decided 2026-11-02: kept in full.
+# =============================================================================
+
+- id: borrowed-routine-number
+  mode: personal
+  why: >
+    Found in use. The answer's "four-day split" came from memory; the reply
+    states a different routine with no number. The extractor wrote "follows a
+    four-day workout split with push pull legs...", three runs in three, and the
+    duplicate shortcut folded it into the stale four-day belief. The routine is
+    the user's; the number is not. (Read the output: the number is the point.)
+  context: >
+    Based on your last confirmed information, you follow a four-day workout
+    split [1]. This means you have structured your workouts over four days of
+    the week, with specific muscle groups targeted each day.
+  text: i do push pull legs upper lower arms workout
+  expect:
+    - content: The user does a push, pull, legs, upper, lower and arms workout split
+      category: routine
+      subject: workout
+  forbid:
+    - The user follows a four-day workout split
+  tags: [held-out, borrowed, found-in-use]
+
+- id: borrowed-run-distance
+  mode: personal
+  why: >
+    The same shape with a distance. "5 km" came from memory; the reply changes
+    only when. "Runs 5 km in the evenings" would be a guess told as their word.
+  context: >
+    You mentioned you run 5 km every morning [1]. Would you like a plan to build
+    up to 10 km?
+  text: i run in the evenings now
+  expect:
+    - content: The user runs in the evenings
+      category: routine
+      subject: running
+  # No forbid: "runs 5 km in the evenings" shares enough tokens with the right
+  # answer that token matching flagged it on every run, before and after (the
+  # number is invisible to it). Read the output.
+  tags: [held-out, borrowed]
+
+- id: borrowed-team-size-work
+  mode: workspace
+  why: >
+    The Work shape: a team size from memory must not ride along with the user's
+    statement of which team they are on now.
+  context: >
+    According to your notes you're on the 3-person platform team [1], which owns
+    the deploy pipeline. Want me to draft the on-call rota?
+  text: i moved to the data team last week
+  expect:
+    - content: The user moved to the data team last week
+      category: fact
+  # No forbid, for the same reason as borrowed-run-distance: the token matcher
+  # flagged the right answer. Read the output.
+  tags: [held-out, borrowed, workspace]
+
+- id: borrowed-own-number-kept
+  mode: personal
+  why: >
+    Cost case, labelled against the guard: the reply names the number itself,
+    so it is the user's own and must stay.
+  context: >
+    You could do a three-day full-body routine, or a four-day upper/lower split.
+  text: the four-day one, mondays to thursdays
+  expect:
+    - content: The user follows a four-day upper/lower split from Monday to Thursday
+      category: routine
+      subject: workout
+  tags: [held-out, borrowed, expected-cost]
+
+- id: borrowed-name-in-a-choice
+  mode: personal
+  why: >
+    Cost case: a choice taken from the answer names someone the reply calls
+    only "her". It is adopted, not the user's own words, and must survive.
+  context: >
+    For the reference letter, I'd ask Priya - she managed you the longest.
+  text: good idea, i'll ask her
+  expect:
+    - content: The user will ask Priya for the reference letter
+      category: decision
+  tags: [held-out, borrowed, expected-cost]
+
+- id: keep-push-day-plan
+  mode: personal
+  why: >
+    Found in use: "keep this" after a push-day plan stored only "a Push Day plan
+    focusing on chest, shoulders and triceps", and a later session could not say
+    what the exercises were. Decided 2026-11-02: an explicit keep stores the
+    plan in full, as one memory.
+  context: >
+    Here's a Push Day for you. Chest: bench press 4 sets of 8-12, push-ups 3
+    sets to failure. Shoulders: overhead press 4 sets of 8-10, lateral raises.
+    Triceps: close-grip bench press 4 sets of 8-12, skull crushers 3 sets of
+    10-15. Finish with chest and shoulder stretches.
+  text: it is perfect for me keep this
+  expect:
+    - content: The user's push day is bench press 4x8-12, push-ups 3 sets to failure, overhead press 4x8-10, lateral raises, close-grip bench press 4x8-12 and skull crushers 3x10-15
+      category: routine
+      subject: push-day
+  tags: [held-out, keep, found-in-use]
+
+- id: keep-save-breakfasts
+  mode: personal
+  why: >
+    "Save" is the same act as "keep": the list is what they asked to keep.
+  context: >
+    A simple weekday breakfast rotation: Monday poha, Tuesday oats with banana,
+    Wednesday besan chilla, Thursday idli with chutney, Friday egg bhurji toast.
+  text: nice, save this
+  expect:
+    - content: The user's weekday breakfasts are poha on Monday, oats with banana on Tuesday, besan chilla on Wednesday, idli with chutney on Thursday and egg bhurji toast on Friday
+      category: routine
+      subject: breakfast
+  tags: [held-out, keep]
+
+- id: keep-release-checklist-work
+  mode: workspace
+  why: >
+    The Work shape: "remember this checklist" keeps the steps, in order.
+  context: >
+    Release checklist: freeze merges on Monday, cut the release branch Tuesday
+    at 10am, run the smoke suite, tag the build, deploy to staging, then to
+    production on Wednesday morning.
+  text: remember this checklist
+  expect:
+    - content: The team's release checklist is to freeze merges on Monday, cut the release branch Tuesday at 10am, run the smoke suite, tag the build, deploy to staging, then deploy to production on Wednesday morning
+      category: decision
+  tags: [held-out, keep, workspace]
+
+- id: keep-remember-own-fact
+  mode: personal
+  why: >
+    Cost case: "remember that" followed by the user's own fact keeps that fact,
+    not the plan in the answer.
+  context: >
+    Here's a 3-day full-body plan: squats, bench press and rows on Monday,
+    deadlifts, overhead press and pull-ups on Wednesday, lunges and dips on
+    Friday.
+  text: remember that i have a bad left knee
+  expect:
+    - content: The user has a bad left knee
+      category: health
+  forbid:
+    - The user's plan is squats, bench press and rows on Monday, deadlifts, overhead press and pull-ups on Wednesday
+  tags: [held-out, keep, expected-cost]

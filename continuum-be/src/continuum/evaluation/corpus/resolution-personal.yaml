@@ -685,3 +685,121 @@
     subject: salary
   expect: store
   tags: [held-out-subjects, cost-of-change, money]
+
+# =============================================================================
+# Part of a whole (2026-11-04) — labelled before the first run.
+# Found in use three times: a day's plan, a meal, or "goes to the gym" judged a
+# conflict with the routine it is one part of. Four are labelled against the
+# change (`expected-cost`): a detail that changed IS a change.
+# =============================================================================
+
+- id: part-day-plan-vs-split
+  why: >
+    Found in use: a push day's exercises are one part of the split, and the
+    split still holds. Both are true; asking is noise.
+  existing:
+    content: The user follows a push, pull, legs, upper, lower and arms split
+    category: routine
+    subject: workout
+    age_days: 6
+  incoming:
+    content: The user's push day is bench press 4x8-12, overhead press 4x8-10 and skull crushers 3x10-15
+    category: routine
+    subject: workout
+  expect: store
+  tags: [held-part, found-in-use]
+
+- id: part-outline-vs-four-day
+  why: >
+    Found in use (2026-11-04, conflict at 1.00): a push day focusing on chest,
+    shoulders and triceps fits inside a four-day split. Nothing in it says the
+    split changed.
+  existing:
+    content: The user will follow a four-day workout split for their current routine
+    category: decision
+    subject: workout
+    age_days: 13
+  incoming:
+    content: The user decided on a Push Day workout plan focusing on chest, shoulders, and triceps
+    category: decision
+    subject: workout
+  expect: store
+  tags: [held-part, found-in-use]
+
+- id: part-coding-and-gym-vs-split
+  why: >
+    Found in use (2026-10-22): "goes to the gym" is not contradicted by saying
+    how the gym days are split. The person settled it as both true.
+  existing:
+    content: The user does coding and goes to the gym
+    category: routine
+    subject: self
+    age_days: 6
+  incoming:
+    content: The user will follow a four-day workout split for their current routine
+    category: decision
+    subject: self
+  expect: store
+  tags: [held-part, found-in-use]
+
+- id: part-breakfast-vs-diet
+  why: >
+    Held out: one meal inside the diet it belongs to.
+  existing:
+    content: The user follows a high-protein diet of three meals and two snacks a day
+    category: routine
+    subject: diet
+    age_days: 20
+  incoming:
+    content: The user's breakfast is oats with whey protein
+    category: routine
+    subject: diet
+  expect: store
+  tags: [held-part]
+
+- id: part-day-plan-changed
+  why: >
+    Cost case: the same part, described differently and said with "now". A
+    changed detail is a change, not more detail.
+  existing:
+    content: The user's push day is bench press, overhead press and dips
+    category: routine
+    subject: push-day
+    age_days: 30
+  incoming:
+    content: The user's push day is now incline dumbbell press, lateral raises and skull crushers
+    category: routine
+    subject: push-day
+  expect: retire
+  tags: [held-part, expected-cost]
+
+- id: part-run-distance-changed
+  why: >
+    Cost case: reads like a detail of the Sunday run, but the distance changed.
+    Storing both would leave 5 km believed beside 10 km.
+  existing:
+    content: The user runs 5 km every Sunday
+    category: routine
+    subject: running
+    age_days: 40
+  incoming:
+    content: The user's Sunday run is 10 km at an easy pace
+    category: routine
+    subject: running
+  expect: retire
+  tags: [held-part, expected-cost, numbers]
+
+- id: part-split-gains-a-day
+  why: >
+    Cost case: the split itself changed shape. Not a part of the old one.
+  existing:
+    content: The user follows a push, pull, legs split
+    category: routine
+    subject: workout
+    age_days: 50
+  incoming:
+    content: The user's split is push, pull, legs and an arms day
+    category: routine
+    subject: workout
+  expect: retire
+  tags: [held-part, expected-cost]

@@ -120,6 +120,12 @@ Rules:
 - Prefer "conflict" over "supersedes" whenever you are unsure whether any part
   of the EXISTING memory survives. Escalating is cheap; erasing a true belief
   is not.
+- Ask whether the EXISTING memory is still true exactly as written once the NEW
+  statement is true. If it is - the NEW one only adds detail about one part of
+  it (one day of a plan, one meal of a diet, one step of a process) - they are
+  "independent". If only part of it still holds, "conflict". If none of it
+  does, "supersedes". A detail that differs from one the EXISTING memory
+  states is a change, not more detail.
 
 Report `confidence` as your genuine certainty in the chosen relation, 0.0 to 1.0.
 Be honest — low confidence is expected and useful, and a low score routes the
@@ -149,6 +155,13 @@ the reason first, then choose the relation that reason supports:
 #     required the new statement to be "clearly the later position" — so on the
 #     clearest reversals it wrote "without clear indication of which is later"
 #     and escalated. Conflict now means partial overlap, not unknown order.
+#
+# And one test (FINDINGS §23): is the EXISTING memory still true as written? A
+# day's plan was judged a conflict with the split it is part of, at 1.00, three
+# times live. With the test, both corpora twice: Personal escalation 58-60% ->
+# 45-49%, stated life changes retire, no loss; Work asks more (34-36% -> 44-46%),
+# catching three disputes it had stored. A wording without the "part holds /
+# none holds" sentences was tried and dropped: Work 51-52 right -> 45-46.
 
 
 class ResolutionService:
@@ -307,6 +320,20 @@ class ResolutionService:
                     forced_escalation=True,
                     **provenance,
                 )
+            # A kept plan is the assistant's list copied out; "keep this" says to keep
+            # it, not that it replaces anything. The judge called a kept push day "a
+            # more detailed version" of the whole split and superseded it at 0.80-0.98
+            # (FINDINGS §22) — a part retiring the whole. The person says which holds.
+            if fact.kept:
+                return Resolution(
+                    Verdict.CONFLICT,
+                    target=candidate,
+                    reason=f"{reason} (a plan you asked to keep, not a change — escalated)",
+                    judge_confidence=confidence,
+                    escalated_from=Verdict.SUPERSEDES,
+                    forced_escalation=True,
+                    **provenance,
+                )
             if (
                 self.settings.person_supersede_requires_change_language
                 and is_role_statement(fact, candidate)
@@ -381,7 +408,7 @@ class ResolutionService:
                 Verdict.CONFLICT,
                 target=candidate,
                 reason=(
-                    f"{reason} (one {candidate.subject} at a time, and these name two — "
+                    f"{reason} (one {_slot(candidate.subject)} at a time, and these name two — "
                     "escalated)"
                 ),
                 judge_confidence=confidence,
@@ -757,13 +784,29 @@ def _describes_a_role(text: str, roles: frozenset[str] = _ROLES) -> bool:
 # time (services/extraction.py), so that a new partner, home or job meets the old.
 SINGLE_HOLDER_SUBJECTS = frozenset({"partner", "home", "job"})
 
+# The words that name the same one-at-a-time slot. The extractor does not always
+# write "partner": "The user's girlfriend is Sam" came back as `girlfriend`, and
+# beside "The user's partner is Priya" the judge called it independent, two
+# passes in two (FINDINGS §23). Meaning cannot draw this line — "my sister",
+# "my colleague" and "my friend" all meet "my partner" (0.77-0.85, bge-m3) — so
+# it is a list: words for the same relationship, never words for a related one.
+_SLOTS = {
+    "partner": frozenset({"partner", "girlfriend", "boyfriend", "wife", "husband", "spouse",
+                          "fiance", "fiancee", "fiancé", "fiancée"}),
+    "home": frozenset({"home", "flat", "apartment", "house"}),
+    "job": frozenset({"job", "employer"}),
+}
+
+
+def _slot(subject: str | None) -> str | None:
+    return next((slot for slot, words in _SLOTS.items() if subject in words), None)
+
 
 def holds_one_at_a_time(fact: ExtractedFact, existing: Memory) -> bool:
     return (
         mode_of(existing.user_id) is Mode.PERSONAL
-        and fact.subject is not None
-        and fact.subject == existing.subject
-        and fact.subject in SINGLE_HOLDER_SUBJECTS
+        and _slot(fact.subject) is not None
+        and _slot(fact.subject) == _slot(existing.subject)
     )
 
 
@@ -826,6 +869,17 @@ def _tokens(text: str) -> dict[str, str]:
         if token:
             out.setdefault(token.lower(), token)
     return out
+
+
+def material_words(text: str) -> set[str]:
+    """The normalised tokens of `text` that can flip what it means — the ones
+    `material_difference` compares."""
+    return {norm for norm, original in _tokens(text).items() if _is_material(norm, original)}
+
+
+def word_tokens(text: str) -> set[str]:
+    """Every normalised token of `text`, tokenised as `material_words` does."""
+    return set(_tokens(text))
 
 
 def _is_material(norm: str, original: str) -> bool:

@@ -8,11 +8,14 @@ an echo from counting as evidence.
 
 from __future__ import annotations
 
+import pytest
+
 from continuum.models.memory import ExtractedFact, MemoryCategory, MemoryStatus, Mode
 from continuum.models.schemas import ChatRequest, IngestRequest, Message
 from continuum.services.agreement import (
     PROPOSAL_MAX_CHARS,
     adopted_only,
+    asks_to_keep,
     extract_turn,
     reply_transcript,
 )
@@ -261,7 +264,7 @@ async def test_a_choice_that_only_says_this_is_asked_for_once_more():
                  C.ROUTINE, "gym")
     extractor = Scripted([vague], [named])
 
-    [kept] = await extract_turn(extractor, reply="keep this workout as my active current workout",  # type: ignore[arg-type]
+    [kept] = await extract_turn(extractor, reply="make this workout my active current workout",  # type: ignore[arg-type]
                                 proposal=SPLIT_ANSWER, mode=Mode.PERSONAL)
 
     assert kept.content == named.content
@@ -273,7 +276,7 @@ async def test_if_the_retry_is_still_vague_the_first_answer_stands():
     vague = fact("The user keeps this workout as their active current workout", C.ROUTINE, "gym")
     still = fact("The user will follow that plan", C.ROUTINE, "gym")
     [kept] = await extract_turn(Scripted([vague], [still]),  # type: ignore[arg-type]
-                                reply="keep this workout as my active current workout",
+                                reply="make this workout my active current workout",
                                 proposal=SPLIT_ANSWER, mode=Mode.PERSONAL)
     assert kept.content == vague.content  # never worse than before; Undo is there
 
@@ -319,3 +322,153 @@ async def test_an_unprompted_maybe_never_makes_a_fact_or_a_dose_pending():
     ])
     assert await extract_turn(extractor, reply="maybe I should take creatine",  # type: ignore[arg-type]
                               proposal=None, mode=Mode.PERSONAL) == []
+
+
+# --- Found in use, 2026-10-28: a borrowed number, and "keep this" (FINDINGS §22) --------
+
+
+FOUR_DAY = (
+    "Based on your last confirmed information, you follow a four-day workout split [1]. "
+    "Want help planning the sessions?"
+)
+PPL_SIX = "i do push pull legs upper lower arms workout"
+ROUTINE = fact("The user follows a push pull legs upper lower arms workout schedule",
+               C.ROUTINE, "workout")
+
+
+async def test_a_number_the_reply_never_said_sends_it_to_be_read_alone():
+    blended = fact("The user follows a four-day workout split with push pull legs upper "
+                   "lower arms workouts", C.ROUTINE, "workout")
+    extractor = Scripted([blended], [ROUTINE])
+
+    [kept] = await extract_turn(extractor, reply=PPL_SIX, proposal=FOUR_DAY,  # type: ignore[arg-type]
+                                mode=Mode.PERSONAL)
+
+    assert kept.content == ROUTINE.content and not kept.adopted
+    # Read again, told exactly which words were the assistant's.
+    assert '"four-day" is what the assistant said' in extractor.transcripts[1]
+
+
+async def test_if_the_retry_borrows_again_the_reply_is_read_alone():
+    echo = fact("The user follows a four-day workout split", C.ROUTINE, "workout")
+    extractor = Scripted([echo], [echo.model_copy()], [ROUTINE])
+    [kept] = await extract_turn(extractor, reply=PPL_SIX, proposal=FOUR_DAY,  # type: ignore[arg-type]
+                                mode=Mode.PERSONAL)
+    assert kept.content == ROUTINE.content
+    assert extractor.transcripts[2] == PPL_SIX  # no answer beside it this time
+
+
+async def test_a_reply_that_says_nothing_without_the_borrowed_detail_stores_nothing():
+    # Safer than the echo: the stale belief is not reinforced by its own words.
+    echo = fact("The user follows a four-day workout split", C.ROUTINE, "workout")
+    assert await extract_turn(Scripted([echo], [], []), reply=PPL_SIX,  # type: ignore[arg-type]
+                              proposal=FOUR_DAY, mode=Mode.PERSONAL) == []
+
+
+async def test_an_echo_of_what_the_answer_cited_is_not_a_choice():
+    # The other shape, three runs in three: the reply's routine dropped, the
+    # cited belief "adopted" — and folded into itself as a duplicate.
+    echo = fact("The user follows a four-day workout split", C.ROUTINE, "workout")
+    [kept] = await extract_turn(Scripted([echo], [ROUTINE]), reply=PPL_SIX,  # type: ignore[arg-type]
+                                proposal=FOUR_DAY, mode=Mode.PERSONAL)
+    assert kept.content == ROUTINE.content
+
+
+async def test_a_number_the_reply_says_itself_is_the_users():
+    own = fact("The user follows a four-day upper/lower split from Monday to Thursday",
+               C.ROUTINE, "workout")
+    extractor = Scripted([own])
+    kept = await extract_turn(extractor, reply="the four-day one, mondays to thursdays",  # type: ignore[arg-type]
+                              proposal="A three-day full body, or a four-day upper/lower split.",
+                              mode=Mode.PERSONAL)
+    assert [f.content for f in kept] == [own.content]
+    assert len(extractor.transcripts) == 1
+
+
+async def test_a_suggestions_own_details_are_what_adopting_it_means():
+    choice = fact("The user will ask Priya for the reference letter", C.DECISION, "letter")
+    extractor = Scripted([choice])
+    [kept] = await extract_turn(extractor, reply="good idea, i'll ask her",  # type: ignore[arg-type]
+                                proposal="For the letter, I'd ask Priya - she managed you longest.",
+                                mode=Mode.PERSONAL)
+    assert kept.adopted and "Priya" in kept.content
+    assert len(extractor.transcripts) == 1
+
+
+@pytest.mark.parametrize(
+    ("reply", "keeps"),
+    [
+        ("keep this", True),
+        ("it is perfect for me keep this", True),
+        ("nice, save this", True),
+        ("remember this checklist", True),
+        ("keep this workout as my active current workout", True),
+        ("save this for later", True),
+        # Their own fact, not the answer.
+        ("remember that i have a bad left knee", False),
+        ("keep it up", False),
+        ("keep that in mind", False),
+        ("keep this workout simple", False),
+        ("don't save this", False),
+        ("no, don't keep this", False),
+        ("maybe save this", False),  # a maybe, not a keep
+        ("perfect, I'll do this one", False),  # adopting is not keeping the list
+    ],
+)
+def test_what_asks_for_the_answer_to_be_kept(reply: str, keeps: bool):
+    assert asks_to_keep(reply) is keeps
+
+
+PUSH_DAY = ("Push Day. Chest: bench press 4 sets of 8-12, push-ups to failure. "
+            "Triceps: skull crushers 3 sets of 10-15.")
+FULL = "The user's push day is bench press 4x8-12, push-ups to failure and skull crushers 3x10-15"
+
+
+async def test_keep_this_stores_the_plan_in_full_in_place_of_its_outline():
+    outline = fact("The user decided on a Push Day plan focusing on chest and triceps",
+                   C.DECISION, "push-day")
+    extractor = Scripted([outline], [fact(FULL, C.ROUTINE, "push-day")])
+
+    [kept] = await extract_turn(extractor, reply="it is perfect for me keep this",  # type: ignore[arg-type]
+                                proposal=PUSH_DAY, mode=Mode.PERSONAL)
+
+    assert kept.content == FULL
+    assert kept.adopted and kept.kept and not kept.tentative
+    assert kept.source_excerpt == "it is perfect for me keep this"
+    # The reply was read as always; the plan by its own prompt, from the answer.
+    assert extractor.systems[0] is None and "asked to\nkeep" in extractor.systems[1]
+    assert extractor.transcripts[1] == PUSH_DAY
+
+
+async def test_a_plan_copied_out_verbatim_says_whose_it_is():
+    copied = fact("Chest: bench press 4 sets of 8-12. Triceps: skull crushers 3x10-15",
+                  C.ROUTINE, "push-day")
+    [kept] = await extract_turn(Scripted([], [copied]), reply="keep this",  # type: ignore[arg-type]
+                                proposal=PUSH_DAY, mode=Mode.PERSONAL)
+    assert kept.content == "The user's push day: Chest: bench press 4 sets of 8-12. " \
+        "Triceps: skull crushers 3x10-15"
+
+
+async def test_a_keep_leaves_what_the_user_said_in_their_own_words():
+    own = fact("The user trains at 6am", C.ROUTINE, "training")
+    outline = fact("The user decided on a Push Day plan", C.DECISION, "push-day")
+    kept = await extract_turn(Scripted([own, outline], [fact(FULL, C.ROUTINE, "push-day")]),  # type: ignore[arg-type]
+                              reply="keep this, i train at 6am", proposal=PUSH_DAY,
+                              mode=Mode.PERSONAL)
+    assert [f.content for f in kept] == [own.content, FULL]
+
+
+async def test_a_keep_that_finds_no_plan_leaves_the_outline():
+    outline = fact("The user decided on a Push Day plan", C.DECISION, "push-day")
+    [kept] = await extract_turn(Scripted([outline], []), reply="keep this",  # type: ignore[arg-type]
+                                proposal=PUSH_DAY, mode=Mode.PERSONAL)
+    assert kept.content == outline.content
+
+
+async def test_a_kept_plan_naming_a_dose_is_not_stored_from_the_answer():
+    outline = fact("The user decided on a morning stack", C.DECISION, "morning")
+    dosed = fact("The user's morning stack is 5 g of creatine and a coffee", C.ROUTINE, "morning")
+    [kept] = await extract_turn(Scripted([outline], [dosed]), reply="save this",  # type: ignore[arg-type]
+                                proposal="Morning: 5 g creatine, then coffee.",
+                                mode=Mode.PERSONAL)
+    assert kept.content == outline.content

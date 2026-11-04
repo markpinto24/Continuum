@@ -32,6 +32,9 @@ export function describeEscalation(escalation: Escalation | null): string | null
     if (escalation.reason.includes('a health fact only changes with your say-so')) {
       return 'Health never changes without asking you, however sure the resolver is.'
     }
+    if (escalation.reason.includes('a plan you asked to keep')) {
+      return 'You asked to keep a plan; that says to keep it, not that it replaces this — so it asked which holds, or whether both do.'
+    }
     return 'Asked because this names a new holder for a role that is often shared, and nothing said the earlier one stopped.'
   }
   if (escalation.judge_relation === 'supersedes') {

@@ -21,7 +21,7 @@ from continuum.core.logger import get_logger
 from continuum.models.memory import CHOICE_CATEGORIES, ExtractedFact, Mode
 from continuum.models.schemas import IngestRequest, Message
 from continuum.services.extraction import FactExtractor
-from continuum.services.resolution import HEALTH_WORDS
+from continuum.services.resolution import HEALTH_WORDS, material_words, word_tokens
 
 log = get_logger(__name__)
 
@@ -66,11 +66,16 @@ _REPLY_GUIDE = """How to read this reply:
   think about it", "not sure yet"); otherwise "tentative": false."""
 
 
-def reply_transcript(reply: str, proposal: str) -> str:
-    """What the extractor reads for a reply. The labels say whose words are whose."""
+def _cut(proposal: str) -> str:
     answer = proposal.strip()
     if len(answer) > PROPOSAL_MAX_CHARS:
         answer = answer[:PROPOSAL_MAX_CHARS].rsplit(" ", 1)[0] + " …"
+    return answer
+
+
+def reply_transcript(reply: str, proposal: str) -> str:
+    """What the extractor reads for a reply. The labels say whose words are whose."""
+    answer = _cut(proposal)
     return (
         "The assistant had said (context only - the assistant's words, not the "
         "user's):\n"
@@ -110,7 +115,8 @@ async def extract_turn(
         return await _unprompted_maybe(extractor, reply=reply, mode=mode)
     transcript = reply_transcript(reply, proposal)
     facts = await extractor.extract(transcript, mode=mode)
-    vague = [f for f in facts if points_at_something(f.content)]
+    plan = await _kept_plan(extractor, reply=reply, proposal=proposal, mode=mode)
+    vague = [] if plan else [f for f in facts if points_at_something(f.content)]
     if vague:
         # "Keep this workout as my active workout" came back as "the user keeps
         # this workout as their active workout", three runs in three: true, and
@@ -120,7 +126,166 @@ async def extract_turn(
         retry = await extractor.extract(transcript + _name_it(vague), mode=mode)
         if retry and not any(points_at_something(f.content) for f in retry):
             facts = retry
-    return adopted_only(facts, reply=reply)
+    facts = adopted_only(facts, reply=reply)
+    if plan:
+        # The plan in full takes the place of its outline, and of a "keeps this
+        # workout" that names nothing; what the user said in their own words stays.
+        facts = [f for f in facts if not f.adopted and not points_at_something(f.content)]
+        facts += plan
+    return await _without_borrowed(
+        extractor, facts, reply=reply, proposal=proposal, transcript=transcript, mode=mode
+    )
+
+
+# "keep this", "save this plan", "remember this checklist": the person asks for
+# the answer itself to be kept, and it is, in full (decided 2026-11-02; found in
+# use: "keep this" after a push day stored only "focusing on chest, shoulders and
+# triceps", and the next session could not say what the exercises were). Not
+# "remember that I have…" — their own fact — nor "keep it up", "keep that in mind".
+_KEEP = re.compile(
+    r"\b(?:keep|save|store|remember|bookmark)\s+(?:this|that|it|these|those)"
+    r"(?:\s+(?:one|plan|workout|routine|list|checklist|schedule|recipe|menu|day|split|"
+    r"program|programme))?(?=\s*(?:$|[.,!;)])|\s(?:for|as|please|thanks|thank)\b)",
+    re.IGNORECASE,
+)
+_NOT_KEEP = re.compile(
+    r"\b(?:don'?t|do not|no need to|never|not)\s+(?:\w+\s+)?(?:keep|save|store|remember)\b",
+    re.IGNORECASE,
+)
+
+
+def asks_to_keep(reply: str) -> bool:
+    """The reply asks for the answer to be kept — decided, not hedged, not a no."""
+    return (
+        bool(_KEEP.search(reply))
+        and not _NOT_KEEP.search(reply)
+        and not is_refusal(reply)
+        and not is_hedged(reply)
+    )
+
+
+# Its own prompt, like the unprompted maybe's: the reply guide's "not every
+# exercise or step" stays as measured for every reply that is not a keep (§14).
+# A template, no worked answer (§9).
+_KEEP_PROMPT = """You read a plan or list the assistant wrote, which the person asked to
+keep.
+
+Write it out once, in full, as one third-person statement about {who}: every
+item, with its numbers (sets, reps, times, amounts) and its days or order, and
+nothing the plan does not say. Leave out greetings, advice and offers of help.
+
+Respond with JSON only, in exactly this shape - an empty list when there is no
+plan or list in it:
+{{"memories": [{{"content": "<the plan, in full>", "category": "<one of: {categories}>",
+               "subject": "<a short slug for what the plan is for>"}}]}}"""
+
+_KEEP_PROMPTS = {
+    Mode.PERSONAL: _KEEP_PROMPT.format(
+        who='the user ("The user\'s ...")', categories="routine, decision, goal, preference"
+    ),
+    Mode.WORKSPACE: _KEEP_PROMPT.format(
+        who='the team ("The team\'s ...")', categories="decision"
+    ),
+}
+
+
+async def _kept_plan(
+    extractor: FactExtractor, *, reply: str, proposal: str, mode: Mode
+) -> list[ExtractedFact]:
+    """The answer, kept in full, when the reply asks for that — else nothing."""
+    if not asks_to_keep(reply):
+        return []
+    facts = await extractor.extract(_cut(proposal), mode=mode, system=_KEEP_PROMPTS[mode])
+    # One plan, a choice, and never a dose: health is told in the person's words.
+    kept = [f for f in facts if f.category in CHOICE_CATEGORIES and not names_a_dose(f.content)]
+    for fact in kept[:1]:
+        if not fact.content.lower().startswith(("the user", "the team")):
+            # Copied out verbatim — "Chest: bench press 4 sets of 8-12…", three runs
+            # in three. Said whose plan it is, so it reads as a memory in a prompt.
+            whose = "The user's" if mode is Mode.PERSONAL else "The team's"
+            what = (fact.subject or "plan").replace("-", " ")
+            fact.content = f"{whose} {what}: {fact.content}"
+        fact.adopted = fact.kept = True
+        fact.tentative = False
+        fact.source_excerpt = reply.strip()
+        log.info("agreement.plan_kept")
+    return kept[:1]
+
+
+# A sentence the answer cites a memory in: "you follow a four-day split [1]".
+_CITED = re.compile(r"[^.!?\n]*\[\d+\][^.!?\n]*")
+
+
+def borrowed_details(content: str, *, reply: str, source: str) -> set[str]:
+    """Numbers, names and negations in `content` that `source` says and the
+    reply does not."""
+    said = {_stem(w) for w in word_tokens(reply)}
+    there = {_stem(w) for w in word_tokens(source)}
+
+    def in_reply(word: str) -> bool:
+        parts = [p for p in word.split("-") if p]
+        return _stem(word) in said or (len(parts) > 1 and all(_stem(p) in said for p in parts))
+
+    return {w for w in material_words(content) if not in_reply(w) and _stem(w) in there}
+
+
+async def _without_borrowed(
+    extractor: FactExtractor,
+    facts: list[ExtractedFact],
+    *,
+    reply: str,
+    proposal: str,
+    transcript: str,
+    mode: Mode,
+) -> list[ExtractedFact]:
+    """Read the reply again when a fact carries a detail it never said.
+
+    Found in use (2026-10-28, FINDINGS §22): "i do push pull legs upper lower arms
+    workout", after "you follow a four-day workout split [1]", came back as
+    "follows a four-day workout split with push pull legs…", or as the four-day
+    split alone — three runs in three. Within the duplicate band of the stale
+    belief and saying its number, it was folded into it: the new routine lost,
+    the old one reinforced. A fact in the user's own words may take nothing
+    material from the answer; an adopted one nothing from what the answer cited
+    from memory — that is an echo, not a suggestion. A choice's own details
+    ("ask Priya") are what adopting it means, and stay.
+    """
+    cited = " ".join(_CITED.findall(proposal))
+
+    def carries(fact: ExtractedFact) -> set[str]:
+        return borrowed_details(
+            fact.content, reply=reply, source=cited if fact.adopted else proposal
+        )
+
+    carried = {id(f): words for f in facts if (words := carries(f))}
+    if not carried:
+        return facts
+    log.info("agreement.borrowed_detail", count=len(carried))
+    # Told exactly what it borrowed, as with a choice that only says "this": the
+    # reply alone is no substitute — the Personal extractor took nothing from a
+    # bare "i do push pull legs upper lower arms workout", three runs in three,
+    # where this retry wrote the routine four in four.
+    said = "; ".join(f'"{f.content}"' for f in facts if id(f) in carried)
+    words = ", ".join(f'"{w}"' for w in sorted(set().union(*carried.values())))
+    retry = adopted_only(
+        await extractor.extract(
+            transcript
+            + f"\n\nYour last answer recorded {said}. {words} is what the assistant said, "
+            "not the user - the user never said it. Answer again: record what the user "
+            "said, in full, without it.",
+            mode=mode,
+        ),
+        reply=reply,
+    )
+    if not retry or any(carries(f) for f in retry):
+        retry = await extractor.extract(lone_turn(reply, mode), mode=mode)
+        for fact in retry:
+            fact.tentative = fact.tentative or is_hedged(fact.content)
+    kept = [f for f in facts if id(f) not in carried]
+    # The retry reads the whole reply again: what was already kept is not added twice.
+    return kept + [
+        f for f in retry if not any(_share_in(f.content, _words(k.content)) >= 0.8 for k in kept)
+    ]
 
 
 # Read only for a hedged turn the extractor took nothing from. Both extraction

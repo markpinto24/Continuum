@@ -45,9 +45,11 @@ filed as `gym` in one run and `workout` in another. That causes false disputes
       a name and stays apart; the *spelling* rule renames `brother-in-law` to
       `brother` (a qualified form, like sara / sara-chen) — both fixed, FINDINGS
       §21: Work stale 1.7% → 0%, no new false disputes
-- [ ] Follow-up: the Personal single-holder rule (partner / home / job named two
+- [x] Follow-up: the Personal single-holder rule (partner / home / job named two
       ways) fires only on an exact slug — extend it to subjects that meet by
-      meaning (`partner-named-as-girlfriend` stored on one pass of two)
+      meaning (`partner-named-as-girlfriend` stored on one pass of two) — not
+      by meaning (sister, colleague, friend all meet partner): a list of words
+      for the same slot, FINDINGS §23
 
 ## Iteration 2 — A judge that asks less *(deferred 2026-10-26: needs a 14B–32B model download)*
 
@@ -158,7 +160,7 @@ vegetarian", "budget is now 10000") come back as "conflict".
 A Personal chat about a workout routine. The logs and three re-runs of the turn
 show what happened.
 
-- [ ] **A reply borrowed a number from the answer and was merged away.** "i do
+- [x] **A reply borrowed a number from the answer and was merged away.** "i do
       push pull legs upper lower arms workout", replying to an answer that said
       "four-day split", was extracted as "The user follows a **four-day** workout
       split with push pull legs…" (3 runs in 3). Cosine 0.86–0.90 against the
@@ -169,15 +171,29 @@ show what happened.
       negation that is in the answer but not in the reply, re-extract the reply
       alone (it then differs by "four-day" and goes to the judge). Held-out cases
       first, including one where the borrowed detail is right ("yes, the
-      four-day one"); agreement corpus ×3 and both resolution corpora ×2
-- [ ] **"Keep this" stores only the outline of a plan.** "it is perfect for me
+      four-day one"); agreement corpus ×3 and both resolution corpora ×2 —
+      FINDINGS §22: read again, told which words were the assistant's (the reply
+      alone gave nothing); echo 3/3 → the routine 3/3, F1 0.75–0.82 → 0.85–0.91
+- [x] **"Keep this" stores only the outline of a plan.** "it is perfect for me
       keep this" after a push-day plan stored "decided on a Push Day workout plan
       focusing on chest, shoulders, and triceps" — no exercises, sets or reps
       (Iteration 3's "the shape, never the full exercise list"). The next answer
       only looked right because the plan was still in the chat history; a new
       session would invent one. Decide: store the plan as one memory when the
       person explicitly says keep / save, or keep the rule and have "Remembered:"
-      say only the outline was kept
+      say only the outline was kept — decided 2026-11-02: kept in full; 4/4 ×3,
+      outlines unchanged otherwise (FINDINGS §22). A kept plan never supersedes:
+      the judge retired the whole split for a day's plan at 0.80–0.98
+- [x] Follow-up: a kept day plan is disputed against the whole routine (2/2 end
+      to end) — a false dispute, safe direction; "Both are true" settles it —
+      one test in the judge prompt (FINDINGS §23): Personal escalation 58–60% →
+      45–49%, no loss; the live workout cases store
+- [x] Follow-up: memories filed under `self` before §13 never meet a real
+      subject — `recheck.py` moves them when the words name one; applied to the
+      live Personal graph (the four-day split → `workout`), after a backup
+- [ ] Follow-up: Work asks more after §23 (34–36% → 44–46%): "billing runs on
+      ECS → EKS" reads the unchanged subject as the part that survives. Recheck
+      with Iteration 2's stronger judge before touching the wording again
 - [ ] **Answer errors on the 7B model**: cited [1] (the four-day memory) for
       push/pull/legs, called a stated routine "suggests you might be doing", and
       listed five days, dropping arms. Recheck with Iteration 2's stronger model;

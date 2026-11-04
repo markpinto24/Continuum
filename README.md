@@ -88,6 +88,12 @@ never silently overwritten; the narrowing *"Postgres stays for reporting only"*
 lands in the inbox instead of being guessed at; and the chat answer surfaces the
 disagreement rather than picking a side.
 
+The app opens on **Lumen**, the voice assistant, in your mode's colours — rose
+for Personal, cyan for Work. The dock on the left adds **Memories** (the graph)
+and **Chat** beside it — any of the three, in the order Memories | Lumen | Chat
+— and opens the **Inbox**. Ask Lumen aloud or type in the chat: it is one
+conversation, and a long spoken answer is shown in full beside Lumen.
+
 In the graph, **colour is status** (amber means disputed, and nothing else is
 loud), **size is confidence**, and **arrows are supersedes**, drawn new → old. A
 dispute edge has no arrowhead: it is symmetric, and a direction would be the UI
@@ -190,6 +196,6 @@ HTTP contract, and CI runs each only when its own directory changes.
 OpenAI-compatible LLM (Ollama, vLLM, Groq) · `bge-m3` · local Whisper and Piper
 for voice · React 19 · TypeScript · Vite · Tailwind v4 · Three.js.
 
-Backend: 620 tests. Frontend: 207. SDK: 14. None needs a running service; a
+Backend: 657 tests. Frontend: 224. SDK: 14. None needs a running service; a
 nightly job runs the resolution corpora on a real model and fails if a single
 belief is lost.

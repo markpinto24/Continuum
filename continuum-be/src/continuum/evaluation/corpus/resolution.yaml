@@ -1045,3 +1045,38 @@
     subject: auth
   expect: store
   tags: [held-out-subjects, cost-of-change, roles]
+
+# =============================================================================
+# Part of a whole (2026-11-04) — labelled before the first run.
+# =============================================================================
+
+- id: part-release-step
+  why: >
+    One step of the release process, added in detail. The process still holds.
+  existing:
+    content: The release process is to freeze merges on Monday, cut the branch on Tuesday and deploy on Wednesday
+    category: decision
+    subject: release
+    age_days: 30
+  incoming:
+    content: The smoke suite runs on the release branch before the build is tagged
+    category: decision
+    subject: release
+  expect: store
+  tags: [held-part]
+
+- id: part-exception-carved-out
+  why: >
+    Cost case: an exception to a rule for everything, not a detail of it. The
+    narrowing the judge prompt exists for; a human decides how much survives.
+  existing:
+    content: All services deploy through the Jenkins pipeline
+    category: decision
+    subject: deploy
+    age_days: 90
+  incoming:
+    content: The billing service deploys through GitHub Actions
+    category: decision
+    subject: deploy
+  expect: escalate
+  tags: [held-part, expected-cost]

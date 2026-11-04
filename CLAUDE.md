@@ -236,6 +236,7 @@ Continuum/                            ← git root
         │   ├── speakable.ts          markdown → speech; finished sentences
         │   ├── greeting.ts           the session's opening line
         │   ├── pending.ts            answering a pending item (chat, inbox, Lumen)
+        │   ├── lumen-theme.ts        Lumen's colours per mode (rose / cyan) and state
         │   └── memory-style.ts       ★ colour/size vocabulary, shared canvas+DOM
         ├── hooks/                    use-resource, use-recorder, use-dictation,
         │                             use-voice, use-autopilot ★, use-element-size,
@@ -250,7 +251,12 @@ Continuum/                            ← git root
         │   ├── learning-panel.tsx    what your decisions say about the gate
         │   ├── chat-panel.tsx        ★ streaming, citations, disputes, autopilot
         │   ├── turn-outcome.tsx      "Remembered: …" + Undo; questions with options
-        │   ├── autopilot-overlay.tsx ★ Lumen's full-screen HUD: reactor, waveform
+        │   ├── autopilot-overlay.tsx ★ Lumen's stage: reactor, waveform, aurora;
+        │   │                           full screen, docked, or the old overlay
+        │   ├── app-dock.tsx          the navigation: Memories | Lumen | Chat toggles, Inbox
+        │   ├── graph-toolbar.tsx     status chips, kind, age, grouping, "How to read"
+        │   ├── app-cursor.tsx        the cursor: a dot and a ring in the mode's accent
+        │   ├── reactbits/            vendored React Bits: Aurora, Dock, BlurText, ShinyText
         │   ├── voice-settings.tsx    Settings → Voice: pick, hear, speed
         │   └── ui/                   shadcn-style primitives, owned in-repo
         └── App.tsx                   ★ the auth gate, then the workspace
@@ -448,13 +454,15 @@ ingest (note / transcript)
          │     └─ each side names someone the other does not → CONFLICT ★
          ├─ supersedes, p ≥ 0.80 ........ SUPERSEDES   → write edges, retire old
          │     ├─ health on either side (category; words in Personal) → CONFLICT ★
+         │     ├─ a plan the person asked to keep (`kept`) → CONFLICT ★
          │     └─ a role (owns, maintains, reviews, leads… and in Personal
          │        partner, lives, works…) and the new statement never says the
          │        old holder stopped → CONFLICT ★
          ├─ supersedes, p < 0.80 ........ CONFLICT     → escalate to human ★
          ├─ conflict .................... CONFLICT     → escalate to human
          └─ independent ................. store, no edges
-               └─ Personal partner/home/job subject, two different names → CONFLICT ★
+               └─ Personal partner/home/job (or girlfriend, flat, employer…),
+                  two different names → CONFLICT ★
 ```
 
 **The bands belong to the embedding model** — bge-m3: duplicate 0.86, conflict
@@ -499,7 +507,12 @@ survives — never a fact about the user, never anything naming a dose, a
 supplement or a health word. An adopted fact never reinforces (an echo is not
 evidence). A hedged reply makes what it adopts pending; a reply opening with a
 no adopts nothing; a question makes no choice at all. The instructions for this
-live in the reply's own framing, not the system prompts (FINDINGS §12).
+live in the reply's own framing, not the system prompts (FINDINGS §12). A fact
+may not carry a number, name or negation the reply never said — from anywhere in
+the answer if it is the user's own, from a sentence the answer cited if adopted —
+or it is read again, told which words were the assistant's. An explicit "keep
+this" keeps the answer in full, by its own prompt, and never retires a belief
+(FINDINGS §22).
 
 **`auto_supersede_confidence` (default 0.80) is the single most consequential
 setting in the project.** Raise it and you escalate more; lower it and you
@@ -731,6 +744,114 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   synthesis; the server accepts only catalogued voices — it never downloads a
   name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
 - API keys panel now says what a key is for, in plain words
+
+### ✅ Phase 27 — Lumen first (done, this release)
+
+The interface reorganised around Lumen, in shadcn-style primitives plus React
+Bits (`components/reactbits/`, vendored and read before use).
+
+- **Three independent columns** (`Columns` in `app-dock.tsx`): **Memories**,
+  **Lumen** and **Chat**, any of them together, always in that order left to
+  right; every session opens on Lumen alone, and the last column open cannot be
+  closed. On a phone, one at a time. A magnifying **Dock** (React Bits) on the
+  left edge — clear of the chat's composer — toggles them in the same order; a
+  dot marks each one open and stays lit on Lumen while a session runs. The
+  **Inbox** and a **memory's detail** are a sheet over whatever is showing (the
+  dock's inbox; a node or a citation), not tabs — the inbox as a centred popup,
+  a memory as a sheet from the right. "Let Lumen take over" in the chat swaps
+  the chat column for Lumen and starts it. Between two open columns is a
+  divider (`PanelResizer`, a grab pill in the gap): it resizes the column on its
+  right — Lumen beside the graph, the chat beside either — each width
+  remembered on its own, and Lumen never squeezes the graph below 300 px. The
+  graph's toolbar is a container query: in a narrow column a chip is its colour
+  and count
+- **Long answers beside Lumen** (`AnswerCard`): over ~220 characters, the answer
+  is shown in full, formatted, to Lumen's right while the chat is closed — and
+  kept until the next question. With the chat open it is a subtitle: the chat
+  already has the transcript, spoken turns marked
+- **Smoother motion.** The rings turned by CSS animations whose duration changed
+  with Lumen's state, and a running animation given a new duration snaps to a
+  new angle — every state change jumped. Now one animation loop eases each
+  ring's speed and keeps its angle; each ring is its own composited layer; the
+  waveform is a canvas whose bars ease toward their targets; the per-frame SVG
+  blur filter is gone; the Aurora renders at half resolution (it was most of the
+  frame: 21 → 41 fps under software rendering)
+- **One conversation, wherever it is shown.** `ChatPanel` still owns the turns
+  and the voice session; the app hands it a host element (`lumenHost`) and it
+  portals Lumen's stage there — full screen, docked, or nowhere (a running
+  session then shows as a bar above the chat). Without a host it behaves as
+  before, so the voice tests run unchanged
+- **Lumen in each mode's colours** (`lib/lumen-theme.ts`): rose for Personal,
+  cyan for Work, per state; an Aurora behind the reactor; the greeting in
+  BlurText and "Tap to talk" in ShinyText while it waits. It still never starts
+  without a tap
+- Checked in headless Brave on a throwaway instance, desktop and phone, both
+  modes. It found that Aurora painted solid white in development: React Bits'
+  cleanup calls `loseContext()`, and StrictMode's second mount got the dead
+  context back. Removed in the vendored copy
+- **From use, the next day:** the dock's mode and settings did nothing on a
+  click — React Bits opens an item's menu only on a hold, so each now has its
+  own action. The legend card and filter bar stacked in the top-left became one
+  slim **graph toolbar** (`graph-toolbar.tsx`): a chip per status present (each
+  a toggle), kind, age, grouping, the count, and the key in a "How to read"
+  popover. The header and the sign-in page took Lumen's look: round glass
+  controls; an aurora from Work's cyan to Personal's rose behind one glass card
+- **Lumen heard nothing** (its greeting was spoken; no transcription ever
+  reached the server). The `AudioContext` was made after the microphone prompt,
+  outside the click — where Brave can leave it suspended, and a suspended
+  context hears exact silence. It is now made and resumed inside the click, and
+  six seconds of exact silence say so ("no sound from your microphone"). Not
+  reproduced headless — the old code worked there too — so this is the likely
+  cause, not a proven one. Checked end to end with spoken audio as the
+  microphone: heard, transcribed, answered, listening again
+- **A backdrop, not flat black** (`app-backdrop.tsx`): a deep blue-black
+  gradient, two soft glows in the mode's colours (`--backdrop-a/-b`) and a
+  faint grid; the header is tinted from the same colours. Still: it drifted at
+  first, and every glass surface over it (header, dock, chat) re-blurred every
+  frame — the workspace fell to ~5 fps under software rendering, back to 60
+  once it stopped
+- **The cursor** (`app-cursor.tsx`, mounted in `main.tsx` so the sign-in page
+  has it too): a dot and a trailing ring in the mode's accent; the ring grows
+  over anything pressable and shrinks on a press. Native over text fields (the
+  caret) and dividers (the resize arrows); only with a fine pointer, never on
+  touch; no trail with reduced motion
+- **Lumen is an orb, not a reactor.** React Bits' Orb (WebGL, the mode's
+  colours, faster while thinking or speaking) inside a soft organic halo drawn
+  on a canvas — it breathes idle, swells with your voice, pulses as Lumen
+  speaks, a comet circles it while thinking. The tick rings, segmented arcs,
+  grid and scan line are gone; the Orb has the same StrictMode `loseContext()`
+  fix as Aurora
+- 224 frontend tests
+
+### ✅ Phase 26 — Part of a whole (done, this release)
+
+FINDINGS §23. Both corpora, two passes each side, 9 held-out cases first.
+
+- **One test in the judge prompt**: is the EXISTING memory still true as
+  written? A day's plan beside its split is independent. Personal escalation
+  58–60% → 45–49%, right 30/29 → 35/37, stale 2.1% → 0%; Work asks more
+  (34–36% → 44–46%), three missed disputes now raised; 0% loss everywhere
+- **One relationship under two words** (`_SLOTS`): girlfriend / partner, flat /
+  home, employer / job — a list, since sister, colleague and friend all meet
+  partner by meaning
+- **`recheck.py` moves `self` memories** onto the one subject their words name,
+  and its dry run now scores moved memories as apply would (it missed a dispute
+  that apply then raised on the live graph; undone by hand)
+
+### ✅ Phase 25 — A borrowed number, and "keep this" (done, this release)
+
+TODO Iteration 10 (FINDINGS §22), found in use: a stated routine was folded into
+the stale "four-day split" the answer had quoted, and "keep this" kept only an
+outline.
+
+- **No detail the reply never said** (`borrowed_details`, `_without_borrowed`):
+  read again, told which words were the assistant's. Echo 3/3 → the routine 3/3;
+  agreement F1 0.75–0.82 → 0.85–0.91, three runs each side
+- **"Keep this" keeps it in full** (decided 2026-11-02; `asks_to_keep`,
+  `_KEEP_PROMPTS`): 4/4 kept plans with their numbers ×3; adopting without a keep
+  still stores the outline
+- **A kept plan never supersedes** (`ExtractedFact.kept`): end to end, the judge
+  retired the whole split for a day's plan at 0.80–0.98. Now it asks
 
 ### ✅ Phase 24 — Follow-ups from use (done, this release)
 
@@ -1228,6 +1349,17 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
   `three`; when bumping it, check `yarn why three` shows a single copy
   (`@types/three` is only the type definitions).
 
+- **React Bits is vendored, not installed.** Each component is copied from
+  `reactbits.dev/r/<Name>-TS-TW` into `components/reactbits/`, read first, and
+  headed with where it came from and any change ("Continuum:"). Aurora's one
+  change: no `loseContext()` on cleanup (see Phase 27).
+- **Lumen is drawn where the app says, owned by the chat.** Moving the voice
+  session out of `ChatPanel` would split one conversation in two; the stage is
+  a portal into `lumenHost`. The graph is not drawn behind Lumen's own screen.
+- **jsdom has no canvas.** `test/setup.ts` makes `getContext` return null, as a
+  browser without WebGL does; Aurora then draws nothing and ShinyText keeps its
+  plain colour.
+
 **Config**
 - Every tunable goes in `continuum-be/src/continuum/config.py` with a comment on
   what it trades off, in the root `.env.example`, and in
@@ -1291,7 +1423,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 620 tests, no services needed
+uv run pytest                          # 657 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -1367,7 +1499,27 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
   arbitrary models on demand. Only `VOICE_CATALOGUE` (plus the server default).
 - **Auto-starting autopilot audio on page load.** Browsers block both audio and
   a microphone loop without a gesture; it would fail silently. The overlay asks
-  for one tap.
+  for one tap — and Lumen's own screen, though it is where the app opens, waits
+  for "Talk to Lumen".
+- **Creating Lumen's `AudioContext` after an `await`.** Out of the click, a
+  browser that blocks autoplay keeps it suspended and Lumen listens to silence.
+  Make it, and resume it, before the microphone prompt.
+- **Animating anything behind a `backdrop-filter`.** Glass re-blurs whatever
+  moves behind it, every frame: a drifting backdrop under the header, dock and
+  chat took the workspace from 60 fps to ~5. Keep what is behind glass still.
+- **Animating a ring by changing a running CSS animation's duration.** The
+  browser snaps it to the angle the new duration implies: Lumen jumped at every
+  state change. Ease the speed in the animation loop instead.
+- **Making Lumen's columns tabs again.** Memories, Lumen and Chat are on screen
+  together, in that order; the inbox and a memory's detail are sheets.
+- **Leaving a Dock item with a menu but no `onClick`.** React Bits opens menus
+  on a hold, like macOS; a plain click then does nothing at all.
+- **Putting `loseContext()` back in Aurora's cleanup.** StrictMode re-runs the
+  effect on the same canvas; the dead context painted Lumen's screen solid white
+  in development.
+- **Passing a `color-mix()` colour to a React Bits component that reads colours
+  through a canvas** (ShinyText). The canvas does not understand it and draws
+  black; give it hex with alpha (`inkHex`).
 - **Resolving across graphs** — letting a shared decision retire a private
   memory, or a private fact supersede team knowledge. Sharing runs the fact
   through the shared graph's resolver instead; losers come from the winner's
@@ -1565,6 +1717,19 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
 - **Reading a capital at the start of a sentence as a name.** "Payments now run
   through Adyen" is not about someone called Payments; reading it as one kept a
   stated change apart from `billing` and left the old belief stale.
+- **Re-reading a reply on its own when it borrowed a detail.** The Personal
+  extractor takes nothing from a bare "i do push pull legs…" or "i run in the
+  evenings now", three runs in three. Read it again with the answer, told which
+  words were the assistant's; the reply alone is only the second fallback.
+- **Widening the one-at-a-time rule to subjects that meet by meaning.** "My
+  sister", "my colleague" and "my friend" meet "my partner" at 0.77–0.85: every
+  new name for one of them would be a forced dispute. `_SLOTS` lists words for
+  the same relationship only.
+- **Trusting a recheck dry run that does not re-embed what it moves.** It
+  searched with the old vector and reported nothing; apply raised a dispute.
+- **Letting a kept plan supersede because the judge is sure.** "Keep this" says
+  keep it, not that it replaces anything; the judge called a day's plan "a more
+  detailed version" of the whole split at 0.80–0.98.
 - **Letting any preference into HOW THEY LIKE TO BE ANSWERED.** It is the one
   place memory text shapes the answer; only preferences about answering get in,
   and never one carrying a link, a persona or an order (`answer_preferences`).

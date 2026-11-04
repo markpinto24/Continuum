@@ -261,6 +261,42 @@ describe('Lumen', () => {
     expect(api.transcribe).not.toHaveBeenCalled()
   })
 
+  it('opens its ear inside the click, before the microphone prompt', async () => {
+    // Made after the prompt, the click had passed: Brave left the audio context
+    // suspended, and Lumen listened to silence (2026-11-05).
+    const order: string[] = []
+    vi.stubGlobal(
+      'AudioContext',
+      class extends FakeAudioContext {
+        constructor() {
+          super()
+          order.push('audio context')
+        }
+      },
+    )
+    navigator.mediaDevices.getUserMedia = vi.fn(() => {
+      order.push('microphone')
+      return Promise.resolve({ getTracks: () => [track] } as unknown as MediaStream)
+    })
+    await startLumen()
+    expect(order).toEqual(['audio context', 'microphone'])
+  })
+
+  it('says so when no sound at all reaches it, instead of listening for ever', async () => {
+    level = 0 // a muted input from the start: exact silence, which no quiet room produces
+    await startLumen()
+    await advance(10_000)
+    expect(screen.getByRole('alert').textContent).toMatch(/no sound from your microphone/)
+  })
+
+  it('takes exact zeros after real sound for a noise gate in a pause, not a dead microphone', async () => {
+    await startLumen()
+    await advance(3000) // its greeting, over a live microphone
+    level = 0
+    await advance(7000)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('remembers it was on, and asks for a tap before it may listen or speak', async () => {
     localStorage.setItem('continuum.autopilot', '1')
     render(

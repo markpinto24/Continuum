@@ -52,6 +52,11 @@ describe('forced escalations say which rule asked', () => {
         esc({ forced: true, reason: 'x (a health fact only changes with your say-so — escalated)' }),
       ),
     ).toMatch(/Health never changes without asking/)
+    expect(
+      describeEscalation(
+        esc({ forced: true, reason: 'x (a plan you asked to keep, not a change — escalated)' }),
+      ),
+    ).toMatch(/You asked to keep a plan/)
     expect(describeEscalation(esc({ forced: true }))).toMatch(/role that is often shared/)
   })
 })

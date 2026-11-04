@@ -149,6 +149,22 @@ async def test_confident_supersede_is_applied(settings):
     assert result.target is not None
 
 
+async def test_a_kept_plan_never_retires_a_belief_however_sure_the_judge(settings):
+    """A day's plan read as "a more detailed version" of the whole split, at 0.98."""
+    judge = ScriptedJudge("supersedes", 0.98)
+    plan = fact("The user's push day is bench press 4x8-12 and skull crushers 3x10-15",
+                MemoryCategory.ROUTINE, "workout")
+    plan.kept = True
+    result = await service(judge, settings).resolve(
+        plan,
+        [(memory("The user follows a push, pull, legs, upper, lower and arms split",
+                 MemoryCategory.ROUTINE, "workout"), 0.80)],
+    )
+    assert result.verdict is Verdict.CONFLICT
+    assert result.escalated_from is Verdict.SUPERSEDES and result.forced_escalation
+    assert "a plan you asked to keep" in result.reason
+
+
 async def test_unsure_supersede_is_escalated_not_applied(settings):
     """The core safety property: a coin-flip never retires a belief."""
     judge = ScriptedJudge("supersedes", 0.55)

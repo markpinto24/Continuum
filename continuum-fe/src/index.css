@@ -31,6 +31,17 @@
   --color-accent: oklch(0.8 0.11 350);
 }
 
+/* The workspace backdrop's two glows (app-backdrop.tsx): Work's cyan and indigo,
+   Personal's rose and violet — the same families as Lumen in each mode. */
+:root {
+  --backdrop-a: #0891b2;
+  --backdrop-b: #4338ca;
+}
+:root[data-mode='personal'] {
+  --backdrop-a: #be185d;
+  --backdrop-b: #6d28d9;
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
@@ -74,10 +85,32 @@
   :focus-visible {
     outline: none;
   }
+
+  /* The app's own cursor (app-cursor.tsx) stands in for the native one, except
+     where the native one says more: the caret in text, the resize arrows. Only
+     set while it is running — never on a touch screen. */
+  html.has-app-cursor,
+  html.has-app-cursor
+    *:not(
+      input:not([type='checkbox'], [type='radio'], [type='range']),
+      textarea,
+      [contenteditable='true'],
+      [role='separator']
+    ) {
+    cursor: none !important;
+  }
 }
 
 @layer utilities {
   /* Scrollbars that do not punch a bright hole in a dark panel. */
+  /* Rows that scroll sideways on a phone (the graph toolbar), with no bar. */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
   .scrollbar-slim {
     scrollbar-width: thin;
     scrollbar-color: var(--color-border) transparent;
