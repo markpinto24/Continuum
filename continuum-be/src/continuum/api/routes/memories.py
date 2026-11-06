@@ -266,10 +266,23 @@ async def reinforce_memory(
 async def reactivate_memory(
     memory_id: str, principal: CurrentUser, memories: MemoryStoreDep
 ) -> Memory:
-    """Bring an archived or superseded memory back. Nothing here is a one-way door."""
+    """Bring an archived or superseded memory back. Nothing here is a one-way door.
+
+    Only those. A disputed memory is settled in the inbox — restoring one side
+    cleared the dispute on that side alone, decided by nobody — and a pending
+    one is answered yes or no, so it is judged against the graph first. Team
+    knowledge is restored by whoever shared it, or an admin, as it is retired.
+    """
     memory = await _owned(memories, memory_id, principal)
     if memory.redacted_at:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="A forgotten memory cannot return.")
+    if memory.status not in (MemoryStatus.SUPERSEDED, MemoryStatus.ARCHIVED):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Only a replaced or archived memory can be restored. A disputed one is "
+            "settled in the inbox; an undecided one is answered yes or no.",
+        )
+    _may_correct(memory, principal)
     memory.reactivate()
     memory.reinforce()
     return await memories.save(memory)
@@ -370,7 +383,10 @@ async def get_memory(memory_id: str, principal: CurrentUser, memories: MemorySto
     return await _owned(memories, memory_id, principal)
 
 
-@router.post("/{memory_id}/share", response_model=ShareResponse)
+# Sharing runs the shared graph's resolver: an embedding and a judge call.
+@router.post(
+    "/{memory_id}/share", response_model=ShareResponse, dependencies=[Depends(limit_llm_requests)]
+)
 async def share_memory(
     memory_id: str, principal: CurrentUser, memories: MemoryStoreDep, sharing: SharingDep
 ) -> ShareResponse:

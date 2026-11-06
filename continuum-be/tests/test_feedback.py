@@ -296,6 +296,57 @@ async def test_a_button_in_the_web_ui_needs_no_words(feedback):
     assert label.said is None and label.settled_via == "session"
 
 
+async def test_only_a_pair_in_dispute_can_be_settled(feedback):
+    """Any ids used to be accepted as losers: a member could retire team beliefs,
+    or an event, that nobody had disputed."""
+    from continuum.api.deps import get_principal
+    from continuum.api.routes import conflicts
+    from continuum.models.auth import Principal
+
+    old, new = pair()
+    bystander = Memory(user_id="mark", content="The launch happened on Friday",
+                       category=MemoryCategory.EVENT, subject="atlas")
+    app = FastAPI()
+    app.include_router(conflicts.router)
+    app.state.memories = FakeMemories(old, new, bystander)
+    app.state.feedback = feedback
+    app.dependency_overrides[get_settings] = lambda: feedback.settings
+    sign_in_as(app)
+    app.dependency_overrides[get_principal] = lambda: Principal(
+        user_id="mark", email="m@example.com", via="session",
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/conflicts/resolve", json={"winner_id": new.id, "loser_ids": [bystander.id]}
+        )
+    assert response.status_code == 422 and "in dispute" in response.json()["detail"]
+    assert app.state.memories.saved == [] and await feedback.labels("mark") == []
+
+
+async def test_a_decision_made_aloud_keeps_its_words_and_says_so(feedback):
+    said = "the first one — yes, settle it"
+    response, _ = await _resolve_as(feedback, "session", {"said": said, "spoken": True})
+    assert response.status_code == 200
+    [label] = await feedback.labels("mark")
+    assert label.said == said and label.settled_via == "voice"
+
+
+@pytest.mark.parametrize("said", [None, "", "   "])
+async def test_a_decision_made_aloud_without_its_words_changes_nothing(feedback, said):
+    body = {"spoken": True} if said is None else {"said": said, "spoken": True}
+    response, memories = await _resolve_as(feedback, "session", body)
+    assert response.status_code == 422 and "keeps the words" in response.json()["detail"]
+    assert memories.saved == [] and await feedback.labels("mark") == []
+
+
+async def test_an_agent_cannot_claim_a_decision_was_made_aloud(feedback):
+    body = {"said": "the first one", "spoken": True}
+    response, memories = await _resolve_as(feedback, "api_key", body)
+    assert response.status_code == 422 and "voice mode" in response.json()["detail"]
+    assert memories.saved == [] and await feedback.labels("mark") == []
+
+
 async def test_forgetting_a_memory_forgets_the_words_that_settled_it(feedback):
     old, new = pair()
     await feedback.record_resolution(

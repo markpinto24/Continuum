@@ -37,10 +37,23 @@ export function greeting({
   speaker?: string
 }): string {
   const name = displayName(userId)
-  const hello = `${timeOfDay(now)}${name ? `, ${name}` : ''}.${speaker ? ` ${speaker} here.` : ''}`
-  const disputes =
-    openDisputes && openDisputes > 0
-      ? ` ${openDisputes === 1 ? 'One disagreement is' : `${openDisputes} disagreements are`} waiting for your decision — ask me about ${openDisputes === 1 ? 'it' : 'them'}, or settle ${openDisputes === 1 ? 'it' : 'them'} in the inbox.`
-      : ''
-  return `${hello}${disputes} ${mode === 'personal' ? 'What’s on your mind?' : 'What are you working on?'}`
+  const personal = mode === 'personal'
+  // Work is a professional assistant; Personal is relaxed, like a friend.
+  const opening = personal
+    ? `Hey${name ? ` ${name}` : ''}!`
+    : `${timeOfDay(now)}${name ? `, ${name}` : ''}.`
+  const hello = `${opening}${speaker ? ` ${speaker} here.` : ''}`
+  const one = openDisputes === 1
+  const it = one ? 'it' : 'them'
+  // Lumen can settle them aloud, and says how; the chat points to the inbox.
+  const how = speaker
+    ? `say “let’s settle ${it}” and we’ll go through ${it} together, or use the inbox.`
+    : personal
+      ? `ask me about ${it}, or sort ${it} out in the inbox.`
+      : `ask me about ${it}, or settle ${it} in the inbox.`
+  const waiting = personal
+    ? `${one ? 'One thing you told me doesn’t quite match' : `${openDisputes} things you told me don’t quite match`} — ${how}`
+    : `${one ? 'One disagreement is' : `${openDisputes} disagreements are`} waiting for your decision — ${how}`
+  const disputes = openDisputes && openDisputes > 0 ? ` ${waiting}` : ''
+  return `${hello}${disputes} ${personal ? 'What’s on your mind?' : 'What are you working on?'}`
 }

@@ -186,16 +186,32 @@
     text-shadow: 0 1px 3px rgb(0 0 0 / 0.95), 0 0 10px rgb(0 0 0 / 0.7);
   }
 
+  /* Each label leads with its node's status colour, glowing like the node. */
+  .graph-label::before {
+    content: '';
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-right: 6px;
+    border-radius: 9999px;
+    vertical-align: 1px;
+    background: var(--dot);
+    box-shadow: 0 0 6px var(--dot);
+  }
+
   .graph-label[data-mode='strong'] {
     font-size: 12px;
     font-weight: 550;
-    padding: 5px 9px;
+    padding: 5px 10px;
+    border-radius: 9999px;
     color: #f2fbff;
     text-shadow: none;
-    background: rgb(8 18 28 / 0.72);
-    border: 1px solid rgb(255 255 255 / 0.1);
+    background: rgb(8 14 22 / 0.72);
+    border: 1px solid color-mix(in oklch, var(--color-accent) 30%, transparent);
     backdrop-filter: blur(8px);
-    box-shadow: 0 6px 20px -6px rgb(0 0 0 / 0.7);
+    box-shadow:
+      0 6px 20px -6px rgb(0 0 0 / 0.7),
+      0 0 18px -6px color-mix(in oklch, var(--color-accent) 55%, transparent);
   }
 
   .text-gradient {
@@ -309,6 +325,273 @@
     .animate-fade-up {
       animation: none;
     }
+  }
+}
+
+/*
+  Light travelling round the sign-in card's edge. Drawn ABOVE the glass, never
+  behind it: an animated layer behind a backdrop-filter re-blurs every frame.
+  @property sits outside any layer, so the angle can be animated.
+*/
+@property --edge-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes edge-turn {
+  to {
+    --edge-angle: 360deg;
+  }
+}
+
+.edge-light {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--edge-angle),
+    transparent 0deg 200deg,
+    rgb(34 211 238 / 0.9) 250deg,
+    rgb(167 139 250 / 0.9) 290deg,
+    rgb(251 113 133 / 0.9) 325deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: edge-turn 7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edge-light {
+    animation: none;
+    --edge-angle: 140deg;
+  }
+}
+
+/*
+  The chat in Lumen's look (chat-panel.tsx). All of it is inside the chat's
+  glass, never behind it, so nothing here makes the glass re-blur.
+*/
+
+/* Still light inside the panel: the mode's two glows, high and low. */
+.chat-ambient {
+  background:
+    radial-gradient(90% 45% at 85% 0%, color-mix(in oklch, var(--backdrop-a) 22%, transparent), transparent 70%),
+    radial-gradient(70% 40% at 0% 100%, color-mix(in oklch, var(--backdrop-b) 18%, transparent), transparent 70%);
+}
+
+/* The assistant's avatar: a small Lumen orb — a deep centre in a lit ring. */
+.lumen-avatar {
+  background:
+    radial-gradient(circle at 50% 50%, rgb(0 0 0 / 0.55) 0 38%, transparent 40%),
+    radial-gradient(circle at 35% 30%, rgb(255 255 255 / 0.85), transparent 30%),
+    conic-gradient(from 200deg, var(--color-accent), color-mix(in oklch, var(--backdrop-b) 80%, white), var(--color-accent));
+  box-shadow:
+    0 0 14px -2px color-mix(in oklch, var(--color-accent) 70%, transparent),
+    inset 0 0 0 1px rgb(255 255 255 / 0.2);
+}
+
+/* Your messages: lit in the accent, as Lumen's ring is. */
+.chat-bubble-user {
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklch, var(--color-accent) 26%, transparent),
+    color-mix(in oklch, var(--backdrop-b) 22%, transparent)
+  );
+  border: 1px solid color-mix(in oklch, var(--color-accent) 28%, transparent);
+  box-shadow: 0 8px 24px -12px color-mix(in oklch, var(--color-accent) 60%, transparent);
+}
+
+/* The composer: light runs round its edge while you type in it. */
+.composer {
+  position: relative;
+  background: rgb(255 255 255 / 0.035);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.composer:focus-within {
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 0 28px -10px color-mix(in oklch, var(--color-accent) 70%, transparent);
+}
+.composer > .composer-edge {
+  opacity: 0;
+  transition: opacity 0.3s;
+  background: conic-gradient(
+    from var(--edge-angle),
+    color-mix(in oklch, var(--color-accent) 14%, transparent) 0deg 190deg,
+    var(--color-accent) 260deg,
+    color-mix(in oklch, var(--backdrop-b) 60%, white) 305deg,
+    color-mix(in oklch, var(--color-accent) 14%, transparent) 360deg
+  );
+  animation-duration: 4s;
+  /* Sits on the border, as the sign-in card's does. */
+  inset: -1px;
+}
+.composer:focus-within > .composer-edge {
+  opacity: 1;
+}
+/* Asking about a past day: amber, as everywhere the as-of date shows. */
+.composer[data-as-of='true'] {
+  border-color: rgb(251 191 36 / 0.4);
+}
+
+/* The send button: the accent, glowing when there is something to send. */
+.send-button:not(:disabled) {
+  background: linear-gradient(135deg, var(--color-accent), color-mix(in oklch, var(--backdrop-b) 60%, var(--color-accent)));
+  box-shadow: 0 0 16px -2px color-mix(in oklch, var(--color-accent) 70%, transparent);
+}
+
+/*
+  The app cursor (app-cursor.tsx). Its state is data attributes on the root;
+  position, size and shape are written by its animation loop. It sits above
+  every glass surface, so nothing here makes the glass re-blur.
+*/
+.app-cursor {
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
+}
+
+.app-cursor[data-shown='true']:not([data-over='text']) {
+  opacity: 1;
+}
+
+.app-cursor-ring,
+.app-cursor-dot,
+.app-cursor-tail,
+.app-cursor-ripple {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.app-cursor-ring {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+}
+
+/* A faint ring, and the fill it takes over something pressable. */
+.app-cursor-ring::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid color-mix(in oklch, var(--color-accent) 28%, transparent);
+  box-shadow: 0 0 22px -6px color-mix(in oklch, var(--color-accent) 75%, transparent);
+  transition:
+    background-color 0.25s ease-out,
+    border-color 0.25s ease-out;
+}
+
+/* Light running round the ring: the sign-in card's edge light, in miniature. */
+.app-cursor-ring::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--edge-angle),
+    transparent 0deg 60deg,
+    color-mix(in oklch, var(--color-accent) 85%, transparent) 190deg,
+    #fff 235deg,
+    color-mix(in oklch, var(--color-accent) 85%, transparent) 270deg,
+    transparent 340deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: edge-turn 2.4s linear infinite;
+}
+
+.app-cursor[data-over='action'] .app-cursor-ring::before {
+  animation-duration: 1.2s;
+}
+
+.app-cursor[data-over='action'] .app-cursor-ring::after {
+  background-color: color-mix(in oklch, var(--color-accent) 9%, transparent);
+  /* Lighter than the accent: on an accent-coloured button, an accent ring vanished. */
+  border-color: color-mix(in oklch, white 55%, var(--color-accent));
+}
+
+.app-cursor[data-pressed='true'] .app-cursor-ring::after {
+  background-color: color-mix(in oklch, var(--color-accent) 20%, transparent);
+}
+
+/* The core: a white-hot centre in the accent, with a dark edge so it shows on accent buttons. */
+.app-cursor-dot > span {
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 999px;
+  background: radial-gradient(circle, #fff 0 28%, var(--color-accent) 62%);
+  box-shadow:
+    0 0 0 1.5px rgb(0 0 0 / 0.5),
+    0 0 12px 2px color-mix(in oklch, var(--color-accent) 80%, transparent);
+  transition: scale 0.18s ease-out;
+}
+
+.app-cursor[data-pressed='true'] .app-cursor-dot > span {
+  scale: 0.6;
+}
+
+.app-cursor[data-wrap='true'] .app-cursor-dot > span {
+  scale: 0.75;
+}
+
+.app-cursor-tail > span {
+  display: block;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px 1px color-mix(in oklch, var(--color-accent) 70%, transparent);
+}
+
+.app-cursor-ripple {
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 999px;
+  /* Mostly white, with a dark edge: an accent ripple vanished on accent buttons. */
+  border: 2px solid color-mix(in oklch, white 70%, var(--color-accent));
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.25),
+    0 0 18px color-mix(in oklch, var(--color-accent) 70%, transparent);
+  animation: cursor-ripple 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+
+@keyframes cursor-ripple {
+  from {
+    scale: 0.4;
+    opacity: 0.9;
+  }
+  to {
+    scale: 2.3;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-cursor-ring::before {
+    animation: none;
+    --edge-angle: 140deg;
   }
 }
 

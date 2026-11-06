@@ -302,6 +302,15 @@ describe('memories, Lumen and chat, each on its own', () => {
     expect(screen.getByRole('dialog', { name: 'Memory' })).toBeDefined()
   })
 
+  it("a memory's panel closes on a press anywhere else, instead of sitting there empty", async () => {
+    render(<App />)
+    await toggle('Memories')
+    await userEvent.click(await screen.findByRole('button', { name: /Atlas runs on Postgres/ }))
+    expect(screen.getByRole('dialog', { name: 'Memory' })).toBeDefined()
+    await userEvent.click(document.body)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Memory' })).toBeNull())
+  })
+
   it('Lumen takes over from the chat — and says why when it cannot start', async () => {
     render(<App />)
     await toggle('Lumen') // nothing else open: Lumen stays

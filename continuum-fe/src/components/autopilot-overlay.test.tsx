@@ -8,7 +8,7 @@ const LONG =
   'Wednesday is pull: rows, pull-ups and curls. Friday is legs: squats, lunges and calf raises. ' +
   'Sunday is the long run, five kilometres at an easy pace.'
 
-function stage(props: { answerBeside: boolean; answer: string }) {
+function stage(props: { answerBeside: boolean; answer: string; chatOnScreen?: boolean }) {
   render(
     <LumenStage
       phase="working"
@@ -33,9 +33,18 @@ describe("Lumen's long answers", () => {
     expect(screen.getByRole('region', { name: "Lumen's answer" }).textContent).toContain('calf raises')
   })
 
-  it('stay a subtitle when the chat is on screen — it already shows the transcript', () => {
+  it('stay a subtitle when there is no room given for the card', () => {
     stage({ answerBeside: false, answer: LONG })
     expect(screen.queryByRole('region', { name: "Lumen's answer" })).toBeNull()
+    expect(screen.getByText(/easy pace/)).toBeTruthy()
+  })
+
+  it('are not shown at all while the chat beside Lumen shows them', () => {
+    stage({ answerBeside: false, answer: LONG, chatOnScreen: true })
+    expect(screen.queryByRole('region', { name: "Lumen's answer" })).toBeNull()
+    expect(screen.queryByText(/easy pace/)).toBeNull()
+    // What it is doing, and what you asked, stay.
+    expect(screen.getByText(/What is my week\?/)).toBeTruthy()
   })
 
   it('a short answer is a subtitle either way', () => {

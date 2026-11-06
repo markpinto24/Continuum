@@ -277,7 +277,11 @@ export function MemoryDetail({
             Still true
           </Button>
         )}
-        {memory.status !== 'active' && !memory.shared_as && !forgotten && (
+        {/* Only what was replaced or archived comes back: a dispute is settled in
+            the inbox, and a maybe is answered — the server refuses the rest. */}
+        {(memory.status === 'superseded' || memory.status === 'archived') &&
+          !memory.shared_as &&
+          !forgotten && (
           <Button
             size="sm"
             variant="outline"

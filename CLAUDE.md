@@ -71,7 +71,7 @@ simplify an implementation.**
 | Auth | sessions + API keys | argon2id passwords; SHA-256-hashed tokens; no JWT |
 | Dictation | faster-whisper (local Whisper, CPU, int8) | speech to text on the server |
 | Spoken answers | Piper (local neural voice, ONNX, CPU) | read-aloud and autopilot; browser voice only as fallback |
-| Frontend (planned) | React, shadcn/ui, react-bits, Three.js | |
+| Frontend (planned) | React, shadcn/ui, react-bits, Three.js, GSAP | GSAP for layout changes, exits and sequences only |
 
 ### Why we do not use Mem0's `Memory.add()`
 
@@ -236,14 +236,18 @@ Continuum/                            ← git root
         │   ├── speakable.ts          markdown → speech; finished sentences
         │   ├── greeting.ts           the session's opening line
         │   ├── pending.ts            answering a pending item (chat, inbox, Lumen)
+        │   ├── voice-actions.ts      ★ what Lumen acts on aloud: commands, answers, read-backs
         │   ├── lumen-theme.ts        Lumen's colours per mode (rose / cyan) and state
+        │   ├── motion.ts             GSAP, registered once: one feel, presence, AT_REST
         │   └── memory-style.ts       ★ colour/size vocabulary, shared canvas+DOM
         ├── hooks/                    use-resource, use-recorder, use-dictation,
         │                             use-voice, use-autopilot ★, use-element-size,
-        │                             use-mode ★ (Personal | Work, set before any fetch)
+        │                             use-mode ★ (Personal | Work, set before any fetch),
+        │                             use-voice-actions ★ (ask, read back, act on a yes)
         ├── components/
         │   ├── brand.tsx             the mark + wordmark (currentColor)
-        │   ├── auth-screen.tsx       sign-in + first-run admin setup
+        │   ├── auth-screen.tsx       sign-in + first-run admin setup; hero beside the card
+        │   ├── belief-story.tsx      the sign-in page's small graph: a change, a dispute
         │   ├── account-dialog.tsx    API keys, password, users (admins)
         │   ├── belief-graph.tsx      ★ the Three.js scene
         │   ├── memory-detail.tsx     provenance, edges, reinforce/restore
@@ -255,8 +259,10 @@ Continuum/                            ← git root
         │   │                           full screen, docked, or the old overlay
         │   ├── app-dock.tsx          the navigation: Memories | Lumen | Chat toggles, Inbox
         │   ├── graph-toolbar.tsx     status chips, kind, age, grouping, "How to read"
-        │   ├── app-cursor.tsx        the cursor: a dot and a ring in the mode's accent
-        │   ├── reactbits/            vendored React Bits: Aurora, Dock, BlurText, ShinyText
+        │   ├── app-cursor.tsx        the cursor: core + tail, a ring with running light
+        │   ├── blur-words.tsx        Lumen's greeting, word by word out of a blur (GSAP)
+        │   ├── column-heading.tsx    MEMORIES / CHAT in Lumen's voice: tracked caps + pill
+        │   ├── reactbits/            vendored React Bits: Aurora, Dock, Orb, ShinyText
         │   ├── voice-settings.tsx    Settings → Voice: pick, hear, speed
         │   └── ui/                   shadcn-style primitives, owned in-repo
         └── App.tsx                   ★ the auth gate, then the workspace
@@ -745,6 +751,97 @@ recall 25% → 62.5%, judge agreement 44% → 78%.
   name a request makes up. Three voices stay loaded (LRU), ~60 MB each on disk
 - API keys panel now says what a key is for, in plain words
 
+### ✅ Phase 29 — Lumen's manners, each mode's tone, a security pass (done, this release)
+
+**Lumen.** More ways to end, each needing its name — "that's all", "good night",
+"see you later", "I'm done", "stop listening", "go to sleep", ", Lumen" — and,
+only as the whole of what was said and only while it is idle, "goodbye", "bye",
+"good night", "that's all for now". Over its own answer a goodbye still needs
+the name. **Pause:** "give me a minute, Lumen" (or "hold on, Lumen" when idle —
+while it speaks, that still interrupts) keeps the session but answers and shows
+nothing until "Lumen", "I'm back" or a goodbye; what it was waiting for is
+dropped. Lumen's lines (`LUMEN_LINES`) and the greeting follow the mode.
+
+**Tone.** Work is professional (clear, precise, no small talk or emoji);
+Personal is relaxed and friendly. Only the two prompt openings changed; the
+shared rules did not. Measured on `--injection` before and after: identical,
+6 of 36 — the 7B model still ignores answer length (known) and obeyed a pirate
+persona planted as an answer preference, before the change as well. That one
+is now closed: an answer preference carrying a persona, link or opening line
+is withheld from MEMORY too (`carries_an_order`), not only from HOW THEY LIKE
+TO BE ANSWERED; 0 new withholdings across 391 corpus statements. After: 2 of
+36 — every planted instruction ignored 3/3, only answer length still missed.
+
+**Security pass** (an independent review, each finding checked in code first,
+each fix tested):
+- **Sign-in attempts are counted before the password is checked**
+  (`LoginThrottle.attempt`). Counting after the threaded argon2 verify let 20
+  parallel guesses all be checked; now 3 of 3. A right password gives its own
+  attempt back to the address, so a household is never locked out by itself
+- **Only a pair in dispute can be settled**: `/conflicts/resolve` accepted any
+  ids as losers — any member could retire team beliefs, or an event, nobody had
+  disputed. A loser from another graph now refuses the whole decision
+- **Restore only what was replaced or archived** (`/reactivate`): it half-
+  settled a dispute on one side and made a maybe a belief unjudged; team
+  knowledge is restored only by its sharer or an admin. The panel hides it
+- **Sessions**: signing in ends the session the browser already held; changing
+  the password ends every session, this one too, and issues a fresh token;
+  wrong current passwords count against the sign-in lockout
+- **Passwords over 1024 characters refused at the door**, for any email: the
+  check inside sign-in skipped the hash for real accounts — a timing oracle
+- **Bodies over 2 MB refused before they are read** (`BodyLimitMiddleware`;
+  dictation gets `SPEECH_MAX_BYTES` + 1 MB), declared or chunked; Caddy limits
+  `/api` to 12 MB as well. FastAPI read a body before checking the credential
+- **IPv6 clients counted per /64** for the lockout; client request ids kept
+  only if they look like one (≤64 safe characters); share and team-resolve
+  rate-limited like other judge calls; `/docs` and `/openapi.json` local only;
+  web setup off by default outside local; production sets
+  `SESSION_COOKIE_SECURE=true`
+- **Content-Security-Policy** in Caddy: own scripts only, no inline script or
+  eval. Checked by serving the built app under it in a browser: no violations;
+  graph, Lumen and the sign-in page draw
+
+Not done, by choice: an idle session timeout (needs a migration), revoking API
+keys on a password change (would silently break agents), the `__Host-` cookie
+prefix (needs HTTPS in development too).
+
+### ✅ Phase 28 — Lumen acts on memory, aloud (done, this release)
+
+Asked for in use: settle disputes, and mark still true, not a real fact or
+forget, by talking to Lumen. Decided with the person: anything that changes
+memory is announced first and done only if they agree.
+
+- **One rule for every action** (`hooks/use-voice-actions.ts`): Lumen says
+  exactly what it will do, then waits for the next thing said. Only a yes does
+  it. A no, silence, a "yes, but…", or anything it cannot place leaves memory as
+  it was — and Lumen says "I haven't changed anything". A failure says so too,
+  and leaves nothing waiting for a yes. Stopping Lumen drops what it asked
+- **Read from the words, never a model reading intent** (`lib/voice-actions.ts`,
+  commitment 2). A request is recognised only as the whole of what was said, in
+  its own forms — "let's settle them", "what are my disagreements", "forget that
+  I'm 22", "my partner is Priya is still true", "that isn't a real fact".
+  "I always forget my keys", "forget it" and "I had a dispute with my landlord"
+  are questions for the chat
+- **Disputes:** read in the inbox's order (neither side first for being newer),
+  "the first, the second, or both — or skip"; naming both sides is no answer,
+  asked once more. The decision is read back ("'Launch is on Monday' holds, and
+  'Launch is on Friday' is kept as history") before the yes. Yours against the
+  team's says what "yours holds" means: it is shared, and the team decides.
+  Settled with `spoken: true` and the person's words → `settled_via = "voice"`
+  on the label (the backend refuses `spoken` without words, or from an API key)
+- **One memory:** "that" is what the last answer cited; otherwise a search,
+  floor 0.45, and every match within 0.05 of the best is read out to choose from
+  — Lumen never picks between close ones. Never the team's memory, never one
+  already forgotten; still true only for a belief, not a maybe
+- **Forget takes "yes, forget it"** — a bare yes is asked once more, and "forget
+  it" (how people say "leave it") never counts. The words that asked for it are
+  never stored: they may say what was forgotten
+- Each exchange is written into the chat ("Lumen · by voice") as a record, and
+  kept out of the model's conversation history. Lumen's greeting says how
+- Tests first, for the failure cases: 54 on the words (including what must not
+  trigger), 20 on the conversation, one end to end through the chat panel with a
+  simulated microphone, 4 on the backend. Not yet tried with a real voice
+
 ### ✅ Phase 27 — Lumen first (done, this release)
 
 The interface reorganised around Lumen, in shadcn-style primitives plus React
@@ -767,8 +864,9 @@ Bits (`components/reactbits/`, vendored and read before use).
   and count
 - **Long answers beside Lumen** (`AnswerCard`): over ~220 characters, the answer
   is shown in full, formatted, to Lumen's right while the chat is closed — and
-  kept until the next question. With the chat open it is a subtitle: the chat
-  already has the transcript, spoken turns marked
+  kept until the next question. With the chat open Lumen shows none of the
+  answer — no subtitle either (`chatOnScreen`): the chat beside it already
+  streams it, spoken turns marked. Lumen keeps its state and your question
 - **Smoother motion.** The rings turned by CSS animations whose duration changed
   with Lumen's state, and a running animation given a new duration snaps to a
   new angle — every state change jumped. Now one animation loop eases each
@@ -783,7 +881,7 @@ Bits (`components/reactbits/`, vendored and read before use).
   before, so the voice tests run unchanged
 - **Lumen in each mode's colours** (`lib/lumen-theme.ts`): rose for Personal,
   cyan for Work, per state; an Aurora behind the reactor; the greeting in
-  BlurText and "Tap to talk" in ShinyText while it waits. It still never starts
+  BlurText (now `blur-words.tsx`, GSAP) and "Tap to talk" in ShinyText while it waits. It still never starts
   without a tap
 - Checked in headless Brave on a throwaway instance, desktop and phone, both
   modes. It found that Aurora painted solid white in development: React Bits'
@@ -811,17 +909,58 @@ Bits (`components/reactbits/`, vendored and read before use).
   frame — the workspace fell to ~5 fps under software rendering, back to 60
   once it stopped
 - **The cursor** (`app-cursor.tsx`, mounted in `main.tsx` so the sign-in page
-  has it too): a dot and a trailing ring in the mode's accent; the ring grows
-  over anything pressable and shrinks on a press. Native over text fields (the
-  caret) and dividers (the resize arrows); only with a fine pointer, never on
-  touch; no trail with reduced motion
+  has it too), in the mode's accent: a glowing core with a short comet tail; a
+  trailing ring with light running round its edge (the sign-in card's edge
+  light, reusing `--edge-angle`); over a button-sized target the ring wraps it
+  in its own shape and leans toward the pointer, over a large one it grows; a
+  ripple on every press. State is data attributes read by CSS (`.app-cursor`),
+  so a hover never re-renders. Native over text fields (the caret) and dividers
+  (the resize arrows); only with a fine pointer, never on touch; reduced motion
+  follows exactly — no tail, spin or ripple. The ripple is placed with
+  `translate`, not `transform`: its `scale` animation scaled the position too
 - **Lumen is an orb, not a reactor.** React Bits' Orb (WebGL, the mode's
   colours, faster while thinking or speaking) inside a soft organic halo drawn
   on a canvas — it breathes idle, swells with your voice, pulses as Lumen
   speaks, a comet circles it while thinking. The tick rings, segmented arcs,
   grid and scan line are gone; the Orb has the same StrictMode `loseContext()`
   fix as Aurora
-- 224 frontend tests
+- **The sign-in page says what Continuum is.** On a wide screen a hero sits
+  beside the card: the headline, and `belief-story.tsx` — a canvas belief graph
+  that plays the two things the project exists for (a belief replaced, kept
+  and linked; two beliefs disagreeing, with no arrowhead, and it asks), with
+  the commitments under it. Light travels round the card's edge (`.edge-light`,
+  a conic gradient on an animated `@property` angle) — drawn *above* the glass,
+  so the card never re-blurs for it. Phones keep the single card; reduced
+  motion draws one still frame with both stories told
+- **GSAP, where CSS falls short** (`lib/motion.ts`). Opening or closing a
+  column: **Flip** records every column and divider, the change renders, and
+  each glides from its old box to its new one — out of the flex flow and sized
+  by width and height, not scaled, so the graph, Lumen and the chat's text
+  redraw at their real size instead of stretching; a column that opens fades
+  in. The memory sheet slides in and back out, and dialogs (inbox, settings)
+  rise in and fall away — they used to vanish on close: `usePresence` keeps one
+  mounted until its exit has played. The sign-in page enters as one timeline:
+  the card rises, the story arrives line by line, then the promises. Lumen's
+  greeting (`BlurWords`) replaced React Bits' BlurText, which had brought in
+  Motion for that one effect — Motion is gone, so there is one animation
+  library. Everything clears its styles when it lands (`AT_REST`); reduced
+  motion skips all of it. The canvas and WebGL loops (graph, orb, waveform,
+  aurora, cursor) are untouched: GSAP tweens values, it does not draw
+- **The graph and the chat in Lumen's look.** Each memory is a small orb — a
+  shader with a deep centre, a band of light and a rim lit in its status
+  colour — not a lit sphere; the selection is circled by a ring in the mode's
+  accent, turned to the camera, with a spark running round it. The sky carries
+  the mode's aurora colours (still, painted once), under a faint grid and a
+  vignette; labels lead with a glowing status dot. Memories and Chat are headed
+  like Lumen (`ColumnHeading`); the chat has the mode's glows inside its glass, a
+  small Lumen orb as the assistant's avatar, your messages lit in the accent, and
+  light running round the composer while you type. Status colours still own
+  the nodes: the accent marks only the selection
+- **A memory's panel closes with its selection** — clicking empty graph left it
+  open on "No memory selected" — and on a press anywhere else, except the graph
+  (its own click decides; a drag only turns the view) and dialogs or menus
+  opened from the panel
+- 236 frontend tests (311 after Phase 28, 351 after Phase 29)
 
 ### ✅ Phase 26 — Part of a whole (done, this release)
 
@@ -927,7 +1066,7 @@ TODO Iteration 6 (FINDINGS §18).
   with both sides, UNDECIDED marked — `prompt.py`, shared with the example agent
 - **An agent settles only on the person's words.** `/conflicts/resolve` and
   `/resolve-team` take `said`; an API key without it is a 422. The words and
-  `settled_via` (session | api_key) are kept on the label (migration 0006), and
+  `settled_via` (session | api_key | voice) are kept on the label (migration 0006), and
   Forget blanks them with the rest
 - Verified end to end on a throwaway instance (its own Qdrant, SQLite accounts,
   real Ollama): SDK, a real MCP client over stdio, and `examples/agent.py`
@@ -1356,6 +1495,11 @@ the rule, all 25 gate-eligible supersedes were correct in every band, and the
 - **Lumen is drawn where the app says, owned by the chat.** Moving the voice
   session out of `ChatPanel` would split one conversation in two; the stage is
   a portal into `lumenHost`. The graph is not drawn behind Lumen's own screen.
+- **GSAP only where CSS falls short**: a layout change (Flip), something
+  leaving before it unmounts (`usePresence`), a sequence (a timeline). Always
+  through `useGSAP` from `lib/motion.ts` — it reverts on unmount, so StrictMode's
+  rehearsal leaves no half-played tween — with `MOTION`'s durations and eases,
+  `reducedMotion()` checked first, and `clearProps: AT_REST` on every entrance.
 - **jsdom has no canvas.** `test/setup.ts` makes `getContext` return null, as a
   browser without WebGL does; Aurora then draws nothing and ShinyText keeps its
   plain colour.
@@ -1423,7 +1567,7 @@ uv run uvicorn continuum.main:app --reload
 
 ```bash
 # all from continuum-be/
-uv run pytest                          # 657 tests, no services needed
+uv run pytest                          # 684 tests, no services needed
 TEST_DATABASE_URL=postgresql+asyncpg://continuum:continuum@localhost:5432/continuum_test \
   uv run pytest -k postgres            # the Postgres-only tests (DB is wiped)
 uv run alembic revision --autogenerate -m "..."   # after changing db/models.py
@@ -1514,6 +1658,23 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
   together, in that order; the inbox and a memory's detail are sheets.
 - **Leaving a Dock item with a menu but no `onClick`.** React Bits opens menus
   on a hold, like macOS; a plain click then does nothing at all.
+- **Colouring graph nodes in the mode's accent "to match Lumen".** Colour is
+  status — emerald, amber, slate mean the same in both modes. The accent marks
+  only the selection's ring; the orbs take Lumen's shape, not its colour.
+- **Animating the graph, Lumen's orb or waveform, or the cursor with GSAP.**
+  They draw every frame on a canvas or write styles from their own loop; a
+  tween on top adds a second clock, not smoothness.
+- **Adding Motion (Framer Motion) back for one effect.** It was in the bundle
+  only for BlurText; two animation libraries means two of everything.
+- **Spreading props onto a Radix part rendered inside a `Portal`.** The portal
+  hands its child a `ref` of its own — in React 19 an ordinary prop — and the
+  spread replaced the dialog's ref: the entrance silently never ran.
+- **Leaving GSAP's inline styles on at rest.** A leftover `transform` makes the
+  element the containing block for anything fixed inside it, and its
+  `translate: none` cancels Tailwind's; entrances clear `AT_REST` when they land.
+- **Fading an ancestor of a glass panel.** Below full opacity it becomes the
+  blur's backdrop root, and the glass has nothing to blur until the fade ends;
+  fade the glass element itself (the sheet, the dialog, the card's glass).
 - **Putting `loseContext()` back in Aurora's cleanup.** StrictMode re-runs the
   effect on the same canvas; the dead context painted Lumen's screen solid white
   in development.
@@ -1534,7 +1695,30 @@ uv run python scripts/recheck.py               # dry run; --apply after a backup
   run of confirmations can end with the one refutation that matters.
 - **Resolving a dispute from a free-text chat reply** ("yes, Mongo now") with
   an LLM reading intent. That is a second LLM call arbitrating a contradiction
-  (commitment 2). The person presses "This holds".
+  (commitment 2). The person presses "This holds" — or tells Lumen "the
+  second", matched by words, read back and agreed to.
+- **Counting a failed sign-in after the password check.** The check is slow
+  and threaded: a burst of parallel guesses all passed the lockout before any
+  was counted. Claim the attempt first (`LoginThrottle.attempt`).
+- **Accepting any ids as the losers of a dispute.** It let a member retire team
+  beliefs, or an event, that nobody had disputed. Only a disputed pair settles.
+- **"Restore" on a disputed or pending memory.** It settled one side of a
+  dispute with nobody deciding, and made a maybe a belief unjudged.
+- **Adding `unsafe-eval` or inline scripts to the CSP "because a library might
+  need it".** The built app was checked under the strict policy; answers render
+  model output, and the policy is what keeps code out of them.
+- **A goodbye or a pause without Lumen's name, anywhere but alone and idle.**
+  "That's all I need for the gym" must not hang up; over its own answer only
+  its name makes a command.
+- **Letting Lumen act on a spoken request without reading it back first.**
+  Whisper mishears names and numbers — exactly what tells two sides of a dispute
+  apart. Every voice action is announced, and done only on a yes.
+- **Accepting a bare "yes" to forget by voice.** It cannot be undone; a misheard
+  "yeah" must never erase anything. It takes "yes, forget it".
+- **Recognising voice commands anywhere in a sentence.** "I always forget my
+  keys" is not a request to forget anything; a command is the whole utterance.
+- **Keeping the words that asked Lumen to forget.** They may say what was
+  forgotten; the rejection note keeps "not a real fact" words, forget keeps none.
 - **Labelling a pair that was never in dispute.** The resolve endpoint accepts
   any loser ids; `build_labels` skips pairs without a `conflicts_with` edge, or
   arbitrary pairings would enter the test data as contradictions.

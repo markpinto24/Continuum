@@ -153,6 +153,8 @@ export interface ConflictResolutionRequest {
    * button in this UI is the person deciding, so the UI sends none.
    */
   said?: string | null
+  /** Settled aloud through Lumen, read back and agreed to: recorded as by voice. */
+  spoken?: boolean
 }
 
 export interface ConflictResolutionResponse {

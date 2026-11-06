@@ -259,7 +259,8 @@ class AuthService:
     ) -> User:
         email = normalise_email(email)
         keys = self.throttle.keys(email, client)
-        wait = await self.throttle.retry_after(keys)
+        # Counted now, before the slow verify — see LoginThrottle.attempt.
+        wait, claimed = await self.throttle.attempt(keys)
         if wait is not None:
             log.warning("auth.login_locked_out", retry_after=wait)
             raise LockedOut(wait)
@@ -275,11 +276,11 @@ class AuthService:
         # A disabled account fails exactly like a wrong password: the sign-in
         # form should not confirm which accounts exist.
         if not ok or user is None or user.disabled:
-            await self.throttle.record_failure(keys)
+            # Already counted, as an attempt, before the verify.
             log.info("auth.login_failed")
             raise InvalidCredentials("Wrong email or password.")
 
-        await self.throttle.record_success(email)
+        await self.throttle.succeeded(email, claimed)
         if stored and self.hasher.check_needs_rehash(stored):
             await self.db.set_password_hash(user.id, await self._hash(password))
         log.info("auth.login_succeeded", user_id=user.id)
@@ -327,18 +328,32 @@ class AuthService:
         log.info("auth.default_mode_set", mode=mode.value)
 
     async def change_password(
-        self, user_id: str, current: str, new: str, *, current_session: str | None
-    ) -> None:
+        self, user_id: str, email: str, current: str, new: str
+    ) -> tuple[str, datetime]:
+        """Change it, end every session — this one too — and return a fresh one.
+
+        Wrong current passwords count against the account's sign-in lockout: a
+        stolen session must not be a way to guess the password at leisure.
+        """
+        email = normalise_email(email)
+        wait, claimed = await self.throttle.attempt([f"email:{email}"])
+        if wait is not None:
+            raise LockedOut(wait)
         stored = await self.db.get_password_hash(user_id)
         if not stored or not await self._verify(stored, current):
             raise InvalidCredentials("Current password is wrong.")
+        await self.throttle.succeeded(email, claimed)
         self._check_password_rules(new)
         await self.db.set_password_hash(user_id, await self._hash(new))
-        # Every other sign-in ends: a password change is often a response to a
-        # suspected compromise, and a stolen cookie must not outlive it.
-        keep = hash_token(current_session) if current_session else None
-        await self.db.delete_sessions_for_user(user_id, keep=keep)
+        # Every sign-in ends: a password change is often a response to a
+        # suspected compromise, and a stolen cookie must not outlive it. This
+        # browser gets a new token rather than keeping the old one.
+        await self.db.delete_sessions_for_user(user_id)
+        user = await self.db.get_user(user_id)
+        if user is None:
+            raise NotFound("No such user.")
         log.info("auth.password_changed", user_id=user_id)
+        return await self.create_session(user)
 
     # --- Preferences -------------------------------------------------------
 

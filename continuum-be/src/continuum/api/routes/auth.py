@@ -149,6 +149,10 @@ async def login(
         )
     except AuthError as exc:
         raise http_error(exc) from exc
+    # Whatever session this browser already held ends: a sign-in never inherits
+    # one (a planted cookie, or someone else's left on a shared machine).
+    if previous := request.cookies.get(settings.session_cookie_name):
+        await auth.end_session(previous)
     token, expires = await auth.create_session(user)
     _set_session_cookie(response, request, settings, token, expires)
     return _me(user)
@@ -197,17 +201,17 @@ async def change_password(
     auth: AuthDep,
     settings: SettingsDep,
 ) -> Response:
-    """Change your password. Signs out every other browser."""
+    """Change your password. Signs out every other browser; this one is given a
+    new session in place of the old."""
     try:
-        await auth.change_password(
-            principal.user_id,
-            body.current_password,
-            body.new_password,
-            current_session=request.cookies.get(settings.session_cookie_name),
+        token, expires = await auth.change_password(
+            principal.user_id, principal.email, body.current_password, body.new_password
         )
     except AuthError as exc:
         raise http_error(exc) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _set_session_cookie(response, request, settings, token, expires)
+    return response
 
 
 @router.get("/keys", response_model=ApiKeyListResponse)

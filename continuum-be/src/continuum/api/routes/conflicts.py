@@ -6,7 +6,7 @@ ambiguity to land. This is it.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from continuum.api.deps import (
     CurrentUser,
@@ -14,6 +14,7 @@ from continuum.api.deps import (
     MemoryStoreDep,
     SettingsDep,
     SharingDep,
+    limit_llm_requests,
 )
 from continuum.models.auth import Principal
 from continuum.models.memory import SHARED_SPACE
@@ -86,6 +87,7 @@ async def resolve_conflict(
     decision stays auditable and reversible.
     """
     said = _person_decided(principal, request.said)
+    via = _settled_via(principal, request.spoken, said)
     owners = principal.owners(shared=settings.shared_space_enabled)
     winner = await memories.get(request.winner_id)
     if not winner or winner.user_id not in owners:
@@ -96,6 +98,19 @@ async def resolve_conflict(
     # Losers come from the winner's own graph: a decision never reaches across
     # from the shared space into anyone's private memories, or back.
     losers = [m for m in lookup.values() if m.user_id == winner.user_id]
+    # Only a pair actually in dispute can be settled. Accepting any ids let any
+    # member retire team beliefs nobody had disputed — or an event, which can
+    # never be superseded — by naming them as "losers".
+    if len(losers) != len(set(loser_ids)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Memory not found")
+    if not losers or any(
+        loser.id not in winner.conflicts_with and winner.id not in loser.conflicts_with
+        for loser in losers
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Only memories in dispute with it can be settled against it.",
+        )
     # The label describes the pair as the resolver saw it, so take it from a
     # snapshot — applying the decision below reinforces the winner — but write it
     # only once the decision has actually been applied.
@@ -110,7 +125,7 @@ async def resolve_conflict(
         await memories.save(winner)
         await feedback.record_resolution(
             principal.user_id, seen_winner, seen_losers, keep_both=True,
-            said=said, settled_via=principal.via,
+            said=said, settled_via=via,
         )
         return ConflictResolutionResponse(winner=winner, losers=losers, action="kept_both")
 
@@ -127,13 +142,18 @@ async def resolve_conflict(
     await memories.save(winner)
     await feedback.record_resolution(
         principal.user_id, seen_winner, seen_losers, keep_both=False,
-        said=said, settled_via=principal.via,
+        said=said, settled_via=via,
     )
 
     return ConflictResolutionResponse(winner=winner, losers=losers, action="superseded")
 
 
-@router.post("/resolve-team", response_model=TeamResolutionResponse)
+# "Mine holds" shares it, which runs the shared graph's resolver: a judge call.
+@router.post(
+    "/resolve-team",
+    response_model=TeamResolutionResponse,
+    dependencies=[Depends(limit_llm_requests)],
+)
 async def resolve_team_conflict(
     request: TeamResolutionRequest,
     principal: CurrentUser,
@@ -148,6 +168,7 @@ async def resolve_team_conflict(
     resolver — or the team, if it is unsure — decides.
     """
     said = _person_decided(principal, request.said)
+    via = _settled_via(principal, request.spoken, said)
     memory = await memories.get(request.memory_id)
     if not memory or memory.user_id != principal.owner:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Memory not found")
@@ -170,7 +191,7 @@ async def resolve_team_conflict(
             raise HTTPException(exc.status, detail=str(exc)) from exc
         await feedback.record_resolution(
             principal.user_id, seen_memory, [seen_team], keep_both=False,
-            said=said, settled_via=principal.via,
+            said=said, settled_via=via,
         )
         return TeamResolutionResponse(memory=shared.original, action="mine_holds", shared=shared)
 
@@ -183,7 +204,7 @@ async def resolve_team_conflict(
     await memories.save(memory)
     await feedback.record_resolution(
         principal.user_id, winner, losers, keep_both=request.decision == "both_hold",
-        said=said, settled_via=principal.via,
+        said=said, settled_via=via,
     )
     return TeamResolutionResponse(memory=memory, action=request.decision)
 
@@ -204,3 +225,27 @@ def _person_decided(principal: Principal, said: str | None) -> str | None:
             "pass their words in `said`.",
         )
     return words
+
+
+def _settled_via(principal: Principal, spoken: bool, said: str | None) -> str:
+    """How the decision was made: a button, an agent, or aloud through Lumen.
+
+    Voice is the person deciding, as a button is — but only once Lumen has read
+    the decision back and they agreed, which the web app does before it sends
+    `spoken`. So it needs their words, kept as the audit trail, and it is the web
+    app's to claim: an agent relaying speech is still an agent.
+    """
+    if not spoken:
+        return principal.via
+    if principal.via != "session":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Only the web app's voice mode settles by voice; an agent passes the "
+            "person's words in `said`.",
+        )
+    if said is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A decision made aloud keeps the words that made it: pass them in `said`.",
+        )
+    return "voice"

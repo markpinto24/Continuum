@@ -8,13 +8,48 @@
  * like it — "Avery" would have collided with "every".)
  */
 
+import type { Mode } from './types'
+
 const PREF_KEY = 'continuum.autopilot'
+
+/**
+ * Lumen's own lines, in each mode's voice: in Work it is a professional
+ * assistant — brief and courteous; in Personal it is relaxed, like a friend.
+ * What it does is the same in both; only how it says so changes.
+ */
+export const LUMEN_LINES: Record<Mode, { pause: string; resume: string; goodbye: string }> = {
+  workspace: {
+    pause: 'Of course. I’ll wait — say “Lumen” or “I’m back” when you’re ready.',
+    resume: 'Welcome back. Go ahead.',
+    goodbye: "You're welcome. Talk soon.",
+  },
+  personal: {
+    pause: 'Sure, take your time. Just say “Lumen” when you’re back.',
+    resume: 'Hey, welcome back! What’s up?',
+    goodbye: 'Anytime! Catch you later.',
+  },
+}
 
 export const ASSISTANT_NAME = 'Lumen'
 
 const NAME = '(?:lumen|lumin|luman|lumens|loomen|lumon|lumeen)'
 const STOP = '(?:stop|sop|wait|hold on|pause|quiet|be quiet|enough|shush)'
-const THANKS = '(?:thank you|thanks|thank you very much|thanks a lot|thank you so much|bye|goodbye|good bye)'
+const THANKS = '(?:thank you|thanks|thank you very much|thanks a lot|thank you so much)'
+/** Ways to say "we're done" — each counts only with Lumen's name attached. */
+const CLOSING =
+  '(?:' +
+  [
+    THANKS,
+    'bye|bye bye|goodbye|good bye|good night|goodnight',
+    'see you|see you later|see ya|talk later|talk to you later|catch you later|later',
+    'that s all|that s it|that is all|that is it|that will be all|that ll be all',
+    'i m done|i am done|we re done|we are done|all done',
+    'stop listening|go to sleep|you can stop now|you can stop|end the session',
+  ].join('|') +
+  ')'
+// "Thanks, that's all, Lumen": two closings, then the name.
+const CLOSINGS = `${CLOSING}(?: ${CLOSING})?`
+const TAIL = '(?: (?:that s all|that is all|for now|for today|thanks|thank you))?'
 
 const words = (text: string) =>
   text
@@ -26,17 +61,47 @@ const words = (text: string) =>
 // A lone "stop" counts when idle; "sop" only ever next to the name.
 const INTERRUPT_ALONE = new RegExp(`^(?:(?:hey|ok|okay) )?(?:${NAME} ${STOP}|${STOP} ${NAME}|stop|wait|hold on|pause)(?: please| now)?$`)
 const INTERRUPT_INSIDE = new RegExp(`(?:^| )(?:${NAME} ${STOP}|${STOP} ${NAME})(?: |$)`)
-const END_ALONE = new RegExp(`^(?:(?:ok|okay) )?${THANKS} ${NAME}(?: (?:that s all|that is all|for now))?$`)
-const END_INSIDE = new RegExp(`(?:^| )${THANKS} ${NAME}(?: |$)`)
+const END_ALONE = new RegExp(
+  `^(?:(?:ok|okay|alright|all right) )?(?:${CLOSINGS} ${NAME}|${NAME} ${CLOSINGS})${TAIL}$`,
+)
+// Without the name: only these, only as the whole of what was said, and only
+// when Lumen is idle — never over its own answer, which might say them.
+const END_UNNAMED = /^(?:(?:ok|okay|alright|all right) )?(?:goodbye|good bye|bye|bye bye|good night|goodnight|that s all for now|that is all for now)$/
+const END_INSIDE = new RegExp(`(?:^| )(?:${CLOSING} ${NAME}|${NAME} (?:${THANKS}|goodbye|good night|stop listening|go to sleep))(?: |$)`)
+
+/** "Give me a minute, Lumen": stay, but stop answering until called back. */
+const HOLD = '(?:(?:give me a|one|just a|wait a|hang on a) (?:minute|moment|second|sec)|be right back|brb|wait for me|hold on|hang on|pause|wait|stand by)'
+const PAUSE = new RegExp(`^(?:(?:ok|okay) )?(?:${HOLD} ${NAME}|${NAME} ${HOLD})(?: please)?$`)
+const BACK = '(?:i m back|i am back|i m here|i am here|back|ready|i m ready|let s continue|lets continue|continue|carry on|resume|we can continue|go on)'
+const RESUME = new RegExp(`^(?:(?:hey|hi|ok|okay) )?(?:${NAME}|${BACK}|${BACK} ${NAME}|${NAME} ${BACK})$`)
 
 /** "Stop, Lumen" (or just "stop") said on its own: cut the current answer short. */
 export function isInterruptCommand(text: string): boolean {
   return INTERRUPT_ALONE.test(words(text))
 }
 
-/** "Thank you, Lumen" said on its own: the conversation is over. */
+/**
+ * The conversation is over: "thank you, Lumen", "that's all, Lumen", "good
+ * night, Lumen", "stop listening, Lumen"… — or, said on its own while Lumen is
+ * idle, "goodbye", "bye", "good night" or "that's all for now".
+ */
 export function isEndCommand(text: string): boolean {
-  return END_ALONE.test(words(text))
+  const said = words(text)
+  return END_ALONE.test(said) || END_UNNAMED.test(said)
+}
+
+/**
+ * "Give me a minute, Lumen" (or "hold on, Lumen" while it is idle): Lumen stays,
+ * but takes nothing as a question until it is called back — the room can talk
+ * without being answered.
+ */
+export function isPauseCommand(text: string): boolean {
+  return PAUSE.test(words(text))
+}
+
+/** While paused: "Lumen", "I'm back", "let's continue, Lumen"… */
+export function isResumeCommand(text: string): boolean {
+  return RESUME.test(words(text))
 }
 
 /**

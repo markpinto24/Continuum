@@ -25,7 +25,6 @@ import {
   type PilotStage,
   type StageLayout,
 } from '@/components/autopilot-overlay'
-import { BrandMark } from '@/components/brand'
 import { Markdown } from '@/components/markdown'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -34,6 +33,7 @@ import { useAutopilot } from '@/hooks/use-autopilot'
 import { useDictation } from '@/hooks/use-dictation'
 import { useResource } from '@/hooks/use-resource'
 import { useVoice } from '@/hooks/use-voice'
+import { useVoiceActions } from '@/hooks/use-voice-actions'
 import { api, streamChat } from '@/lib/api'
 import {
   ASSISTANT_NAME,
@@ -41,6 +41,9 @@ import {
   heardInterrupt,
   isEndCommand,
   isInterruptCommand,
+  isPauseCommand,
+  isResumeCommand,
+  LUMEN_LINES as LINES,
   readAutopilotPref,
   spokenAnswer,
   spokenQuestion,
@@ -75,8 +78,12 @@ interface Turn {
   error?: string
   /** Spoken in autopilot rather than typed. */
   via?: 'voice'
-  /** The session's opening line: written locally, never sent to the model. */
-  kind?: 'greeting'
+  /**
+   * greeting: the session's opening line, written locally. spoken: an exchange
+   * with Lumen about your memory (a dispute settled, a memory forgotten…) —
+   * shown here as a record, never sent to the model as conversation.
+   */
+  kind?: 'greeting' | 'spoken'
 }
 
 /** Within this distance of the bottom, the chat keeps following new text. */
@@ -121,6 +128,7 @@ export function ChatPanel({
   lumenHost,
   lumenLayout = 'full',
   lumenAnswerBeside = false,
+  lumenChatBeside = false,
   onTakeOver,
   onShowLumen,
   onLumenActive,
@@ -142,6 +150,8 @@ export function ChatPanel({
   lumenLayout?: Exclude<StageLayout, 'overlay'>
   /** Long answers in full beside Lumen — when the chat itself is not on screen. */
   lumenAnswerBeside?: boolean
+  /** The chat is on screen beside Lumen: it shows the answer, so Lumen does not. */
+  lumenChatBeside?: boolean
   /** "Let Lumen take over": the app moves Lumen beside the graph and starts it. */
   onTakeOver?: () => void
   /** From the bar of a running session: back to Lumen's own screen. */
@@ -265,7 +275,7 @@ export function ChatPanel({
 
       const history: ChatMessage[] = [
         ...turnsRef.current
-          .filter((t) => !t.error && t.kind !== 'greeting')
+          .filter((t) => !t.error && t.kind !== 'greeting' && t.kind !== 'spoken')
           .map((t): ChatMessage => ({ role: t.role, content: t.content })),
         { role: 'user', content: question },
       ]
@@ -370,6 +380,14 @@ export function ChatPanel({
   // A pending item Lumen just asked about aloud: the next thing said is read as
   // its answer — by the words, and only right after the question.
   const askingRef = useRef<Question | null>(null)
+  // "Give me a minute, Lumen": still listening, but answering nothing until it
+  // hears its name, "I'm back", or a goodbye.
+  const [pilotPaused, setPilotPaused] = useState(false)
+  const pausedRef = useRef(false)
+  const pause = useCallback((on: boolean) => {
+    pausedRef.current = on
+    setPilotPaused(on)
+  }, [])
 
   const say = useCallback(
     async (text: string) => {
@@ -382,6 +400,32 @@ export function ChatPanel({
     },
     [reader],
   )
+
+  // Asked aloud to act on memory: settle a dispute, still true, not a real fact,
+  // forget. Each is read back first and done only on a yes.
+  const voiceActionsSay = useCallback(
+    async (text: string) => {
+      setPilotStage('speaking')
+      await say(text)
+    },
+    [say],
+  )
+  const voiceActions = useVoiceActions({
+    say: voiceActionsSay,
+    note: useCallback((said: string | null, reply: string) => {
+      setTurns((prev) => [
+        ...prev,
+        ...(said ? [{ role: 'user' as const, content: said, via: 'voice' as const, kind: 'spoken' as const }] : []),
+        { role: 'assistant', content: reply, kind: 'spoken' },
+      ])
+    }, []),
+    onBusy: useCallback(() => setPilotStage('thinking'), []),
+    onGraphChanged,
+    lastCited: useCallback(() => {
+      const last = [...turnsRef.current].reverse().find((t) => t.role === 'assistant' && t.done)
+      return last?.done?.cited_ids ?? []
+    }, []),
+  })
 
   const speakAnswerTo = useCallback(
     async (said: string) => {
@@ -422,14 +466,30 @@ export function ChatPanel({
 
   const handleUtterance = useCallback(
     async (clip: Blob) => {
-      setPilotStage('transcribing')
+      // Paused, it only listens for its name: no "catching what you said".
+      if (!pausedRef.current) setPilotStage('transcribing')
       try {
         const said = (await api.transcribe(clip)).text.trim()
         if (!said) return
+        if (isEndCommand(said)) return handlers.current.thankAndEnd()
+        if (pausedRef.current) {
+          // Whatever the room says while paused is neither shown nor answered.
+          if (!isResumeCommand(said)) return
+          pause(false)
+          setPilotCaption(null)
+          await voiceActionsSay(LINES[mode].resume)
+          return
+        }
         setPilotCaption(said)
         const asked = askingRef.current
         askingRef.current = null
-        if (isEndCommand(said)) return handlers.current.thankAndEnd()
+        if (isPauseCommand(said)) {
+          voiceActions.reset() // nothing it asked is still waiting
+          pause(true)
+          await voiceActionsSay(LINES[mode].pause)
+          setPilotCaption(null)
+          return
+        }
         if (isInterruptCommand(said)) return // nothing is playing to stop
         const choice = asked ? spokenAnswer(said) : null
         if (asked && choice) {
@@ -441,12 +501,13 @@ export function ChatPanel({
           return
         }
         // Not an answer: the item stays undecided, its buttons still in the chat.
+        if (await voiceActions.handle(said)) return
         await speakAnswerTo(said)
       } finally {
         setPilotStage(null)
       }
     },
-    [say, settle, speakAnswerTo],
+    [mode, pause, say, settle, speakAnswerTo, voiceActions, voiceActionsSay],
   )
 
   /** Heard while Lumen was busy: act on its commands, ignore everything else. */
@@ -471,13 +532,16 @@ export function ChatPanel({
     setBargeIn(pilotStage === 'thinking' || pilotStage === 'speaking' || pilotStage === 'greeting')
   }, [pilotStage, setBargeIn])
 
+  const { reset: resetVoiceActions } = voiceActions
   const resetPilot = useCallback(() => {
+    resetVoiceActions()
+    pause(false)
     setPilotStage(null)
     setPilotCaption(null)
     setPilotAnswer(null)
     setPilotNeedsTap(false)
     writeAutopilotPref(false)
-  }, [])
+  }, [pause, resetVoiceActions])
 
   /** End without a word — the overlay's close, or an error path. */
   const endAutopilot = useCallback(() => {
@@ -493,9 +557,9 @@ export function ChatPanel({
     reader.stop()
     resetPilot()
     const goodbye = reader.stream('goodbye')
-    goodbye.push("You're welcome. Talk soon.")
+    goodbye.push(LINES[mode].goodbye)
     goodbye.end()
-  }, [autopilot, reader, resetPilot])
+  }, [autopilot, mode, reader, resetPilot])
 
   /** "Stop, Lumen": cut the answer short and listen again straight away. */
   const interruptAutopilot = useCallback(() => {
@@ -551,6 +615,7 @@ export function ChatPanel({
     answer: pilotAnswer,
     levelRef: autopilot.levelRef,
     needsTap: pilotNeedsTap && !autopilot.active,
+    paused: pilotPaused && autopilot.active,
     mode,
     onTap: () => void startAutopilot(),
     onInterrupt: interruptAutopilot,
@@ -571,6 +636,7 @@ export function ChatPanel({
               greeting={greetingText}
               canTalk={dictationOffered}
               answerBeside={lumenAnswerBeside}
+              chatOnScreen={lumenChatBeside}
               error={pilotError}
               onDismissError={() => setPilotError(null)}
             />,
@@ -674,12 +740,8 @@ export function ChatPanel({
         )}
         {dictation.error && <Notice onDismiss={dictation.dismissError}>{dictation.error}</Notice>}
 
-        <div
-          className={cn(
-            'rounded-2xl border bg-white/[0.035] shadow-[inset_0_1px_0_rgb(255_255_255/0.06)] transition-colors focus-within:border-accent/50 focus-within:ring-3 focus-within:ring-accent/10',
-            asOf ? 'border-amber-400/40' : 'border-white/10',
-          )}
-        >
+        <div className="composer rounded-2xl" data-as-of={asOf ? 'true' : undefined}>
+          <span aria-hidden className="edge-light composer-edge" />
           <textarea
             ref={inputRef}
             value={draft}
@@ -780,7 +842,7 @@ export function ChatPanel({
                 size="icon"
                 aria-label="Send"
                 disabled={!draft.trim()}
-                className="size-8 rounded-full"
+                className="send-button size-8 rounded-full"
               >
                 <ArrowUp />
               </Button>
@@ -842,10 +904,21 @@ function TurnView({
     )
   }
 
+  if (turn.kind === 'spoken' && turn.role === 'assistant') {
+    return (
+      <AssistantRow>
+        <p className="pt-0.5 text-sm leading-relaxed text-foreground/90">{turn.content}</p>
+        <p className="mt-1 font-mono text-[10px] tracking-[0.18em] text-muted/70 uppercase">
+          Lumen · by voice
+        </p>
+      </AssistantRow>
+    )
+  }
+
   if (turn.role === 'user') {
     return (
       <div className="flex justify-end">
-        <p className="max-w-[85%] rounded-2xl rounded-br-md bg-accent/12 px-3.5 py-2 text-sm leading-relaxed text-foreground ring-1 ring-accent/15">
+        <p className="chat-bubble-user max-w-[85%] rounded-2xl rounded-br-md px-3.5 py-2 text-sm leading-relaxed text-foreground">
           {turn.via === 'voice' && (
             <Mic className="mr-1.5 inline size-3 align-[-1px] text-accent/80" aria-label="Spoken" />
           )}
@@ -991,9 +1064,8 @@ function TurnView({
 function AssistantRow({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex gap-3">
-      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-accent/10 ring-1 ring-accent/25">
-        <BrandMark className="size-4 text-accent" />
-      </span>
+      {/* A small Lumen orb: the chat and Lumen are one assistant. */}
+      <span aria-hidden className="lumen-avatar mt-0.5 size-7 shrink-0 rounded-full" />
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   )

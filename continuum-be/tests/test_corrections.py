@@ -226,6 +226,42 @@ async def test_a_forgotten_memory_cannot_be_reactivated(memories, engine):
     assert (await call(app, "POST", f"/memories/{mine.id}/reactivate")).status_code == 409
 
 
+async def test_restore_brings_back_a_replaced_or_archived_memory(memories, engine):
+    archived, replaced = make("Atlas used MySQL"), make("Atlas used Oracle")
+    archived.archive()
+    replaced.mark_superseded_by("newer")
+    await memories.add_many([archived, replaced])
+    app = app_for(memories, engine, person())
+    for memory in (archived, replaced):
+        assert (await call(app, "POST", f"/memories/{memory.id}/reactivate")).status_code == 200
+
+
+async def test_restore_never_settles_a_dispute_or_a_maybe(memories, engine):
+    """Restoring one side of a dispute cleared it on that side alone, decided by
+    nobody; restoring a maybe made it a belief without being judged."""
+    disputed, other = make("Atlas uses Postgres"), make("Atlas uses Mongo")
+    disputed.mark_contradicted(other.id)
+    other.mark_contradicted(disputed.id)
+    maybe = make("Maybe Atlas moves to Mongo", status=MemoryStatus.PENDING)
+    await memories.add_many([disputed, other, maybe])
+    app = app_for(memories, engine, person())
+    for memory in (disputed, maybe):
+        response = await call(app, "POST", f"/memories/{memory.id}/reactivate")
+        assert response.status_code == 409
+    assert (await memories.get(disputed.id)).conflicts_with == [other.id]
+    assert (await memories.get(maybe.id)).status is MemoryStatus.PENDING
+
+
+async def test_only_the_author_or_an_admin_restores_team_knowledge(memories, engine):
+    shared = make("Deploys freeze on Fridays", user=SHARED_SPACE, shared_by="sara")
+    shared.archive()
+    await memories.add(shared)
+    url = f"/memories/{shared.id}/reactivate"
+    assert (await call(app_for(memories, engine, person()), "POST", url)).status_code == 403
+    assert (await call(app_for(memories, engine, person("sara")), "POST", url)).status_code \
+        == 200
+
+
 async def test_export_is_your_whole_graph_and_nothing_else(memories, engine):
     mine, archived = make("Atlas uses Postgres"), make("Atlas used MySQL")
     archived.archive()

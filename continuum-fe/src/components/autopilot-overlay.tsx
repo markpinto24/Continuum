@@ -2,9 +2,9 @@ import { AudioLines, MicOff, Square, X } from 'lucide-react'
 import { type RefObject, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
+import { BlurWords } from '@/components/blur-words'
 import { Markdown } from '@/components/markdown'
 import Aurora from '@/components/reactbits/Aurora'
-import BlurText from '@/components/reactbits/BlurText'
 import Orb from '@/components/reactbits/Orb'
 import ShinyText from '@/components/reactbits/ShinyText'
 import type { PilotPhase } from '@/hooks/use-autopilot'
@@ -60,6 +60,8 @@ export interface LumenStageProps {
   levelRef: RefObject<number>
   /** The session is live: it listens, thinks and speaks. */
   active: boolean
+  /** "Give me a minute, Lumen": listening only for its name. */
+  paused?: boolean
   /** Restored from last time: the browser needs a click before it may speak or listen. */
   needsTap: boolean
   /** Which memory it talks from — and so its colours. */
@@ -76,6 +78,12 @@ export interface LumenStageProps {
    * lines as a subtitle. Off when the chat is on screen: it shows the transcript.
    */
   answerBeside?: boolean
+  /**
+   * The chat is on screen beside Lumen and already shows the answer as it
+   * streams: Lumen then shows none of it — no subtitle, no card — only what it
+   * is doing and what you asked.
+   */
+  chatOnScreen?: boolean
   onDismissError?: () => void
   /** Start Lumen, or resume it — the click a browser needs first. */
   onTap: () => void
@@ -102,12 +110,14 @@ export function LumenStage({
   levelRef,
   active,
   needsTap,
+  paused = false,
   mode: memoryMode = 'workspace',
   layout = 'overlay',
   greeting,
   canTalk = true,
   error = null,
   answerBeside = false,
+  chatOnScreen = false,
   onDismissError,
   onTap,
   onInterrupt,
@@ -116,8 +126,10 @@ export function LumenStage({
 }: LumenStageProps) {
   const theme = LUMEN_THEMES[memoryMode]
   const waiting = !active && !needsTap
+  // Paused and not saying anything: at rest, listening only for its name.
+  const resting = paused && !stage
   const hud: HudMode =
-    needsTap || waiting
+    needsTap || waiting || resting
       ? 'idle'
       : phase === 'hearing'
         ? 'hearing'
@@ -135,12 +147,15 @@ export function LumenStage({
 
   const label = needsTap
     ? 'Lumen was on last time'
-    : phase === 'working'
-      ? (stage && STAGE_LABEL[stage]) || 'Working…'
-      : LABEL[phase]
+    : resting
+      ? 'Paused — say “Lumen” when you’re back'
+      : phase === 'working'
+        ? (stage && STAGE_LABEL[stage]) || 'Working…'
+        : LABEL[phase]
   const busy = stage === 'speaking' || stage === 'thinking'
   // Kept after it has spoken, until the next question, so it can be read.
-  const beside = answerBeside && active && !!answer && answer.length > LONG_ANSWER
+  const beside =
+    !chatOnScreen && answerBeside && active && !!answer && answer.length > LONG_ANSWER
 
   return (
     <div
@@ -168,7 +183,7 @@ export function LumenStage({
             style={{ color, boxShadow: `inset 0 0 0 1px ${color}55`, background: `${color}12` }}
           >
             <span className="size-1.5 rounded-full hud-breathe" style={{ background: color }} />
-            {MODE_TAG[hud]}
+            {resting ? 'Paused' : MODE_TAG[hud]}
           </span>
         </div>
         {layout === 'overlay' && (
@@ -232,7 +247,7 @@ export function LumenStage({
             )}
           </div>
 
-          {!beside && active && answer && (stage === 'speaking' || stage === 'thinking') && (
+          {!chatOnScreen && !beside && active && answer && (stage === 'speaking' || stage === 'thinking') && (
             <Subtitle text={answer} color={color} ink={ink} />
           )}
         </div>
@@ -327,13 +342,10 @@ function Waiting({
   return (
     <>
       {greeting && (
-        <BlurText
+        <BlurWords
           // A new greeting (the disputes loaded) plays again rather than half-swapping.
           key={greeting}
           text={greeting}
-          trigger="load"
-          animateBy="words"
-          delay={70}
           className={cn(
             'justify-center text-center font-light tracking-tight',
             docked ? 'text-xl' : 'text-2xl sm:text-3xl',

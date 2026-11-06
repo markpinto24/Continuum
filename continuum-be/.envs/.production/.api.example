@@ -53,6 +53,9 @@ ADMIN_EMAIL=<CHANGE_ME_YOUR_EMAIL>
 ADMIN_PASSWORD=<CHANGE_ME_STRONG_PASSWORD>
 ADMIN_USER_ID=
 SESSION_TTL_HOURS=336
+# Said outright rather than inferred from the proxy's X-Forwarded-Proto: the
+# session cookie is only ever sent over HTTPS.
+SESSION_COOKIE_SECURE=true
 LLM_REQUESTS_PER_MINUTE=30
 MAX_INPUT_CHARS=50000
 # On: Caddy is the only way in and it overwrites X-Real-IP with the real

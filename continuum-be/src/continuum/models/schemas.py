@@ -10,6 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from continuum.models.feedback import RejectReason, ResolutionLabel
 from continuum.models.memory import Memory, MemoryCategory, MemoryStatus, Mode
 
+# Longer is refused at the door, for an unknown email and a real one alike.
+# Checked only inside sign-in, an over-long password on a real account skipped
+# the hash and answered fast, while an unknown email paid for a dummy hash:
+# the timing told which emails have accounts.
+MAX_PASSWORD_LENGTH = 1024
+
 
 class ClientBody(BaseModel):
     """Base for every request body a client sends.
@@ -208,6 +214,11 @@ class ConflictResolutionRequest(ClientBody):
         max_length=500,
         description="The person's own words deciding it (\"Mongo now\", \"both are true\"). "
         "Required when an agent settles with an API key; recorded with the decision.",
+    )
+    spoken: bool = Field(
+        default=False,
+        description="Settled aloud through Lumen, the web app's voice mode: the decision "
+        "was read back and agreed to. Recorded as settled by voice; needs `said`.",
     )
 
 
@@ -518,7 +529,7 @@ class AuthStatus(BaseModel):
 
 class SetupRequest(ClientBody):
     email: str
-    password: str
+    password: str = Field(max_length=MAX_PASSWORD_LENGTH)
     user_id: str | None = Field(
         default=None,
         description=(
@@ -535,7 +546,7 @@ class SetupRequest(ClientBody):
 
 class LoginRequest(ClientBody):
     email: str
-    password: str
+    password: str = Field(max_length=MAX_PASSWORD_LENGTH)
 
 
 class Me(BaseModel):
@@ -554,8 +565,8 @@ class ModeUpdate(ClientBody):
 
 
 class PasswordChangeRequest(ClientBody):
-    current_password: str
-    new_password: str
+    current_password: str = Field(max_length=MAX_PASSWORD_LENGTH)
+    new_password: str = Field(max_length=MAX_PASSWORD_LENGTH)
 
 
 class ApiKeyCreateRequest(ClientBody):
@@ -601,7 +612,7 @@ class UserListResponse(BaseModel):
 
 class UserCreateRequest(ClientBody):
     email: str
-    password: str
+    password: str = Field(max_length=MAX_PASSWORD_LENGTH)
     user_id: str | None = None
     is_admin: bool = False
 
@@ -625,6 +636,11 @@ class TeamResolutionRequest(ClientBody):
         default=None,
         max_length=500,
         description="The person's own words deciding it. Required with an API key.",
+    )
+    spoken: bool = Field(
+        default=False,
+        description="Settled aloud through Lumen, the web app's voice mode: the decision "
+        "was read back and agreed to. Recorded as settled by voice; needs `said`.",
     )
 
 

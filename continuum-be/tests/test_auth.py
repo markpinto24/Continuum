@@ -7,6 +7,7 @@ refuses. Runs the real router, real AuthService and a real SQLite store
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from datetime import datetime
@@ -246,6 +247,21 @@ async def test_wrong_password_and_unknown_email_look_identical(env):
     assert wrong.json() == unknown.json()
 
 
+async def test_an_over_long_password_is_refused_alike_for_any_email(env):
+    """Checked only inside sign-in, it skipped the hash for a real account and
+    answered faster than for an unknown one: the timing named real emails."""
+    await env.user("mark@example.com")
+    huge = "x" * 5000
+    async with env.client() as client:
+        real = await client.post(
+            "/auth/login", json={"email": "mark@example.com", "password": huge}, headers=BROWSER
+        )
+        unknown = await client.post(
+            "/auth/login", json={"email": "who@example.com", "password": huge}, headers=BROWSER
+        )
+    assert real.status_code == unknown.status_code == 422
+
+
 async def test_repeated_failures_lock_the_account_even_for_the_right_password():
     env = await build(login_max_failures=3)
     await env.user("mark@example.com")
@@ -261,6 +277,49 @@ async def test_repeated_failures_lock_the_account_even_for_the_right_password():
         )
     assert locked.status_code == 429
     assert int(locked.headers["retry-after"]) > 0
+
+
+async def test_a_burst_of_parallel_guesses_is_counted_before_any_is_checked():
+    """Counting after the (slow, threaded) password check let a burst of parallel
+    guesses all pass the lockout check first. Only the budget may be verified."""
+    env = await build(login_max_failures=3)
+    await env.user("mark@example.com")
+    verified = 0
+    real_verify = env.auth._verify
+
+    async def counting_verify(stored: str, password: str) -> bool:
+        nonlocal verified
+        verified += 1
+        await asyncio.sleep(0.01)  # as slow as argon2, relatively: everyone overlaps
+        return await real_verify(stored, password)
+
+    env.auth._verify = counting_verify
+    async with env.client() as client:
+        guesses = [
+            client.post(
+                "/auth/login", json={"email": "mark@example.com", "password": f"guess-{i:04}"},
+                headers=BROWSER,
+            )
+            for i in range(20)
+        ]
+        responses = await asyncio.gather(*guesses)
+    codes = sorted(r.status_code for r in responses)
+    assert codes.count(401) == 3 and codes.count(429) == 17
+    assert verified == 3
+
+
+async def test_a_right_password_gives_its_attempt_back_to_the_address():
+    """A household signing in again and again from one address is not locked out:
+    a success returns its own attempt — the address's earlier failures stand."""
+    env = await build(login_max_failures=3)
+    await env.user("mark@example.com")
+    async with env.client() as client:
+        for _ in range(5):
+            ok = await client.post(
+                "/auth/login", json={"email": "mark@example.com", "password": PASSWORD},
+                headers=BROWSER,
+            )
+            assert ok.status_code == 200
 
 
 async def test_a_disabled_account_cannot_sign_in(env):
@@ -325,8 +384,49 @@ async def test_changing_password_signs_out_other_browsers(env):
             json={"current_password": PASSWORD, "new_password": "a brand new passphrase"},
         )
         assert changed.status_code == 204
-        assert (await laptop.get("/auth/me")).status_code == 200
+        assert (await laptop.get("/auth/me")).status_code == 200  # on its new session
         assert (await phone.get("/auth/me")).status_code == 401
+
+
+async def test_changing_password_replaces_this_browsers_session_too(env):
+    await env.user("mark@example.com")
+    laptop = await env.signed_in("mark@example.com")
+    async with laptop:
+        before = laptop.cookies.get(env.settings.session_cookie_name)
+        changed = await laptop.post(
+            "/auth/password",
+            json={"current_password": PASSWORD, "new_password": "a brand new passphrase"},
+        )
+        after = changed.cookies.get(env.settings.session_cookie_name)
+    assert before and after and before != after
+    assert await env.auth.principal_from_session(before) is None
+
+
+async def test_guessing_the_current_password_hits_the_sign_in_lockout():
+    env = await build(login_max_failures=3)
+    await env.user("mark@example.com")
+    laptop = await env.signed_in("mark@example.com")
+    async with laptop:
+        codes = [
+            (await laptop.post(
+                "/auth/password",
+                json={"current_password": f"guess-{i}", "new_password": "a brand new passphrase"},
+            )).status_code
+            for i in range(5)
+        ]
+    assert codes[:3] == [401, 401, 401] and codes[3:] == [429, 429]
+
+
+async def test_signing_in_ends_the_session_the_browser_already_had(env):
+    await env.user("mark@example.com")
+    browser = await env.signed_in("mark@example.com")
+    async with browser:
+        old = browser.cookies.get(env.settings.session_cookie_name)
+        again = await browser.post(
+            "/auth/login", json={"email": "mark@example.com", "password": PASSWORD}, headers=BROWSER
+        )
+        assert again.status_code == 200
+    assert await env.auth.principal_from_session(old) is None
 
 
 async def test_disabling_a_user_ends_their_sessions(env):
@@ -647,8 +747,11 @@ async def test_the_whole_auth_flow_on_postgres():
     assert await auth.principal_from_api_key(secret) is None
     assert (await auth.list_api_keys(user.id))[0].revoked_at.tzinfo is not None
 
-    await auth.change_password(user.id, PASSWORD, "a new long passphrase", current_session=token)
-    assert await auth.principal_from_session(token) is not None
+    fresh, _ = await auth.change_password(
+        user.id, "mark@example.com", PASSWORD, "a new long passphrase"
+    )
+    assert await auth.principal_from_session(token) is None  # the old token is gone
+    assert await auth.principal_from_session(fresh) is not None
 
 
 

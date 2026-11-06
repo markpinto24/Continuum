@@ -20,6 +20,8 @@ const api = vi.hoisted(() => ({
   confirmPending: vi.fn(),
   declinePending: vi.fn(),
   unsurePending: vi.fn(),
+  conflicts: vi.fn(),
+  resolveConflict: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -34,6 +36,8 @@ vi.mock('@/lib/api', () => ({
     confirmPending: api.confirmPending,
     declinePending: api.declinePending,
     unsurePending: api.unsurePending,
+    conflicts: api.conflicts,
+    resolveConflict: api.resolveConflict,
   },
   streamChat: api.streamChat,
 }))
@@ -242,6 +246,73 @@ describe('Lumen', () => {
     await advance(1000)
 
     expect(screen.getByText('Lumen is speaking')).toBeDefined() // it carries on
+  })
+
+  it('settles a dispute aloud: read back first, done on a yes, never sent to the chat', async () => {
+    const memory = (id: string, content: string) => ({ id, user_id: 'mark', content, status: 'contradicted', subject: 'launch' })
+    api.conflicts.mockReset().mockResolvedValue({
+      total: 1,
+      conflicts: [{ memory: memory('m1', 'Launch is on Friday'), conflicting: [memory('m2', 'Launch is on Monday')], team: false }],
+    })
+    api.resolveConflict.mockReset().mockResolvedValue({})
+    api.transcribe
+      .mockResolvedValueOnce({ text: "Let's settle them.", language: 'en', duration_seconds: 1 })
+      .mockResolvedValueOnce({ text: 'The second one.', language: 'en', duration_seconds: 1 })
+      .mockResolvedValueOnce({ text: 'Yes.', language: 'en', duration_seconds: 1 })
+    await startLumen()
+
+    await say(1)
+    await advance(2500)
+    expect(api.synthesize).toHaveBeenCalledWith(expect.stringMatching(/First: “Launch is on Friday”/), expect.anything())
+    await say(1)
+    await advance(2500)
+    expect(api.synthesize).toHaveBeenCalledWith(expect.stringMatching(/“Launch is on Monday” holds/), expect.anything())
+    expect(api.resolveConflict).not.toHaveBeenCalled() // announced, not done
+    await say(1)
+    await advance(2500)
+
+    expect(api.resolveConflict).toHaveBeenCalledWith(
+      expect.objectContaining({ winner_id: 'm2', loser_ids: ['m1'], keep_both: false, spoken: true }),
+    )
+    expect(api.streamChat).not.toHaveBeenCalled()
+    // The exchange is in the chat as a record of what was done by voice.
+    expect(screen.getAllByText('Lumen · by voice').length).toBeGreaterThan(0)
+  })
+
+  it('"give me a minute, Lumen" pauses: the room is neither answered nor shown, until it is called back', async () => {
+    api.transcribe
+      .mockResolvedValueOnce({ text: 'Give me a minute, Lumen.', language: 'en', duration_seconds: 1 })
+      .mockResolvedValueOnce({ text: 'Did you feed the cat?', language: 'en', duration_seconds: 1 })
+      .mockResolvedValueOnce({ text: "I'm back.", language: 'en', duration_seconds: 1 })
+      .mockResolvedValueOnce({ text: 'What database are we on?', language: 'en', duration_seconds: 1 })
+    await startLumen()
+
+    await say(1)
+    await advance(2500)
+    expect(api.synthesize).toHaveBeenCalledWith('Of course.', expect.anything()) // Work: professional
+    expect(screen.getByText(/Paused — say “Lumen” when you’re back/)).toBeDefined()
+
+    await say(1) // someone else in the room
+    await advance(2500)
+    expect(api.streamChat).not.toHaveBeenCalled()
+    expect(screen.queryByText(/feed the cat/)).toBeNull()
+
+    await say(1)
+    await advance(2500)
+    expect(api.synthesize).toHaveBeenCalledWith('Welcome back.', expect.anything())
+
+    await say(1)
+    await advance(2500)
+    expect(api.streamChat).toHaveBeenCalledTimes(1) // answering again
+  })
+
+  it('more ways to say goodbye: "that\'s all, Lumen" ends it too', async () => {
+    api.transcribe.mockResolvedValue({ text: "That's all, Lumen.", language: 'en', duration_seconds: 1 })
+    await startLumen()
+    await say(1)
+    await advance(2300)
+    expect(overlay()).toBeNull()
+    expect(api.streamChat).not.toHaveBeenCalled()
   })
 
   it('"thank you, Lumen" when idle ends it without asking the model anything', async () => {

@@ -83,7 +83,9 @@ class Settings(BaseSettings):
     # While no account exists, the web UI offers "create the first admin". Turn
     # off on a deployment reachable by strangers and bootstrap from the env pair
     # below instead — otherwise whoever loads the page first owns the instance.
-    auth_allow_web_setup: bool = True
+    # Unset: on for local development, off anywhere else — a deployment that
+    # forgot to set it must not hand the instance to its first visitor.
+    auth_allow_web_setup: bool | None = None
     # Creates the first admin at startup when no account exists yet.
     admin_email: str | None = None
     admin_password: str | None = None
@@ -98,6 +100,10 @@ class Settings(BaseSettings):
     llm_requests_per_minute: int = 30
     # Largest note or transcript accepted by ingest and chat, in characters.
     max_input_chars: int = 50_000
+    # Largest request body, refused before it is read (core/middleware.py). Room
+    # for a long chat history; an upload of dictated audio gets
+    # speech_max_bytes plus room for the form around it.
+    max_request_bytes: int = 2 * 1024 * 1024
 
     # --- Shared team space --------------------------------------------------
     # One shared graph for everyone on the instance. Every user's chat, search,
@@ -337,6 +343,8 @@ class Settings(BaseSettings):
             self.conflict_similarity_threshold = conflict
         if self.subject_similarity_threshold is None:
             self.subject_similarity_threshold = CALIBRATED_SUBJECT_THRESHOLDS.get(family)
+        if self.auth_allow_web_setup is None:
+            self.auth_allow_web_setup = self.is_local
         return self
 
     @property

@@ -70,7 +70,8 @@ class ResolutionLabel(BaseModel):
     graph_owner: str | None = None
     # The person's own words deciding it — required when an agent settles.
     said: str | None = None
-    settled_via: str | None = None  # "session" (a button) | "api_key" (an agent)
+    # "session" (a button) | "api_key" (an agent) | "voice" (Lumen: read back, agreed)
+    settled_via: str | None = None
 
 
 class GateBand(BaseModel):

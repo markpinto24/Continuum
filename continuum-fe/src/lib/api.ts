@@ -220,10 +220,21 @@ export const api = {
   resolveConflict: (body: ConflictResolutionRequest) =>
     request<ConflictResolutionResponse>('/conflicts/resolve', post(body)),
 
-  resolveTeamConflict: (memoryId: string, sharedId: string, decision: TeamDecision) =>
+  /** `aloud`: settled through Lumen, with the person's words (recorded as by voice). */
+  resolveTeamConflict: (
+    memoryId: string,
+    sharedId: string,
+    decision: TeamDecision,
+    aloud?: { said: string },
+  ) =>
     request<TeamResolutionResponse>(
       '/conflicts/resolve-team',
-      post({ memory_id: memoryId, shared_id: sharedId, decision }),
+      post({
+        memory_id: memoryId,
+        shared_id: sharedId,
+        decision,
+        ...(aloud ? { said: aloud.said, spoken: true } : {}),
+      }),
     ),
 
   ingest: (text: string) => request<IngestResponse>('/ingest', post({ text })),

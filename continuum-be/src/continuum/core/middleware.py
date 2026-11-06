@@ -9,12 +9,15 @@ that id for free.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 
+from fastapi import HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from continuum.core import logger as clog
 from continuum.core.logger import get_logger
@@ -27,11 +30,72 @@ REQUEST_ID_HEADER = "x-request-id"
 _QUIET_PATHS = frozenset({"/", "/health", "/docs", "/openapi.json", "/redoc", "/favicon.ico"})
 
 
+# A client's own request id is kept only if it looks like one: it is echoed in
+# a header and written into every log line of the request.
+_REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+class BodyLimitMiddleware:
+    """Refuses a request body over its limit before anything reads it.
+
+    FastAPI reads a body before it resolves dependencies, so without this an
+    anonymous multi-gigabyte request was held in memory (or a multipart upload
+    spooled to disk) before the missing credential refused it. A declared
+    Content-Length over the limit is refused at once; a chunked body is counted
+    as it arrives and refused the moment it passes the limit.
+    """
+
+    def __init__(self, app: ASGIApp, *, default: int, overrides: dict[str, int]) -> None:
+        self.app = app
+        self.default = default
+        self.overrides = overrides
+
+    def _limit(self, path: str) -> int:
+        for suffix, limit in self.overrides.items():
+            if path.rstrip("/").endswith(suffix):
+                return limit
+        return self.default
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["method"] in ("GET", "HEAD", "OPTIONS"):
+            await self.app(scope, receive, send)
+            return
+        limit = self._limit(scope["path"])
+        declared = dict(scope["headers"]).get(b"content-length")
+        if declared is not None and (not declared.isdigit() or int(declared) > limit):
+            await _too_large(limit)(scope, receive, send)
+            return
+
+        seen = 0
+
+        async def counted() -> Message:
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > limit:
+                    raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, _too_large_detail(limit))
+            return message
+
+        await self.app(scope, counted, send)
+
+
+def _too_large_detail(limit: int) -> str:
+    return f"The request is too large (over {limit // 1024} KB)."
+
+
+def _too_large(limit: int) -> JSONResponse:
+    return JSONResponse(
+        {"detail": _too_large_detail(limit)}, status_code=status.HTTP_413_CONTENT_TOO_LARGE
+    )
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid.uuid4())
+        offered = request.headers.get(REQUEST_ID_HEADER, "")
+        request_id = offered if _REQUEST_ID.fullmatch(offered) else str(uuid.uuid4())
 
         clog.clear()
         clog.bind(

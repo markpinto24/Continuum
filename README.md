@@ -94,6 +94,13 @@ and **Chat** beside it — any of the three, in the order Memories | Lumen | Cha
 — and opens the **Inbox**. Ask Lumen aloud or type in the chat: it is one
 conversation, and a long spoken answer is shown in full beside Lumen.
 
+Lumen can also act on your memory when you ask it aloud: "let's settle them"
+goes through your disagreements one by one, and "that's still true", "that
+isn't a real fact" or "forget that I'm 22" act on one memory. Every one is read
+back first — "'Launch is on Monday' holds, and 'Launch is on Friday' is kept as
+history. Shall I?" — and done only on a yes. Anything else changes nothing.
+Forgetting, which cannot be undone, takes "yes, forget it".
+
 In the graph, **colour is status** (amber means disputed, and nothing else is
 loud), **size is confidence**, and **arrows are supersedes**, drawn new → old. A
 dispute edge has no arrowhead: it is symmetric, and a direction would be the UI
@@ -196,6 +203,6 @@ HTTP contract, and CI runs each only when its own directory changes.
 OpenAI-compatible LLM (Ollama, vLLM, Groq) · `bge-m3` · local Whisper and Piper
 for voice · React 19 · TypeScript · Vite · Tailwind v4 · Three.js.
 
-Backend: 657 tests. Frontend: 224. SDK: 14. None needs a running service; a
+Backend: 684 tests. Frontend: 351. SDK: 14. None needs a running service; a
 nightly job runs the resolution corpora on a real model and fails if a single
 belief is lost.

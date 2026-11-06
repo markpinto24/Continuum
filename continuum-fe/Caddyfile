@@ -15,6 +15,12 @@
 	# client sent — which is what makes TRUST_PROXY_HEADERS=true safe, so the
 	# sign-in lockout counts visitors rather than this proxy.
 	handle /api/* {
+		# Refused here, before it reaches the API. The API has its own limit
+		# (MAX_REQUEST_BYTES; dictated audio gets SPEECH_MAX_BYTES + 1 MB): this
+		# one stops an oversized body at the edge, before it is even forwarded.
+		request_body {
+			max_size 12MB
+		}
 		reverse_proxy {$API_UPSTREAM:api:8000} {
 			header_up X-Real-IP {remote_host}
 			# Chat answers stream as server-sent events: pass each chunk on now.
@@ -43,6 +49,13 @@
 		Referrer-Policy "same-origin"
 		# The microphone is used for dictation and Lumen, on this origin only.
 		Permissions-Policy "microphone=(self), camera=(), geolocation=()"
+		# Only this origin's own scripts run — no inline script, no eval — so an
+		# answer rendered from model output can never carry code in with it.
+		# Inline styles stay: libraries set them, and they cannot run anything.
+		# Checked against the built app in a browser: no violations, the graph,
+		# Lumen and the sign-in page all draw.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+		Cross-Origin-Opener-Policy "same-origin"
 		-Server
 	}
 }

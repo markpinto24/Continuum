@@ -1,5 +1,5 @@
-import { Heart, Inbox, MessageSquare, Network, Sparkles, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Heart, Inbox, Network, Sparkles, X } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { AccountDialog } from '@/components/account-dialog'
 import { AppBackdrop } from '@/components/app-backdrop'
@@ -7,6 +7,7 @@ import { AppDock, COLUMNS, type Column, type Columns } from '@/components/app-do
 import { AppHeader } from '@/components/app-header'
 import { AuthScreen, LEGACY_USER_KEY } from '@/components/auth-screen'
 import { BrandMark } from '@/components/brand'
+import { ColumnHeading } from '@/components/column-heading'
 import { BeliefGraph } from '@/components/belief-graph'
 import { ChatPanel, type ChatControl } from '@/components/chat-panel'
 import { ContradictionInbox } from '@/components/contradiction-inbox'
@@ -23,6 +24,7 @@ import { cn } from '@/lib/utils'
 import { useMode } from '@/hooks/use-mode'
 import { useResource } from '@/hooks/use-resource'
 import { ApiError, api, onUnauthorized, setMode } from '@/lib/api'
+import { AT_REST, Flip, gsap, MOTION, reducedMotion, useGSAP, usePresence } from '@/lib/motion'
 import {
   AUTO_CLUSTER_ABOVE,
   CLUSTER_PREFIX,
@@ -189,8 +191,48 @@ function Workspace({
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
-  const [shown, setShown] = useState<Columns>({ memories: false, lumen: true, chat: false })
+  const [shown, setShownNow] = useState<Columns>({ memories: false, lumen: true, chat: false })
   const columns: Columns = narrow ? onlyOne(shown) : shown
+
+  // Opening or closing a column moves the others: Flip records where every
+  // column (and divider) is, the change renders, and each one then glides from
+  // its old box to its new one instead of jumping. A column that opens fades in.
+  const columnsRef = useRef<HTMLDivElement>(null)
+  const flipFrom = useRef<Flip.FlipState | null>(null)
+  const setShown = useCallback((update: (was: Columns) => Columns) => {
+    const host = columnsRef.current
+    if (host && !reducedMotion()) {
+      flipFrom.current = Flip.getState(host.querySelectorAll('[data-flip-id]'))
+      // A click that changed nothing must not leave a stale record for the
+      // next change (a window resize, say) to animate from.
+      requestAnimationFrame(() => {
+        flipFrom.current = null
+      })
+    }
+    setShownNow(update)
+  }, [])
+  const layoutKey = `${columns.memories}|${columns.lumen}|${columns.chat}`
+  useLayoutEffect(() => {
+    const state = flipFrom.current
+    const host = columnsRef.current
+    flipFrom.current = null
+    if (!state || !host) return
+    Flip.from(state, {
+      targets: host.querySelectorAll('[data-flip-id]'),
+      ...MOTION.layout,
+      // Out of the flex flow while they move, sized by width and height rather
+      // than scaled: the graph, Lumen and the chat's text redraw at their real
+      // size each frame instead of stretching.
+      absolute: true,
+      scale: false,
+      onEnter: (entering) =>
+        gsap.fromTo(
+          entering,
+          { opacity: 0, scale: 0.97 },
+          { opacity: 1, scale: 1, ...MOTION.enter, delay: 0.12, clearProps: AT_REST },
+        ),
+    })
+  }, [layoutKey])
   const toggle = useCallback(
     (column: Column) =>
       setShown((was) => {
@@ -199,15 +241,16 @@ function Workspace({
         // Something is always on screen: the last one open stays open.
         return next.memories || next.lumen || next.chat ? next : was
       }),
-    [narrow],
+    [narrow, setShown],
   )
   const open = useCallback(
     (column: Column) =>
       setShown((was) => (narrow ? { memories: false, lumen: false, chat: false, [column]: true } : { ...was, [column]: true })),
-    [narrow],
+    [narrow, setShown],
   )
   // The inbox, or one memory's detail, over whatever is showing.
   const [sheet, setSheet] = useState<'inbox' | 'memory' | null>(null)
+  const closeSheet = useCallback(() => setSheet(null), [])
 
   // Ctrl+\ (Cmd+\ on a Mac): the chat, in or out.
   useEffect(() => {
@@ -236,7 +279,7 @@ function Workspace({
       narrow ? { memories: false, lumen: true, chat: false } : { ...was, lumen: true, chat: false },
     )
     void chat.current?.startLumen()
-  }, [narrow])
+  }, [narrow, setShown])
   // Lumen is the wide column unless the graph is beside it.
   const lumenWide = !columns.memories
   // Beside the graph, Lumen never squeezes it below a usable width.
@@ -298,7 +341,12 @@ function Workspace({
         return
       }
       if (id) inspect(id)
-      else setSelectedId(null)
+      else {
+        // Clicking empty space clears the selection, and with it the memory's
+        // panel: left open, it sat on "No memory selected".
+        setSelectedId(null)
+        setSheet((was) => (was === 'memory' ? null : was))
+      }
     },
     [inspect],
   )
@@ -360,12 +408,16 @@ function Workspace({
 
           {/* Memories | Lumen | Chat — whichever are open, in that order. */}
           {/* Between two open columns is a divider: drag it to give one more room. */}
-          <div className={cn('absolute inset-0 flex p-3', narrow ? 'pb-[88px]' : 'pl-[84px]')}>
+          <div
+            ref={columnsRef}
+            className={cn('absolute inset-0 flex p-3', narrow ? 'pb-[88px]' : 'pl-[84px]')}
+          >
             {columns.memories && (
               <section
                 aria-label="Memories"
+                data-flip-id="memories"
                 // A container: the toolbar compacts itself to this column's width.
-                className="@container relative min-w-0 flex-1 overflow-hidden rounded-2xl ring-1 ring-white/[0.07] animate-fade-up"
+                className="@container relative min-w-0 flex-1 overflow-hidden rounded-2xl ring-1 ring-white/[0.07]"
               >
                 {graph.error ? (
                   <Centered>
@@ -424,6 +476,17 @@ function Workspace({
                         </div>
                       </div>
                     )}
+                    {data.nodes.length > 0 && (
+                      <ColumnHeading
+                        title="Memories"
+                        tag={
+                          counts.contradicted > 0
+                            ? `${data.nodes.length} · ${counts.contradicted} disputed`
+                            : `${data.nodes.length} beliefs`
+                        }
+                        className="pointer-events-none absolute bottom-4 left-5 z-10"
+                      />
+                    )}
                     {mode === 'workspace' && me.default_mode === 'workspace' && !asOfDay && (
                       <PersonalHint inset={0} onTry={() => onMode('personal')} />
                     )}
@@ -440,6 +503,7 @@ function Workspace({
 
             {columns.memories && columns.lumen && (
               <PanelResizer
+                data-flip-id="resize-lumen"
                 label="Resize Lumen"
                 width={lumenWidth}
                 dragging={lumenPanel.dragging}
@@ -451,6 +515,7 @@ function Workspace({
               // The stage is drawn in here (a portal from the chat).
               <div
                 ref={setLumenHost}
+                data-flip-id="lumen"
                 className={cn(
                   'relative min-w-0 overflow-hidden rounded-2xl ring-1 ring-white/[0.07]',
                   lumenWide ? 'flex-1' : 'shrink-0',
@@ -461,6 +526,7 @@ function Workspace({
 
             {chatBeside && columns.chat && (
               <PanelResizer
+                data-flip-id="resize-chat"
                 label="Resize the chat"
                 width={panel.width}
                 dragging={panel.dragging}
@@ -470,23 +536,22 @@ function Workspace({
 
             <section
               aria-label="Chat"
+              data-flip-id="chat"
               // Hidden, not unmounted: the conversation and Lumen's voice
               // session live in it, whatever is on screen.
               inert={!columns.chat}
               aria-hidden={!columns.chat}
               className={cn(
                 'liquid-glass relative min-w-0 flex-col rounded-2xl',
-                columns.chat ? 'flex animate-fade-up' : 'hidden',
+                columns.chat ? 'flex' : 'hidden',
                 chatBeside ? 'shrink-0' : 'mx-auto w-full max-w-3xl',
               )}
               style={chatBeside ? { width: panel.width } : undefined}
             >
-              <header className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-2.5">
-                <MessageSquare className="size-4 text-accent" />
-                <h2 className="text-sm font-medium">Chat</h2>
-                <span className="text-xs text-muted">
-                  {mode === 'personal' ? 'Personal · only you' : 'Work'}
-                </span>
+              {/* Still light inside the glass, in the mode's colours. */}
+              <div aria-hidden className="chat-ambient pointer-events-none absolute inset-0 -z-10 rounded-2xl" />
+              <header className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-3.5">
+                <ColumnHeading title="Chat" tag={mode === 'personal' ? 'Personal · only you' : 'Work'} />
                 <Tooltip label={'Hide the chat (Ctrl+\\)'}>
                   <button
                     type="button"
@@ -505,6 +570,7 @@ function Workspace({
                 lumenHost={columns.lumen ? lumenHost : null}
                 lumenLayout={lumenWide ? 'full' : 'docked'}
                 lumenAnswerBeside={!columns.chat}
+                lumenChatBeside={columns.chat}
                 onTakeOver={takeOver}
                 onShowLumen={() => open('lumen')}
                 me={me}
@@ -518,22 +584,21 @@ function Workspace({
             </section>
           </div>
 
-          {sheet === 'memory' && (
-            <Sheet
-              title="Memory"
-              icon={<Network className="size-4" />}
-              onClose={() => setSheet(null)}
-              narrow={narrow}
-            >
-              <MemoryDetail
-                memoryId={selectedId}
-                onSelect={setSelectedId}
-                onMutated={refreshAll}
-                userId={me.user_id}
-                isAdmin={me.is_admin}
-              />
-            </Sheet>
-          )}
+          <Sheet
+            open={sheet === 'memory' && selectedId !== null}
+            title="Memory"
+            icon={<Network className="size-4" />}
+            onClose={closeSheet}
+            narrow={narrow}
+          >
+            <MemoryDetail
+              memoryId={selectedId}
+              onSelect={setSelectedId}
+              onMutated={refreshAll}
+              userId={me.user_id}
+              isAdmin={me.is_admin}
+            />
+          </Sheet>
 
           {/* The inbox is a decision to make, so it gets the middle of the
               screen: a popup over everything, not a strip at the edge. */}
@@ -586,25 +651,86 @@ function onlyOne(columns: Columns): Columns {
  * The inbox, or one memory's detail: over whatever is on screen, from the right
  * — its own panel, not a tab beside the chat. Escape or the close button.
  */
-function Sheet({
-  title,
-  icon,
-  onClose,
-  narrow,
-  children,
-}: {
+function Sheet(props: {
+  open: boolean
   title: string
   icon: React.ReactNode
   onClose: () => void
   narrow: boolean
   children: React.ReactNode
 }) {
+  const { present, exited } = usePresence(props.open)
+  return present ? <SheetPanel {...props} exited={exited} /> : null
+}
+
+/** Slides in from the right (up, on a phone) and back out before it unmounts. */
+function SheetPanel({
+  open,
+  title,
+  icon,
+  onClose,
+  narrow,
+  exited,
+  children,
+}: {
+  open: boolean
+  title: string
+  icon: React.ReactNode
+  onClose: () => void
+  narrow: boolean
+  exited: () => void
+  children: React.ReactNode
+}) {
+  const panel = useRef<HTMLElement>(null)
+
+  // A press anywhere else closes it, as a popover would — except on the graph,
+  // whose own click decides (another memory opens it again, empty space closes
+  // it, and a drag only turns the view), and inside another dialog or menu
+  // opened from it.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (!target || panel.current?.contains(target)) return
+      if (target.closest('canvas, [role="dialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]')) return
+      onClose()
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [open, onClose])
+
+  useGSAP(
+    () => {
+      const el = panel.current
+      if (!el) return
+      if (reducedMotion()) {
+        if (!open) exited()
+        return
+      }
+      gsap.killTweensOf(el)
+      // The panel carries the glass itself, so it can fade without its blur
+      // losing what is behind it.
+      const away = narrow ? { y: 28 } : { x: 36 }
+      if (open) {
+        gsap.fromTo(
+          el,
+          { opacity: 0, ...away },
+          { opacity: 1, x: 0, y: 0, ...MOTION.enter, clearProps: AT_REST },
+        )
+      } else {
+        gsap.to(el, { opacity: 0, ...away, ...MOTION.exit, onComplete: exited })
+      }
+    },
+    { dependencies: [open] },
+  )
   return (
     <aside
+      ref={panel}
       role="dialog"
       aria-label={title}
+      inert={!open}
       className={cn(
-        'liquid-glass absolute z-50 flex flex-col rounded-2xl animate-fade-up',
+        'liquid-glass absolute z-50 flex flex-col rounded-2xl',
         narrow ? 'inset-2' : 'top-3 right-3 bottom-3 w-[min(460px,calc(100%-24px))]',
       )}
     >

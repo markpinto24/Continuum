@@ -198,12 +198,19 @@ async def test_a_shared_conflict_is_settled_by_anyone_but_never_reaches_a_privat
     assert inbox["total"] == 1  # shared disputes reach every member's inbox
 
     older = next(m for m in await memories.list_all(user_id=SHARED_SPACE) if m.id != newer.id)
-    response = await call(
+    # Naming a private memory as a loser refuses the whole decision: nothing
+    # changes, on either side.
+    refused = await call(
         raj, "POST", "/conflicts/resolve",
         json={"winner_id": newer.id, "loser_ids": [older.id, private.id]},
     )
+    assert refused.status_code == 404
+    assert (await memories.get(older.id)).status is MemoryStatus.CONTRADICTED
+    response = await call(
+        raj, "POST", "/conflicts/resolve",
+        json={"winner_id": newer.id, "loser_ids": [older.id]},
+    )
     assert response.status_code == 200
-    # The private memory named as a loser is left alone.
     assert [m["id"] for m in response.json()["losers"]] == [older.id]
     assert (await memories.get(private.id)).status is MemoryStatus.ACTIVE
     assert private.category is MemoryCategory.DECISION

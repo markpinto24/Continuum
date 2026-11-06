@@ -14,6 +14,7 @@ still costs a full argon2id verification each time.
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import time
 import uuid
@@ -47,6 +48,14 @@ class SlidingWindow:
         raise NotImplementedError
 
     async def reset(self, key: str) -> None:
+        raise NotImplementedError
+
+    async def claim(self, key: str) -> tuple[int | None, str | None]:
+        """`hit`, returning a token for this one event so it can be given back."""
+        raise NotImplementedError
+
+    async def release(self, key: str, token: str) -> None:
+        """Remove the one event `claim` recorded — not the others."""
         raise NotImplementedError
 
 
@@ -92,6 +101,27 @@ class MemoryWindow(SlidingWindow):
     async def reset(self, key: str) -> None:
         self._events.pop(key, None)
 
+    async def claim(self, key: str) -> tuple[int | None, str | None]:
+        wait = await self.retry_after(key)
+        if wait is not None:
+            return wait, None
+        stamp = self.clock()
+        events = self._recent(key)
+        events.append(stamp)
+        self._events[key] = events
+        return None, repr(stamp)
+
+    async def release(self, key: str, token: str) -> None:
+        events = self._events.get(key)
+        if events is None:
+            return
+        try:
+            events.remove(float(token))
+        except ValueError:
+            return  # already aged out of the window
+        if not events:
+            self._events.pop(key, None)
+
 
 # One sorted set per key, scored by time. Trim, count, and — only if under the
 # limit — add, as one script: two workers checking at once cannot both slip in.
@@ -129,12 +159,12 @@ class RedisWindow(SlidingWindow):
         self.clock = clock
         self._script = redis.register_script(_HIT)
 
-    async def _run(self, key: str, *, add: bool) -> int | None:
+    async def _run(self, key: str, *, add: bool, member: str | None = None) -> int | None:
         try:
             result = await self._script(
                 keys=[self.prefix + key],
                 args=[self.clock(), self.window, self.limit, "1" if add else "0",
-                      uuid.uuid4().hex],
+                      member or uuid.uuid4().hex],
             )
         except Exception as exc:  # noqa: BLE001 - fail open, loudly
             log.error("limits.redis_unavailable", error=str(exc), limit=self.prefix)
@@ -147,6 +177,17 @@ class RedisWindow(SlidingWindow):
 
     async def hit(self, key: str) -> int | None:
         return await self._run(key, add=True)
+
+    async def claim(self, key: str) -> tuple[int | None, str | None]:
+        member = uuid.uuid4().hex
+        wait = await self._run(key, add=True, member=member)
+        return (wait, None) if wait is not None else (None, member)
+
+    async def release(self, key: str, token: str) -> None:
+        try:
+            await self.redis.zrem(self.prefix + key, token)
+        except Exception as exc:  # noqa: BLE001
+            log.error("limits.redis_unavailable", error=str(exc), limit=self.prefix)
 
     async def record(self, key: str) -> None:
         now = self.clock()
@@ -185,7 +226,7 @@ class LoginThrottle:
 
     @staticmethod
     def keys(email: str, client: str | None) -> list[str]:
-        return [f"email:{email}"] + ([f"ip:{client}"] if client else [])
+        return [f"email:{email}"] + ([f"ip:{_address_block(client)}"] if client else [])
 
     async def retry_after(self, keys: Iterable[str]) -> int | None:
         waits = [w for k in keys if (w := await self._failures.retry_after(k)) is not None]
@@ -195,11 +236,54 @@ class LoginThrottle:
         for key in keys:
             await self._failures.record(key)
 
+    async def attempt(self, keys: Iterable[str]) -> tuple[int | None, dict[str, str]]:
+        """Count this sign-in attempt BEFORE the password is checked.
+
+        Checking first and counting after the (slow, threaded) password hash let
+        a burst of parallel guesses all pass the check before any was counted:
+        "5 per 15 minutes" became "as many as fit in one burst". Each key is
+        claimed atomically; if any refuses, the others are given back.
+        """
+        claimed: dict[str, str] = {}
+        for key in keys:
+            wait, token = await self._failures.claim(key)
+            if wait is not None:
+                for done, held in claimed.items():
+                    await self._failures.release(done, held)
+                return wait, {}
+            if token is not None:
+                claimed[key] = token
+        return None, claimed
+
+    async def succeeded(self, email: str, claimed: dict[str, str]) -> None:
+        """A right password: the account's counter resets, and this attempt is
+        given back to the address — its earlier failures still stand."""
+        await self.record_success(email)
+        for key, token in claimed.items():
+            if key.startswith("ip:"):
+                await self._failures.release(key, token)
+
     async def record_success(self, email: str) -> None:
         # Only the account's counter resets. Clearing the address counter on
         # success would let an attacker with one valid login reset their budget
         # for guessing everyone else's.
         await self._failures.reset(f"email:{email}")
+
+
+def _address_block(client: str) -> str:
+    """One IPv4 address, or the /64 an IPv6 address sits in.
+
+    A single IPv6 subscriber is usually handed a whole /64 — billions of
+    addresses — so counting each address apart let one client rotate through
+    them and never reach the per-address limit.
+    """
+    try:
+        address = ipaddress.ip_address(client)
+    except ValueError:
+        return client
+    if address.version == 6:
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(address)
 
 
 def build_window(

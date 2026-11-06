@@ -3,6 +3,7 @@ import ForceGraph3D, { type ForceGraphMethods } from 'react-force-graph-3d'
 import {
   AdditiveBlending,
   CanvasTexture,
+  Color,
   FogExp2,
   Group,
   Mesh,
@@ -10,6 +11,7 @@ import {
   type Object3D,
   type PerspectiveCamera,
   type Scene,
+  ShaderMaterial,
   SphereGeometry,
   Sprite,
   SpriteMaterial,
@@ -19,6 +21,8 @@ import {
 } from 'three'
 
 import { useElementSize } from '@/hooks/use-element-size'
+import { useMediaQuery } from '@/hooks/use-media-query'
+import { LUMEN_THEMES } from '@/lib/lumen-theme'
 import { centreOnOpenArea } from '@/lib/view-offset'
 import {
   EDGE_COLOR,
@@ -50,6 +54,11 @@ import type { GraphEdgeKind, Mode } from '@/lib/types'
  * starfield (sub-pixel stars twinkled), no auto-rotation. The sky is painted
  * once into a texture, and labels are HTML laid out each frame so they never
  * overlap.
+ *
+ * In Lumen's look: each memory is a small orb lit from its rim (a shader, not
+ * a lit sphere), the selected one circled by a ring in the mode's accent with a
+ * spark running round it, and the sky carries the mode's aurora colours. The
+ * status colours still own the nodes; the accent only marks the selection.
  */
 
 /** `react-force-graph` mutates what you hand it, so these carry its extra fields. */
@@ -110,6 +119,9 @@ export function BeliefGraph({
 }: BeliefGraphProps) {
   const palette = SKIES[mode]
   const sky = palette.sky
+  const lumen = LUMEN_THEMES[mode]
+  const accent = lumen.colors.idle
+  const reduced = useMediaQuery('(prefers-reduced-motion: reduce)')
   const [containerRef, { width, height }] = useElementSize<HTMLDivElement>()
   const graphRef = useRef<ForceGraphMethods<SceneNode, SceneLink> | undefined>(undefined)
   const labelLayer = useRef<HTMLDivElement | null>(null)
@@ -159,7 +171,7 @@ export function BeliefGraph({
     const graph = graphRef.current
     if (!ready || !graph) return
     const scene = graph.scene() as Scene
-    scene.background = skyTexture(palette)
+    scene.background = skyTexture(palette, lumen.aurora)
     scene.fog = new FogExp2(palette.sky, 0.00038)
     const controls = graph.controls() as { enableDamping?: boolean; dampingFactor?: number }
     // Eased orbiting: the camera glides to a stop instead of jerking.
@@ -168,7 +180,7 @@ export function BeliefGraph({
     return () => {
       scene.fog = null
     }
-  }, [ready, palette])
+  }, [ready, palette, lumen])
 
   // Centre the view on the part of the canvas the floating panel leaves open.
   // Applied here and re-asserted every frame (in the label loop below): the
@@ -277,6 +289,15 @@ export function BeliefGraph({
         strong: boolean
       }[] = []
       for (const { node, el } of labelled.current) {
+        // The selection's ring faces the camera, so it always reads as a circle
+        // round the memory, and its spark runs round it as Lumen's does.
+        if (node.id === selectedId) {
+          const orbit = node.__threeObj?.getObjectByName('orbit')
+          if (orbit) {
+            orbit.quaternion.copy(camera.quaternion)
+            if (!reduced) orbit.rotateZ(-time / 1100)
+          }
+        }
         // Disputed nodes breathe, gently — the one thing that wants a decision.
         if (node.status === 'contradicted' && !(neighbourhood && !neighbourhood.has(node.id))) {
           const glow = node.__threeObj?.getObjectByName('glow') as Sprite | undefined
@@ -349,12 +370,12 @@ export function BeliefGraph({
 
     frame = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frame)
-  }, [ready, width, height, rightInset, neighbourhood, selectedId])
+  }, [ready, width, height, rightInset, neighbourhood, selectedId, reduced])
 
   const nodeObject = useCallback(
     (node: SceneNode) =>
-      nodeDecoration(node, { muted: isMuted(node.id), selected: node.id === selectedId }),
-    [isMuted, selectedId],
+      nodeDecoration(node, { muted: isMuted(node.id), selected: node.id === selectedId, accent }),
+    [isMuted, selectedId, accent],
   )
 
   const linkColor = useCallback(
@@ -388,12 +409,9 @@ export function BeliefGraph({
           nodeId="id"
           nodeLabel={nodeTooltip}
           nodeVal={(node) => nodeSize(node)}
-          nodeColor={(node) =>
-            isMuted(node.id) ? withAlpha(STATUS_COLOR[node.status], 0.14) : STATUS_COLOR[node.status]
-          }
-          nodeOpacity={0.96}
-          nodeResolution={24}
-          nodeThreeObjectExtend
+          // The whole node is ours (the orb, its glow, its rings): the library's
+          // own lit sphere is not drawn.
+          nodeThreeObjectExtend={false}
           nodeThreeObject={nodeObject}
           linkColor={linkColor}
           linkWidth={(link) => (link.kind === 'conflicts_with' ? 1.5 : 1)}
@@ -419,10 +437,32 @@ export function BeliefGraph({
         />
       )}
 
+      {/* Still, over the canvas and under the labels: a faint HUD grid fading
+          out from the middle, as on the sign-in page, and a vignette. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.045]"
+        style={{
+          backgroundImage: `linear-gradient(${accent} 1px, transparent 1px), linear-gradient(90deg, ${accent} 1px, transparent 1px)`,
+          backgroundSize: '44px 44px',
+          maskImage: 'radial-gradient(ellipse at center, black 15%, transparent 72%)',
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{ background: `radial-gradient(ellipse at center, transparent 50%, ${sky} 100%)`, opacity: 0.8 }}
+      />
+
       {/* Labels sit above the canvas but never take a click from it. */}
       <div ref={labelLayer} aria-hidden className="pointer-events-none absolute inset-0">
         {data.nodes.map((node) => (
-          <span key={node.id} data-id={node.id} className="graph-label absolute top-0 left-0">
+          <span
+            key={node.id}
+            data-id={node.id}
+            className="graph-label absolute top-0 left-0"
+            style={{ ['--dot' as string]: STATUS_COLOR[node.status] }}
+          >
             {node.label.length > 40 ? `${node.label.slice(0, 39)}…` : node.label}
           </span>
         ))}
@@ -433,11 +473,15 @@ export function BeliefGraph({
 
 function nodeDecoration(
   node: SceneNode,
-  { muted, selected }: { muted: boolean; selected: boolean },
+  { muted, selected, accent }: { muted: boolean; selected: boolean; accent: string },
 ): Object3D {
   const group = new Group()
   const radius = Math.cbrt(nodeSize(node)) * NODE_REL_SIZE
   const color = STATUS_COLOR[node.status]
+
+  const orb = new Mesh(UNIT_SPHERE, orbMaterial(color, muted ? 0.14 : 0.97))
+  orb.scale.setScalar(radius)
+  group.add(orb)
 
   // Soft light around the node, in its status colour — the glow, without a
   // bloom pass that would cost the whole scene its antialiasing.
@@ -456,12 +500,29 @@ function nodeDecoration(
   group.add(glow)
 
   if (selected) {
-    group.add(
+    // Turned to face the camera, and spun, each frame by the label loop.
+    const orbit = new Group()
+    orbit.name = 'orbit'
+    const ringRadius = radius * 1.75
+    orbit.add(
       new Mesh(
-        new TorusGeometry(radius * 1.55, Math.max(0.25, radius * 0.06), 8, 64),
-        new MeshBasicMaterial({ color: '#e6faff', transparent: true, opacity: 0.85 }),
+        new TorusGeometry(ringRadius, Math.max(0.18, radius * 0.045), 8, 96),
+        new MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.75, depthWrite: false }),
       ),
     )
+    const spark = new Sprite(
+      new SpriteMaterial({
+        map: glowTexture(),
+        color: accent,
+        transparent: true,
+        blending: AdditiveBlending,
+        depthWrite: false,
+      }),
+    )
+    spark.position.set(ringRadius, 0, 0)
+    spark.scale.setScalar(Math.max(4, radius * 1.4))
+    orbit.add(spark)
+    group.add(orbit)
   }
   if (node.shared) {
     group.add(
@@ -510,6 +571,54 @@ function nodeDecoration(
   return group
 }
 
+// --- The orb --------------------------------------------------------------------
+
+const UNIT_SPHERE = new SphereGeometry(1, 32, 24)
+
+/**
+ * A memory as a small orb: a deep centre, a rim lit from inside in its status
+ * colour, and one soft highlight — Lumen's look, in the colour that says what
+ * the memory is. Unlit, so it reads the same from every angle.
+ */
+function orbMaterial(hex: string, opacity: number): ShaderMaterial {
+  return new ShaderMaterial({
+    uniforms: { uColor: { value: new Color(hex) }, uOpacity: { value: opacity } },
+    transparent: opacity < 1,
+    depthWrite: opacity > 0.5,
+    vertexShader: /* glsl */ `
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vNormal = normalize(normalMatrix * normal);
+        vView = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        vec3 n = normalize(vNormal);
+        float facing = clamp(dot(n, normalize(vView)), 0.0, 1.0);
+        float rim = pow(1.0 - facing, 2.0);
+        // A deep centre, a band of light inside the edge (Lumen's ring), and
+        // the rim brightest of all.
+        vec3 col = uColor * (0.16 + 0.22 * facing);
+        float band = smoothstep(0.18, 0.42, facing) * (1.0 - smoothstep(0.42, 0.72, facing));
+        col += uColor * band * 0.45;
+        col += mix(uColor, vec3(1.0), 0.35) * rim * 1.9;
+        float highlight = pow(max(dot(n, normalize(vec3(-0.45, 0.6, 0.65))), 0.0), 28.0);
+        col += vec3(highlight * 0.4);
+        gl_FragColor = vec4(col, uOpacity);
+        #include <colorspace_fragment>
+      }
+    `,
+  })
+}
+
 // --- Textures, built once ------------------------------------------------------
 
 let glowCache: CanvasTexture | null = null
@@ -531,10 +640,11 @@ function glowTexture(): CanvasTexture {
 }
 
 /**
- * The sky, painted once: a lit centre, faint nebula clouds and fixed stars.
- * Painted rather than rendered as points, so nothing in it can twinkle.
+ * The sky, painted once: a lit centre, the mode's aurora as soft bands across
+ * the top, faint nebula clouds and fixed stars. Painted rather than rendered,
+ * so nothing in it moves or twinkles behind the glass toolbar.
  */
-function skyTexture(palette: (typeof SKIES)[Mode]): CanvasTexture {
+function skyTexture(palette: (typeof SKIES)[Mode], aurora: string[]): CanvasTexture {
   const size = 1024
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = size
@@ -557,6 +667,24 @@ function skyTexture(palette: (typeof SKIES)[Mode]): CanvasTexture {
     nebula(size * 0.22, size * 0.3, size * 0.32, palette.nebulae[0])
     nebula(size * 0.8, size * 0.72, size * 0.36, palette.nebulae[1])
     nebula(size * 0.62, size * 0.18, size * 0.22, palette.nebulae[2])
+
+    // Lumen's aurora, still: long, tilted, very soft bands in its colours.
+    const band = (x: number, y: number, angle: number, color: string, alpha: number) => {
+      ctx.save()
+      ctx.translate(x, y)
+      ctx.rotate(angle)
+      ctx.scale(3.2, 0.55)
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.22)
+      g.addColorStop(0, `${color}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`)
+      g.addColorStop(1, `${color}00`)
+      ctx.fillStyle = g
+      ctx.fillRect(-size, -size, size * 2, size * 2)
+      ctx.restore()
+    }
+    band(size * 0.3, size * 0.16, -0.18, aurora[0], 0.22)
+    band(size * 0.62, size * 0.1, 0.12, aurora[1], 0.12)
+    band(size * 0.82, size * 0.26, -0.08, aurora[2], 0.18)
+    band(size * 0.2, size * 0.88, 0.1, aurora[2], 0.08)
 
     // Deterministic stars, so the sky is the same on every load.
     let seed = 7

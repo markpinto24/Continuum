@@ -19,7 +19,7 @@ from continuum.clients.llm import LLMClient
 from continuum.clients.qdrant import QdrantStore
 from continuum.config import get_settings
 from continuum.core.logger import configure_logging, get_logger
-from continuum.core.middleware import RequestContextMiddleware
+from continuum.core.middleware import BodyLimitMiddleware, RequestContextMiddleware
 from continuum.db.engine import make_engine, migrate
 from continuum.services.activity import ActivityService
 from continuum.services.auth import AuthService
@@ -220,10 +220,19 @@ def create_app() -> FastAPI:
         ),
         version="0.4.0",
         lifespan=lifespan,
+        # The interactive docs are a map of every endpoint: local only.
+        docs_url="/docs" if settings.is_local else None,
+        redoc_url="/redoc" if settings.is_local else None,
+        openapi_url="/openapi.json" if settings.is_local else None,
     )
 
     # Order matters: request context is bound outermost so every downstream log
     # line — including CORS rejections — carries the request id.
+    app.add_middleware(
+        BodyLimitMiddleware,
+        default=settings.max_request_bytes,
+        overrides={"/speech/transcribe": settings.speech_max_bytes + 1024 * 1024},
+    )
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
@@ -238,7 +247,7 @@ def create_app() -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:
-        return {"app": settings.app_name, "docs": "/docs", "api": settings.api_prefix}
+        return {"app": settings.app_name, "api": settings.api_prefix}
 
     return app
 
